@@ -12,7 +12,12 @@
     "format": "prettier --write .",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "prisma:seed": "node prisma/seed.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "bcryptjs": "^3.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

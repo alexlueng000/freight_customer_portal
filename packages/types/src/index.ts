@@ -5,3 +5,10 @@ export interface HealthResponse {
   service: string;
   timestamp: string;
 }
+
+export interface ApiErrorResponse {
+  code: string;
+  message: string;
+  details?: unknown;
+  requestId: string;
+}

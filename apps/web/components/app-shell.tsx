@@ -20,6 +20,7 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import { useAuth } from '@/components/auth-provider';
 import { cn } from '@/lib/utils';
 
 export interface ShellNavItem {
@@ -93,15 +94,12 @@ export function AppShell({
   children,
   navGroups,
   appName,
-  tenantName,
-  userLabel,
 }: {
   children: React.ReactNode;
   navGroups: ShellNavGroup[];
   appName: string;
-  tenantName: string;
-  userLabel: string;
 }) {
+  const auth = useAuth();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const navItems = navGroups.flatMap((group) => group.items);
@@ -119,7 +117,7 @@ export function AppShell({
             NF
           </div>
           <div className={cn('min-w-0', collapsed && 'hidden')}>
-            <div className="truncate text-sm font-semibold">{tenantName}</div>
+            <div className="truncate text-sm font-semibold">{auth.user?.tenantName}</div>
             <div className="truncate text-xs text-muted">{appName}</div>
           </div>
         </div>
@@ -215,11 +213,12 @@ export function AppShell({
                 </button>
                 <button
                   className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium hover:bg-sidebar focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  onClick={() => void auth.logout()}
                   type="button"
-                  title="用户菜单"
+                  title="退出登录"
                 >
                   <Gauge aria-hidden className="size-4 text-primary" />
-                  <span className="hidden sm:inline">{userLabel}</span>
+                  <span className="hidden sm:inline">{auth.user?.displayName}</span>
                 </button>
               </div>
             </div>

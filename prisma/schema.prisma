@@ -7,5 +7,254 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// M0 keeps the schema intentionally minimal. Tenant/Auth/RBAC/Customer/Audit
-/// models are introduced in M1 with tenant isolation tests.
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  LOCKED
+  DISABLED
+}
+
+enum UserType {
+  INTERNAL
+  CUSTOMER
+}
+
+enum RoleCode {
+  SUPER_ADMIN
+  TENANT_ADMIN
+  SALES
+  OPERATION
+  FINANCE
+  CUSTOMER_ADMIN
+  CUSTOMER_USER
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum MarkupType {
+  NONE
+  FIXED
+  PERCENT
+}
+
+model Tenant {
+  id              String       @id @default(cuid())
+  code            String       @unique @db.VarChar(50)
+  name            String       @db.VarChar(200)
+  status          TenantStatus @default(TRIAL)
+  timezone        String       @default("Asia/Shanghai") @db.VarChar(100)
+  defaultCurrency String       @default("USD") @db.VarChar(3)
+  brandName       String?      @db.VarChar(200)
+  logoUrl         String?      @db.VarChar(1000)
+  customDomain    String?      @unique @db.VarChar(255)
+  createdAt       DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @db.Timestamptz(3)
+
+  users                  User[]
+  roles                  Role[]
+  customerCompanies      CustomerCompany[]
+  customerContacts       CustomerContact[]
+  auditLogs              AuditLog[]
+  businessNumberCounters BusinessNumberCounter[]
+  refreshSessions        RefreshSession[]
+}
+
+model User {
+  id                String     @id @default(cuid())
+  tenantId          String
+  customerCompanyId String?
+  email             String     @db.VarChar(320)
+  passwordHash      String     @db.VarChar(255)
+  displayName       String     @db.VarChar(150)
+  userType          UserType
+  status            UserStatus @default(INVITED)
+  lastLoginAt       DateTime?  @db.Timestamptz(3)
+  createdAt         DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime   @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customerCompany CustomerCompany?  @relation("CustomerUsers", fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  userRoles       UserRole[]
+  ownedCustomers  CustomerCompany[] @relation("CustomerSalesOwner")
+  auditLogs       AuditLog[]        @relation("AuditActor")
+  refreshSessions RefreshSession[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+  @@index([tenantId, customerCompanyId])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        RoleCode
+  name        String   @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  userRoles   UserRole[]
+  permissions RolePermission[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, name])
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  roles RolePermission[]
+}
+
+model UserRole {
+  userId       String
+  roleId       String
+  assignedAt   DateTime @default(now()) @db.Timestamptz(3)
+  assignedById String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model CustomerCompany {
+  id                 String         @id @default(cuid())
+  tenantId           String
+  code               String         @db.VarChar(50)
+  name               String         @db.VarChar(200)
+  shortName          String?        @db.VarChar(100)
+  countryCode        String?        @db.VarChar(2)
+  taxId              String?        @db.VarChar(100)
+  creditLimit        Decimal?       @db.Decimal(18, 4)
+  paymentTermDays    Int?
+  defaultMarkupType  MarkupType     @default(NONE)
+  defaultMarkupValue Decimal?       @db.Decimal(18, 4)
+  salesOwnerId       String?
+  status             CustomerStatus @default(ACTIVE)
+  createdById        String?
+  updatedById        String?
+  createdAt          DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime       @updatedAt @db.Timestamptz(3)
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  salesOwner    User?             @relation("CustomerSalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
+  contacts      CustomerContact[]
+  customerUsers User[]            @relation("CustomerUsers")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, name])
+  @@index([tenantId, salesOwnerId])
+  @@index([tenantId, status])
+}
+
+model CustomerContact {
+  id                String   @id @default(cuid())
+  tenantId          String
+  customerCompanyId String
+  name              String   @db.VarChar(150)
+  email             String?  @db.VarChar(320)
+  phone             String?  @db.VarChar(50)
+  roleTitle         String?  @db.VarChar(100)
+  isPrimary         Boolean  @default(false)
+  isBookingContact  Boolean  @default(false)
+  isDocumentContact Boolean  @default(false)
+  createdById       String?
+  updatedById       String?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customerCompany CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, customerCompanyId])
+  @@index([tenantId, email])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  actorUserId String?
+  entityType  String   @db.VarChar(100)
+  entityId    String   @db.VarChar(100)
+  action      String   @db.VarChar(100)
+  beforeData  Json?
+  afterData   Json?
+  ipAddress   String?  @db.VarChar(64)
+  userAgent   String?  @db.VarChar(1000)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  actorUser User?  @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, entityType, entityId, createdAt])
+  @@index([tenantId, actorUserId, createdAt])
+}
+
+model BusinessNumberCounter {
+  id        String   @id @default(cuid())
+  tenantId  String
+  type      String   @db.VarChar(30)
+  yearMonth String   @db.VarChar(6)
+  value     Int      @default(0)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, type, yearMonth])
+  @@index([tenantId, type])
+}
+
+model RefreshSession {
+  id            String    @id @default(cuid())
+  tenantId      String
+  userId        String
+  familyId      String    @db.VarChar(50)
+  tokenHash     String    @unique @db.VarChar(64)
+  expiresAt     DateTime  @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+  revokedReason String?   @db.VarChar(100)
+  replacedById  String?
+  ipAddress     String?   @db.VarChar(64)
+  userAgent     String?   @db.VarChar(1000)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt    DateTime? @db.Timestamptz(3)
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshSession?  @relation("SessionRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces   RefreshSession[] @relation("SessionRotation")
+
+  @@index([tenantId, userId, expiresAt])
+  @@index([tenantId, familyId])
+}

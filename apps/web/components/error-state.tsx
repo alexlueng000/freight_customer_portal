@@ -3,9 +3,11 @@ import { AlertTriangle, Lock } from 'lucide-react';
 export function ErrorState({
   title = '页面加载失败',
   description = '请稍后重试，或返回上一页继续处理其他任务。',
+  onRetry,
 }: {
   title?: string;
   description?: string;
+  onRetry?: () => void;
 }) {
   return (
     <div className="rounded border border-danger/20 bg-surface p-5">
@@ -14,9 +16,15 @@ export function ErrorState({
         <div>
           <h3 className="text-sm font-semibold">{title}</h3>
           <p className="mt-1 text-sm leading-6 text-muted">{description}</p>
-          <button className="mt-3 h-9 rounded border border-border px-3 text-sm font-semibold" type="button">
-            重试
-          </button>
+          {onRetry ? (
+            <button
+              className="mt-3 h-9 rounded border border-border px-3 text-sm font-semibold"
+              onClick={onRetry}
+              type="button"
+            >
+              重试
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

@@ -7,7 +7,24 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "API_PORT",
+        "API_INTERNAL_URL",
+        "AUTH_ACCESS_TOKEN_SECRET",
+        "AUTH_ACCESS_TOKEN_TTL_SECONDS",
+        "AUTH_REFRESH_TOKEN_SECRET",
+        "AUTH_REFRESH_TOKEN_TTL_SECONDS",
+        "DATABASE_URL",
+        "LOG_LEVEL",
+        "NODE_ENV",
+        "PASSWORD_HASH_PEPPER",
+        "REDIS_HOST",
+        "REDIS_PASSWORD",
+        "REDIS_PORT",
+        "SENTRY_DSN",
+        "WORKER_CONCURRENCY"
+      ]
     },
     "lint": {
       "dependsOn": ["^lint"]
@@ -17,6 +34,7 @@
     },
     "test": {
       "dependsOn": ["^test"],
+      "env": ["DATABASE_URL"],
       "outputs": ["coverage/**"]
     }
   }
