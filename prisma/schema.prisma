@@ -1,0 +1,11 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// M0 keeps the schema intentionally minimal. Tenant/Auth/RBAC/Customer/Audit
+/// models are introduced in M1 with tenant isolation tests.

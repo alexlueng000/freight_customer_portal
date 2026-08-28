@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 20% 98%;
+  --foreground: 220 24% 14%;
+  --muted: 218 14% 44%;
+  --border: 214 18% 88%;
+  --surface: 200 20% 99%;
+  --sidebar: 205 24% 96%;
+  --primary: 194 72% 32%;
+  --accent: 38 86% 45%;
+  --success: 151 47% 32%;
+  --warning: 35 83% 42%;
+  --danger: 0 62% 45%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
