@@ -9,6 +9,8 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { PermissionsGuard } from './modules/auth/permissions.guard.js';
 import { CustomersModule } from './modules/customers/customers.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { RatesModule } from './modules/rates/rates.module.js';
+import { QuotesModule } from './modules/quotes/quotes.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { RequestContextMiddleware } from './shared/request-context/request-context.middleware.js';
 import { RequestContextModule } from './shared/request-context/request-context.module.js';
@@ -24,6 +26,8 @@ import { RequestContextModule } from './shared/request-context/request-context.m
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     AuthModule,
     CustomersModule,
+    RatesModule,
+    QuotesModule,
     UsersModule,
     HealthModule,
   ],

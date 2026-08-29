@@ -48,6 +48,37 @@ enum MarkupType {
   PERCENT
 }
 
+enum RateStatus {
+  DRAFT
+  ACTIVE
+  EXPIRED
+  INACTIVE
+}
+
+enum ChargeBasis {
+  PER_CONTAINER
+  PER_BL
+  PER_SHIPMENT
+}
+
+enum RateImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  BOOKED
+  EXPIRED
+  REJECTED
+  CANCELLED
+}
+
 model Tenant {
   id              String       @id @default(cuid())
   code            String       @unique @db.VarChar(50)
@@ -68,6 +99,103 @@ model Tenant {
   auditLogs              AuditLog[]
   businessNumberCounters BusinessNumberCounter[]
   refreshSessions        RefreshSession[]
+  rates                  Rate[]
+  rateImportJobs         RateImportJob[]
+  quotes                 Quote[]
+}
+
+model RateImportJob {
+  id               String           @id @default(cuid())
+  tenantId         String
+  originalFileName String           @db.VarChar(255)
+  status           RateImportStatus @default(PENDING)
+  totalRows        Int              @default(0)
+  successRows      Int              @default(0)
+  failedRows       Int              @default(0)
+  errors           Json?
+  errorMessage     String?          @db.VarChar(1000)
+  createdById      String
+  startedAt        DateTime?        @db.Timestamptz(3)
+  completedAt      DateTime?        @db.Timestamptz(3)
+  createdAt        DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime         @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, createdById, createdAt])
+}
+
+model Rate {
+  id            String     @id @default(cuid())
+  tenantId      String
+  rateNo        String     @db.VarChar(50)
+  polCode       String     @db.VarChar(10)
+  polName       String     @db.VarChar(150)
+  podCode       String     @db.VarChar(10)
+  podName       String     @db.VarChar(150)
+  carrierCode   String     @db.VarChar(20)
+  serviceName   String?    @db.VarChar(150)
+  effectiveDate DateTime   @db.Date
+  expiryDate    DateTime   @db.Date
+  etd           DateTime?  @db.Timestamptz(3)
+  transitDays   Int?
+  supplierName  String?    @db.VarChar(200)
+  contractNo    String?    @db.VarChar(100)
+  currency      String     @db.VarChar(3)
+  status        RateStatus @default(DRAFT)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime   @updatedAt @db.Timestamptz(3)
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  prices  RatePrice[]
+  charges RateCharge[]
+  quotes  Quote[]
+
+  @@unique([tenantId, rateNo])
+  @@index([tenantId, polCode, podCode, status])
+  @@index([tenantId, carrierCode, effectiveDate, expiryDate])
+  @@index([tenantId, expiryDate])
+}
+
+model RatePrice {
+  id            String   @id @default(cuid())
+  tenantId      String
+  rateId        String
+  containerType String   @db.VarChar(20)
+  costAmount    Decimal  @db.Decimal(18, 4)
+  sellAmount    Decimal? @db.Decimal(18, 4)
+  currency      String   @db.VarChar(3)
+  remark        String?  @db.VarChar(500)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+
+  rate Rate @relation(fields: [rateId], references: [id], onDelete: Cascade)
+
+  @@unique([rateId, containerType])
+  @@index([tenantId, rateId])
+}
+
+model RateCharge {
+  id            String      @id @default(cuid())
+  tenantId      String
+  rateId        String
+  chargeCode    String      @db.VarChar(30)
+  chargeName    String      @db.VarChar(150)
+  chargeBasis   ChargeBasis
+  containerType String?     @db.VarChar(20)
+  amount        Decimal     @db.Decimal(18, 4)
+  currency      String      @db.VarChar(3)
+  isIncluded    Boolean     @default(false)
+  createdAt     DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime    @updatedAt @db.Timestamptz(3)
+
+  rate Rate @relation(fields: [rateId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, rateId])
+  @@index([tenantId, chargeCode])
 }
 
 model User {
@@ -83,12 +211,14 @@ model User {
   createdAt         DateTime   @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime   @updatedAt @db.Timestamptz(3)
 
-  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  customerCompany CustomerCompany?  @relation("CustomerUsers", fields: [customerCompanyId], references: [id], onDelete: Restrict)
-  userRoles       UserRole[]
-  ownedCustomers  CustomerCompany[] @relation("CustomerSalesOwner")
-  auditLogs       AuditLog[]        @relation("AuditActor")
-  refreshSessions RefreshSession[]
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customerCompany       CustomerCompany?  @relation("CustomerUsers", fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  userRoles             UserRole[]
+  ownedCustomers        CustomerCompany[] @relation("CustomerSalesOwner")
+  auditLogs             AuditLog[]        @relation("AuditActor")
+  refreshSessions       RefreshSession[]
+  ownedQuotes           Quote[]           @relation("QuoteSalesOwner")
+  priceOverriddenQuotes Quote[]           @relation("QuotePriceOverrideBy")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -170,6 +300,7 @@ model CustomerCompany {
   salesOwner    User?             @relation("CustomerSalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
   contacts      CustomerContact[]
   customerUsers User[]            @relation("CustomerUsers")
+  quotes        Quote[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -257,4 +388,65 @@ model RefreshSession {
 
   @@index([tenantId, userId, expiresAt])
   @@index([tenantId, familyId])
+}
+
+model Quote {
+  id                  String      @id @default(cuid())
+  tenantId            String
+  quoteNo             String      @db.VarChar(50)
+  customerCompanyId   String
+  salesOwnerId        String?
+  sourceRateId        String?
+  status              QuoteStatus @default(DRAFT)
+  polCode             String      @db.VarChar(10)
+  podCode             String      @db.VarChar(10)
+  carrierCode         String?     @db.VarChar(20)
+  etd                 DateTime?   @db.Timestamptz(3)
+  validUntil          DateTime    @db.Date
+  currency            String      @db.VarChar(3)
+  subtotal            Decimal     @db.Decimal(18, 4)
+  totalAmount         Decimal     @db.Decimal(18, 4)
+  acceptedAt          DateTime?   @db.Timestamptz(3)
+  bookedAt            DateTime?   @db.Timestamptz(3)
+  priceOverriddenAt   DateTime?   @db.Timestamptz(3)
+  priceOverriddenById String?
+  priceOverrideReason String?     @db.VarChar(500)
+  version             Int         @default(1)
+  createdById         String?
+  updatedById         String?
+  createdAt           DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime    @updatedAt @db.Timestamptz(3)
+
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer          CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  salesOwner        User?           @relation("QuoteSalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
+  priceOverriddenBy User?           @relation("QuotePriceOverrideBy", fields: [priceOverriddenById], references: [id], onDelete: SetNull)
+  sourceRate        Rate?           @relation(fields: [sourceRateId], references: [id], onDelete: SetNull)
+  items             QuoteItem[]
+
+  @@unique([tenantId, quoteNo])
+  @@index([tenantId, customerCompanyId, status])
+  @@index([tenantId, validUntil])
+  @@index([tenantId, sourceRateId])
+  @@index([tenantId, priceOverriddenById])
+}
+
+model QuoteItem {
+  id                String   @id @default(cuid())
+  tenantId          String
+  quoteId           String
+  chargeCode        String   @db.VarChar(30)
+  chargeName        String   @db.VarChar(150)
+  containerType     String?  @db.VarChar(20)
+  quantity          Decimal  @default(1) @db.Decimal(18, 4)
+  unitPrice         Decimal  @db.Decimal(18, 4)
+  originalUnitPrice Decimal? @db.Decimal(18, 4)
+  amount            Decimal  @db.Decimal(18, 4)
+  currency          String   @db.VarChar(3)
+  costAmount        Decimal? @db.Decimal(18, 4)
+  sortOrder         Int      @default(0)
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, quoteId])
 }

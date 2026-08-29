@@ -13,20 +13,46 @@ const permissions = [
   ['customer_user.read', 'View customer users within the permitted customer scope'],
   ['customer_user.manage', 'Create and manage users within the permitted customer scope'],
   ['audit.read', 'View tenant audit logs'],
+  ['rate.read', 'View tenant freight rates'],
+  ['rate.manage', 'Create and manage tenant freight rates'],
+  ['rate.search', 'Search customer-visible freight rate sell prices'],
+  ['quote.create', 'Create a customer quote from a rate'],
+  ['quote.read', 'View quotes within the permitted customer scope'],
+  ['quote.manage', 'Manage and send tenant quotes'],
+  ['quote.accept', 'Accept quotes within the customer scope'],
+  ['quote.reject', 'Reject quotes within the customer scope'],
 ];
 
 const rolePermissions = {
   [RoleCode.SUPER_ADMIN]: permissions.map(([code]) => code),
   [RoleCode.TENANT_ADMIN]: permissions.map(([code]) => code),
-  [RoleCode.SALES]: ['customer.read', 'customer.manage', 'customer_user.read'],
+  [RoleCode.SALES]: [
+    'customer.read',
+    'customer.manage',
+    'customer_user.read',
+    'quote.read',
+    'quote.manage',
+  ],
   [RoleCode.OPERATION]: ['customer.read', 'customer_user.read'],
   [RoleCode.FINANCE]: ['customer.read'],
   [RoleCode.CUSTOMER_ADMIN]: [
     'customer.read',
     'customer_user.read',
     'customer_user.manage',
+    'rate.search',
+    'quote.create',
+    'quote.read',
+    'quote.accept',
+    'quote.reject',
   ],
-  [RoleCode.CUSTOMER_USER]: ['customer.read'],
+  [RoleCode.CUSTOMER_USER]: [
+    'customer.read',
+    'rate.search',
+    'quote.create',
+    'quote.read',
+    'quote.accept',
+    'quote.reject',
+  ],
 };
 
 const roleNames = {
@@ -139,7 +165,9 @@ async function seedDemoTenant(permissionRecords) {
     roleId: requireRole(roleRecords, RoleCode.CUSTOMER_ADMIN).id,
   });
 
-  console.info(`Demo users ready for tenant ${tenant.code}: ${admin.email} and customer@demo.freight.local`);
+  console.info(
+    `Demo users ready for tenant ${tenant.code}: ${admin.email} and customer@demo.freight.local`,
+  );
 }
 
 function requireDemoSecret(name) {

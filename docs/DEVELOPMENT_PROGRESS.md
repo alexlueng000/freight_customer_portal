@@ -1,8 +1,8 @@
 # Freight Customer Portal 开发进度日志
 
 > 最后更新：2026-08-29
-> 当前阶段：Phase 1 — SaaS / 安全基础
-> 当前目标：完成首个可持久化、可鉴权的业务纵切片
+> 当前阶段：Phase 2 — Rate + Quote
+> 当前目标：完成 Rate + Quote 业务 UAT，并进入 Quote → Booking
 
 ## 1. 项目当前状态
 
@@ -32,7 +32,7 @@
 - 已建立 Tenant、User、Role、Permission、UserRole、CustomerCompany、CustomerContact、AuditLog、BusinessNumberCounter 等基础模型。
 - 已加入关键租户一致性约束和数据库触发器，防止跨租户绑定客户、用户和角色。
 - 已新增 RefreshSession 表，用于刷新令牌轮换和重放检测。
-- 当前 3 个 Prisma migration 已写入版本库并应用到本地数据库。
+- 当前 11 个 Prisma migration 已写入版本库并应用到本地数据库。
 - Demo seed 可重复执行，已经创建 DEMO 租户、系统角色、权限、演示客户公司及演示用户。
 
 ### 2.3 后端认证
@@ -127,98 +127,135 @@
 - 角色分配、状态更新和包含前后值的 AuditLog 在同一数据库事务中完成。
 - 已将 `/admin/users` 从模拟数据切换到真实 API，并支持分页、筛选、新建用户及角色/状态管理。
 
+### 2.10 Rate 数据模型与后台 CRUD（后端已完成）
+
+- 已按批准 ERD 建立 `Rate`、`RatePrice`、`RateCharge`、`RateStatus` 和 `ChargeBasis`。
+- 已增加租户内运价编号唯一约束、有效期/币种/金额/费用计价单位检查，以及面向查价的组合索引。
+- RatePrice/RateCharge 通过数据库触发器校验与 Rate 的租户一致性，作为应用层租户范围之外的纵深防御。
+- 已实现后台运价分页、筛选、创建、详情和受控更新接口：
+  - `GET /api/v1/rates`
+  - `POST /api/v1/rates`
+  - `GET /api/v1/rates/:id`
+  - `PATCH /api/v1/rates/:id`
+- 运价金额以字符串 DTO 接收并转换为 Prisma Decimal；业务日期以 PostgreSQL DATE 保存。
+- 创建和修改在事务内写入 AuditLog，修改记录保存可追溯的前后快照。
+- 后台接口明确拒绝客户类型账号，避免在客户查价接口完成前暴露采购成本。
+- 已加入 `rate.read` / `rate.manage` 权限；当前仅平台/租户管理员可访问包含采购成本的后台接口，客户查价将使用独立的销售价响应模型。
+
+### 2.11 运营后台运价页面
+
+- 已将 `/admin/rates` 从模拟页面切换到真实 Rate API。
+- 已支持关键词、POL、POD、Carrier、箱型、状态和指定有效日筛选，以及分页和清空筛选。
+- 运价列表展示航线、船司、各箱型采购成本、有效期、供应方、合约号和状态。
+- 已实现基于 React Hook Form + Zod 的新建和编辑抽屉，支持基础信息、业务日期、多个箱型价格和附加费用。
+- 表单校验覆盖有效期顺序、金额格式、重复箱型及按箱费用必须选择箱型。
+- 已处理 loading、empty、error、permission-denied、保存中和成功反馈状态。
+- 前端仅向具有平台/租户管理员角色的用户展示新建和编辑操作，服务端权限仍为最终安全边界。
+
+### 2.12 Rate Excel 异步导入
+
+- 已新增 `RateImportJob` 持久化模型和 `PENDING / PROCESSING / COMPLETED / FAILED` 状态。
+- 已实现标准 `.xlsx` 模板下载、5 MB 内存上传限制、BullMQ 入队和导入状态查询：
+  - `GET /api/v1/rates/import-template`
+  - `POST /api/v1/rates/import`
+  - `GET /api/v1/rate-imports/:id`
+- Worker 已从单纯队列事件监听升级为真实 Processor，并携带、校验租户与操作者上下文。
+- 导入模板采用一行一个箱型价格；相同 `rateNo` 的多行合并为一条 Rate 和多条 RatePrice。
+- 已校验固定表头、必填列、币种、金额、有效期、状态、箱型重复、同一 Rate 航线一致性和租户内运价编号重复。
+- 采用全量校验后单事务写入；任一行错误则整批不写入，最多返回 500 条逐行错误。
+- 导入成功为每条 Rate 写入 `RATE_IMPORTED` 审计记录；BullMQ 按 import job id 幂等入队并配置 3 次指数退避重试。
+- 后台运价页已增加模板下载、Excel 上传、进度轮询、汇总和逐行错误展示。
+
+### 2.13 客户查价与基础加价
+
+- 已新增独立的客户查价接口 `GET /api/v1/portal/rates`，要求 `rate.search` 权限并强制客户公司范围。
+- `rate.search` 仅回填给 `CUSTOMER_ADMIN` / `CUSTOMER_USER`，与包含采购成本的后台 `rate.read` / `rate.manage` 分离。
+- 查询支持 POL、POD、ETD 日期范围、箱型和可选 Carrier，只匹配当前租户的 ACTIVE 且有效运价。
+- 客户响应只返回最终销售价和航线/船期信息，不返回 costAmount、供应方、合约号、内部备注或客户加价参数。
+- 当前批准文档未明确标准售价与客户加价的组合顺序；采用可逆规则：以 `sellAmount` 为基价，缺失时回退到 `costAmount`，再应用 FIXED/PERCENT 客户加价。
+- 金额计算全部使用 Prisma Decimal 并保留最多 4 位小数，不使用 JavaScript 浮点权威计算。
+- 已将 `/portal/rates` 从模拟页切换为真实查询表单和结果表格，覆盖 loading、初始、无结果、错误和权限拒绝状态。
+- “生成报价”按钮已接入 Quote 创建接口，成功后进入真实报价详情。
+
+### 2.14 Quote 快照与状态机
+
+- 已按批准 ERD 建立 Quote、QuoteItem、QuoteStatus、租户内月度业务编号和价格快照。
+- 已实现客户报价创建、列表、详情、接受和拒绝接口，并确保客户响应不包含成本字段。
+- 已实现独立状态机：DRAFT → SENT → VIEWED → ACCEPTED/REJECTED；开放报价可转 EXPIRED，非法跳转由服务端拒绝。
+- 客户首次查看已发送报价时原子标记 VIEWED；接受操作保存 acceptedAt，并对重复接受提供幂等结果。
+- 已新增后台报价列表、详情、发送和手工过期操作；Sales 查询限制为自己负责的客户报价。
+- 所有状态动作均写入包含 from/to 的 AuditLog；到期报价在客户决策前先持久化为 EXPIRED。
+- 已新增 quote.manage、quote.accept、quote.reject 权限及迁移。
+- 客户查价已按 V1 受控规则汇总同币种、未包含且计价单位匹配的 RateCharge；Quote 创建会保存独立附加费 QuoteItem 快照。
+- 已实现销售草稿报价手工改价，强制填写原因并保留原始单价、修改人、修改时间、版本号和 before/after 审计记录。
+- Quote PDF 已改为 BullMQ Worker 异步生成，按租户、Quote 和版本写入 S3 兼容对象存储；同版本重复下载复用对象，API 下载前仍执行租户、客户或 Sales 数据范围校验。
+- Worker 已增加主动过期扫描，将到期的 DRAFT/SENT/VIEWED 报价持久化为 EXPIRED 并写入系统审计记录。
+
 ## 3. 已完成验证
 
 - ESLint：通过。
 - TypeScript typecheck：通过。
 - Next.js / NestJS 生产构建：通过。
-- API 自动化测试：8 个测试套件、25 个测试全部通过。
+- API 自动化测试：13 个测试套件、51 个测试全部通过；Worker：3 个测试套件、5 个测试全部通过。
 - 已覆盖登录、错误密码、当前用户、刷新令牌轮换、旧令牌重用、租户限定身份和数据库租户约束。
 - 已覆盖客户公司跨租户隔离、同租户代码唯一性、客户账号公司范围、创建审计和权限 Guard。
 - 已覆盖联系人跨租户/跨客户隔离、创建审计和联系方式审计脱敏。
 - 已覆盖用户列表与更新的租户隔离、用户类型/角色匹配、客户公司绑定、状态/角色事务更新、变更审计和密码审计保护。
+- 已覆盖运价编号租户唯一性、跨租户读取/修改失败、有效期/箱型筛选、明细事务更新、数据库约束和修改审计。
 - 真实 HTTP 验收已覆盖登录、`/auth/me`、刷新和退出。
 - 浏览器验收已覆盖内部账号登录、客户账号登录、角色分流、刷新恢复登录状态、客户列表/详情、联系人表单校验和 CSS 渲染。
+- 浏览器验收已覆盖后台运价创建、成本与状态编辑、多条件筛选、筛选空状态和清空筛选，页面无控制台错误。
+- 浏览器验收已覆盖标准模板上传、BullMQ/Worker 异步处理、完成状态轮询和导入后列表刷新。
+- 浏览器验收已覆盖客户账号真实查价、销售价展示和采购成本/供应方/合约号/内部备注不可见。
 
 ## 4. 当前未完成事项与风险
 
-- Dashboard、运价、报价、订舱、出运、单证和账单页面目前大部分仍使用模拟数据。
+- Dashboard、订舱、出运、单证和账单页面目前大部分仍使用模拟数据；Rate 与 Quote 已接入真实 API。
 - 通用 permission decorator / guard 已实现，但完整权限矩阵和其他业务模块的敏感操作权限仍需逐模块落地。
 - 前端还没有自动化组件测试和 Playwright E2E 测试基线。
 - 忘记密码和重置密码尚未实现。
 - 登录失败审计、账号锁定策略、CSP 和更完整的 Security Headers 尚未完成。
+- `RateCharge` V1 规则已确认并实现；仍需在 Rate UAT 中用真实费用样本复核。
+- Quote 发送邮件通知按批准路线图属于 M5 Notifications，本阶段不提前建立完整通知域。
 - 开发环境不要在 `next dev` 运行期间执行 `next build`，否则共用 `.next` 可能导致 Webpack 模块或 CSS 清单错位。
 - 当前工作区包含尚未提交的基础、认证和前端登录改动；进入下一大模块前应先整理 diff，并由项目负责人决定是否创建阶段性提交。
 
 ## 5. 下一步开发计划
 
-Phase 1 的首个可持久化纵切片已经完成：真实认证、租户上下文、客户公司/联系人和用户管理均已落地。下一步进入 **Rate 数据模型与运价 CRUD**，并继续在每个新模块中落实权限矩阵。
+Rate + Quote 功能开发已完成。当前先完成业务 UAT，再进入 Quote → Booking：
 
-### 5.1 第一小步：客户公司 API（已完成）
+### 5.1 Rate 业务 UAT
 
-- 实现 `customers` NestJS 模块。
-- 实现客户公司分页列表、查询、创建和详情接口。
-- 所有查询强制使用认证上下文中的 `tenantId`。
-- 客户代码在同一租户内唯一。
-- 使用 DTO 校验名称、代码、国家、账期、额度和默认加价字段。
-- 金额与百分比使用 Prisma Decimal，不使用 JavaScript 浮点数保存权威金额。
-- 创建和修改客户时写入 AuditLog。
-- 为 `TENANT_ADMIN`、`SALES` 等角色增加明确的服务端权限检查。
+- [ ] 按 [Rate 阶段验收清单](./Rate_Acceptance_Checklist_V1_CN.md) 完成 RATE-UAT-001 至 RATE-UAT-009。
+- [x] 已确认并实现 `RateCharge` 进入客户查价和 QuoteItem 的 V1 受控规则。
+- [ ] 保存业务验收证据并完成产品、业务和技术签署。
 
-建议接口：
+### 5.2 Quote 完成范围
 
-```text
-GET  /api/v1/customers
-POST /api/v1/customers
-GET  /api/v1/customers/:id
-```
+- [x] 实现 Quote PDF 异步生成、S3 版本复用和受权限保护的客户/后台下载。
+- [x] 实现受控销售手工改价，保存原价、修改价、操作人、时间、原因、版本和审计记录。
+- [x] 补充 Worker 定时过期扫描，避免只在读取/决策时惰性持久化。
+- [ ] Quote 发送邮件通知随 M5 Notifications 实现；邮件投递使用 BullMQ 并记录 Notification/message log。
 
-### 5.2 第二小步：运营后台客户页面（已完成）
+### 5.3 Quote → Booking
 
-- 将 `/admin/customers` 从模拟数据切换到真实 API。
-- 增加分页、关键词和状态筛选。
-- 增加“新建客户”表单。
-- 完成 loading、empty、error 和 permission-denied 状态。
-- 表单创建成功后刷新列表，并显示明确反馈。
+- [ ] 按批准 ERD 核对 Booking、BookingContainerRequest、状态和编号规则。
+- [ ] 从 `ACCEPTED` Quote 创建 Booking，并复制必要航线和价格快照。
+- [ ] 在同一事务中创建 Booking 并将 Quote 更新为 `BOOKED`。
+- [ ] 覆盖重复转单、过期报价、非法状态和跨租户/跨客户负向测试。
 
-### 5.3 第三小步：客户联系人（已完成）
+### 5.4 自动化验收
 
-- 在客户详情中查看和创建联系人。
-- 支持主联系人、订舱联系人和单证联系人标记。
-- 校验联系人必须属于当前租户下的目标客户公司。
-- 后续客户用户创建必须绑定同租户的 CustomerCompany。
-
-### 5.4 用户管理与基础 RBAC（已完成）
-
-- 已实现内部用户和客户用户列表、创建、启停与单角色变更。
-- 客户用户创建必须绑定当前租户下的 CustomerCompany。
-- 用户管理接口已使用 permission decorator / guard，并覆盖无权限与跨租户失败路径。
-- `/admin/users` 已从模拟数据切换到真实 API，提供创建和管理抽屉。
-
-### 5.5 下一阶段：Rate 数据模型与运价 CRUD
-
-- 按批准 ERD 核对 Rate、运价明细、有效期和币种字段，不提前引入通用定价引擎。
-- 建立租户范围内的 Rate Prisma 模型、迁移、索引和数据库约束。
-- 实现服务端分页、筛选、创建、详情和受控修改，并落实 `rate.read` / `rate.manage`。
-- 金额使用 Prisma Decimal，日期按业务日期处理，敏感修改写入 AuditLog。
-- 先完成运营后台运价管理，再接 Excel 导入和客户查价。
-
-### 5.6 Phase 1 验收标准
-
-- Tenant A 无法读取或修改 Tenant B 的客户公司。
-- 无权限角色无法创建或修改客户。
-- 相同客户代码可以存在于不同租户，但不能在同一租户重复。
-- 创建客户后能立即在运营后台列表中看到真实数据库记录。
-- 敏感变更能够在 AuditLog 中追踪操作者、租户、对象和变更内容。
-- lint、typecheck、相关单元/集成测试和 build 全部通过。
+- [ ] 建立 Playwright 浏览器测试基线。
+- [ ] 固化后台创建 Rate → 客户查价 → 生成 Quote → 后台发送 → 客户查看/接受的黄金路径。
+- [ ] 在 CI 中保留失败截图、trace 或视频证据。
 
 ## 6. 后续里程碑
 
-Phase 1 的认证、客户和用户基础完成后，按以下顺序继续：
+当前后续里程碑：
 
-1. Rate 数据模型、CRUD、Excel 导入和客户查价。
-2. Quote 创建、报价状态机和 PDF。
-3. Booking 创建、提交、审核和确认。
-4. Shipment、Container、TrackingEvent 和 Documents。
-5. Invoice、Notifications 和 Branding。
-6. 核心黄金路径 Playwright E2E 与试点加固。
+1. Rate/Quote 业务 UAT 与异步 PDF 下载验收。
+2. Quote → Booking、Booking 提交、审核和确认。
+3. Shipment、Container、TrackingEvent 和 Documents。
+4. Invoice、Notifications 和 Branding。
+5. 核心黄金路径 Playwright E2E 与试点加固。
