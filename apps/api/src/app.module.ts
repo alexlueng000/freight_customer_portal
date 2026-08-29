@@ -6,6 +6,7 @@ import { validateEnvironment } from './config/environment.js';
 import { PrismaModule } from './database/prisma.module.js';
 import { AuthGuard } from './modules/auth/auth.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
+import { BookingsModule } from './modules/bookings/bookings.module.js';
 import { PermissionsGuard } from './modules/auth/permissions.guard.js';
 import { CustomersModule } from './modules/customers/customers.module.js';
 import { HealthModule } from './modules/health/health.module.js';
@@ -25,6 +26,7 @@ import { RequestContextModule } from './shared/request-context/request-context.m
     RequestContextModule,
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     AuthModule,
+    BookingsModule,
     CustomersModule,
     RatesModule,
     QuotesModule,

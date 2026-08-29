@@ -60,6 +60,15 @@ export async function requestAuth(
     | (AuthResponse & { code?: string; message?: string })
     | undefined;
   if (!response.ok) {
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('retry-after');
+      throw new AuthApiError(
+        retryAfter
+          ? `登录尝试过于频繁，请等待 ${retryAfter} 秒后重试。`
+          : '登录尝试过于频繁，请稍后重试。',
+        payload?.code,
+      );
+    }
     throw new AuthApiError(payload?.message ?? '认证服务暂时不可用，请稍后重试。', payload?.code);
   }
   return payload;

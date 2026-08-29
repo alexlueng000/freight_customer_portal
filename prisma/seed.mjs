@@ -21,6 +21,14 @@ const permissions = [
   ['quote.manage', 'Manage and send tenant quotes'],
   ['quote.accept', 'Accept quotes within the customer scope'],
   ['quote.reject', 'Reject quotes within the customer scope'],
+  ['booking.create', 'Create and edit draft bookings from accepted quotes'],
+  ['booking.read', 'View bookings within the permitted customer scope'],
+  ['booking.submit', 'Submit or cancel customer bookings'],
+  ['booking.manage', 'Review, confirm, reject, or cancel tenant bookings'],
+  ['shipment.create', 'Create shipments from confirmed bookings'],
+  ['shipment.read', 'View shipments within the permitted customer scope'],
+  ['document.upload', 'Upload shipment and booking documents'],
+  ['document.read', 'View and download authorized documents'],
 ];
 
 const rolePermissions = {
@@ -32,9 +40,21 @@ const rolePermissions = {
     'customer_user.read',
     'quote.read',
     'quote.manage',
+    'booking.read',
+    'shipment.read',
+    'document.read',
   ],
-  [RoleCode.OPERATION]: ['customer.read', 'customer_user.read'],
-  [RoleCode.FINANCE]: ['customer.read'],
+  [RoleCode.OPERATION]: [
+    'customer.read',
+    'customer_user.read',
+    'booking.read',
+    'booking.manage',
+    'shipment.create',
+    'shipment.read',
+    'document.upload',
+    'document.read',
+  ],
+  [RoleCode.FINANCE]: ['customer.read', 'shipment.read', 'document.read'],
   [RoleCode.CUSTOMER_ADMIN]: [
     'customer.read',
     'customer_user.read',
@@ -44,6 +64,11 @@ const rolePermissions = {
     'quote.read',
     'quote.accept',
     'quote.reject',
+    'booking.create',
+    'booking.read',
+    'booking.submit',
+    'shipment.read',
+    'document.read',
   ],
   [RoleCode.CUSTOMER_USER]: [
     'customer.read',
@@ -52,6 +77,11 @@ const rolePermissions = {
     'quote.read',
     'quote.accept',
     'quote.reject',
+    'booking.create',
+    'booking.read',
+    'booking.submit',
+    'shipment.read',
+    'document.read',
   ],
 };
 
@@ -155,7 +185,7 @@ async function seedDemoTenant(permissionRecords) {
     userType: 'INTERNAL',
     roleId: requireRole(roleRecords, RoleCode.TENANT_ADMIN).id,
   });
-  await upsertDemoUser({
+  const customerUser = await upsertDemoUser({
     tenantId: tenant.id,
     customerCompanyId: customerCompany.id,
     email: 'customer@demo.freight.local',
@@ -165,9 +195,155 @@ async function seedDemoTenant(permissionRecords) {
     roleId: requireRole(roleRecords, RoleCode.CUSTOMER_ADMIN).id,
   });
 
+  await seedDemoBookingFlow({
+    tenantId: tenant.id,
+    customerCompanyId: customerCompany.id,
+    adminUserId: admin.id,
+    customerUserId: customerUser.id,
+  });
+
   console.info(
     `Demo users ready for tenant ${tenant.code}: ${admin.email} and customer@demo.freight.local`,
   );
+}
+
+async function seedDemoBookingFlow({ tenantId, customerCompanyId, adminUserId, customerUserId }) {
+  const now = new Date();
+  const etd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const validUntil = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const acceptedQuote = await prisma.quote.upsert({
+    where: { tenantId_quoteNo: { tenantId, quoteNo: 'QT-DEMO-ACCEPTED' } },
+    update: {
+      status: 'ACCEPTED',
+      acceptedAt: now,
+      bookedAt: null,
+      validUntil,
+      etd,
+      updatedById: customerUserId,
+    },
+    create: {
+      id: 'demo_quote_accepted_v1',
+      tenantId,
+      quoteNo: 'QT-DEMO-ACCEPTED',
+      customerCompanyId,
+      salesOwnerId: adminUserId,
+      status: 'ACCEPTED',
+      polCode: 'CNSZX',
+      podCode: 'USLAX',
+      carrierCode: 'COSCO',
+      etd,
+      validUntil,
+      currency: 'USD',
+      subtotal: '2450.00',
+      totalAmount: '2450.00',
+      acceptedAt: now,
+      createdById: customerUserId,
+      updatedById: customerUserId,
+    },
+  });
+  await prisma.quoteItem.upsert({
+    where: { id: 'demo_quote_item_accepted_v1' },
+    update: { quantity: '1', unitPrice: '2450.00', amount: '2450.00' },
+    create: {
+      id: 'demo_quote_item_accepted_v1',
+      tenantId,
+      quoteId: acceptedQuote.id,
+      chargeCode: 'OCEAN_FREIGHT',
+      chargeName: 'Ocean Freight',
+      containerType: '40HQ',
+      quantity: '1',
+      unitPrice: '2450.00',
+      amount: '2450.00',
+      currency: 'USD',
+      sortOrder: 0,
+    },
+  });
+
+  const bookedQuote = await prisma.quote.upsert({
+    where: { tenantId_quoteNo: { tenantId, quoteNo: 'QT-DEMO-BOOKED' } },
+    update: { status: 'BOOKED', bookedAt: now, validUntil, etd },
+    create: {
+      id: 'demo_quote_booked_v1',
+      tenantId,
+      quoteNo: 'QT-DEMO-BOOKED',
+      customerCompanyId,
+      salesOwnerId: adminUserId,
+      status: 'BOOKED',
+      polCode: 'CNSHA',
+      podCode: 'USLGB',
+      carrierCode: 'OOCL',
+      etd,
+      validUntil,
+      currency: 'USD',
+      subtotal: '1850.00',
+      totalAmount: '1850.00',
+      acceptedAt: now,
+      bookedAt: now,
+      createdById: customerUserId,
+      updatedById: customerUserId,
+    },
+  });
+  await prisma.quoteItem.upsert({
+    where: { id: 'demo_quote_item_booked_v1' },
+    update: { quantity: '1', unitPrice: '1850.00', amount: '1850.00' },
+    create: {
+      id: 'demo_quote_item_booked_v1',
+      tenantId,
+      quoteId: bookedQuote.id,
+      chargeCode: 'OCEAN_FREIGHT',
+      chargeName: 'Ocean Freight',
+      containerType: '40GP',
+      quantity: '1',
+      unitPrice: '1850.00',
+      amount: '1850.00',
+      currency: 'USD',
+      sortOrder: 0,
+    },
+  });
+  const booking = await prisma.booking.upsert({
+    where: { tenantId_bookingNo: { tenantId, bookingNo: 'BOOK-DEMO-DRAFT' } },
+    update: {
+      quoteId: bookedQuote.id,
+      etd,
+      updatedById: customerUserId,
+    },
+    create: {
+      id: 'demo_booking_draft_v1',
+      tenantId,
+      bookingNo: 'BOOK-DEMO-DRAFT',
+      quoteId: bookedQuote.id,
+      customerCompanyId,
+      status: 'DRAFT',
+      polCode: 'CNSHA',
+      podCode: 'USLGB',
+      carrierCode: 'OOCL',
+      etd,
+      commodity: 'Consumer electronics accessories',
+      packages: 320,
+      grossWeight: '9800.00',
+      volumeCbm: '54.50',
+      shipperName: 'Northstar Trading Co., Ltd.',
+      shipperAddress: 'Pudong New Area, Shanghai, China',
+      bookingContactName: 'Demo Customer Admin',
+      bookingContactEmail: 'customer@demo.freight.local',
+      createdById: customerUserId,
+      updatedById: customerUserId,
+    },
+  });
+  await prisma.bookingContainerRequest.upsert({
+    where: { bookingId_containerType: { bookingId: booking.id, containerType: '40GP' } },
+    update: { quantity: 1, weightPerContainer: '9800.00', sortOrder: 0 },
+    create: {
+      id: 'demo_booking_container_v1',
+      tenantId,
+      bookingId: booking.id,
+      containerType: '40GP',
+      quantity: 1,
+      weightPerContainer: '9800.00',
+      sortOrder: 0,
+    },
+  });
+  console.info('Demo booking flow ready: one accepted quote and one draft booking.');
 }
 
 function requireDemoSecret(name) {

@@ -19,6 +19,7 @@ import { LoginDto } from './dto/login.dto.js';
 import { Public } from './public.decorator.js';
 
 const refreshCookieName = 'freight_refresh';
+const loginRateLimit = process.env.NODE_ENV === 'development' ? 50 : 5;
 
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
@@ -36,7 +37,7 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: loginRateLimit, ttl: 60_000 } })
   @ApiOkResponse({ description: 'Authenticated user and short-lived access token' })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials or inactive account' })
   async login(

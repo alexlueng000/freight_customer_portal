@@ -1,12 +1,12 @@
 # Freight Customer Portal 开发进度日志
 
 > 最后更新：2026-08-29
-> 当前阶段：Phase 2 — Rate + Quote
-> 当前目标：完成 Rate + Quote 业务 UAT，并进入 Quote → Booking
+> 当前阶段：Phase 4 — Shipment + Document 基础
+> 当前目标：验收 Rate → Quote → Booking → SO Released → Shipment Created 前半段核心链路
 
 ## 1. 项目当前状态
 
-项目基础环境已经建立，客户门户与运营后台界面可以正常运行。当前已从纯模拟页面推进到真实数据库、真实登录、真实用户和租户上下文阶段。
+项目基础环境已经建立，客户门户与运营后台界面可以正常运行。Rate、Quote、Booking、SO Document 与 Shipment 建档已经接入真实数据库、鉴权、权限和租户上下文；Container、Tracking、BL、Invoice 等后半段履约链路仍待开发。
 
 本地开发入口：
 
@@ -32,8 +32,8 @@
 - 已建立 Tenant、User、Role、Permission、UserRole、CustomerCompany、CustomerContact、AuditLog、BusinessNumberCounter 等基础模型。
 - 已加入关键租户一致性约束和数据库触发器，防止跨租户绑定客户、用户和角色。
 - 已新增 RefreshSession 表，用于刷新令牌轮换和重放检测。
-- 当前 11 个 Prisma migration 已写入版本库并应用到本地数据库。
-- Demo seed 可重复执行，已经创建 DEMO 租户、系统角色、权限、演示客户公司及演示用户。
+- 当前 15 个 Prisma migration 已写入版本库并应用到本地数据库。
+- Demo seed 可重复执行，已经创建 DEMO 租户、系统角色、权限、演示客户公司、演示用户、Accepted Quote 与 Draft Booking。
 
 ### 2.3 后端认证
 
@@ -191,12 +191,32 @@
 - Quote PDF 已改为 BullMQ Worker 异步生成，按租户、Quote 和版本写入 S3 兼容对象存储；同版本重复下载复用对象，API 下载前仍执行租户、客户或 Sales 数据范围校验。
 - Worker 已增加主动过期扫描，将到期的 DRAFT/SENT/VIEWED 报价持久化为 EXPIRED 并写入系统审计记录。
 
+### 2.15 Booking 交易闭环
+
+- 已建立 `Booking`、`BookingContainerRequest` 与独立 `BookingStatus` 状态机。
+- 已实现 `ACCEPTED Quote → DRAFT Booking` 原子转单：复制航线、船司、ETD、箱型需求和默认订舱联系人，并将 Quote 更新为 `BOOKED`。
+- 已实现客户 Booking 列表、详情、Draft 编辑、提交和取消；后台实现列表、详情、开始审核、确认、拒绝和取消。
+- 服务端强制执行 `DRAFT → SUBMITTED → UNDER_REVIEW → CONFIRMED → SO_RELEASED`，拒绝非法跳转。
+- Booking 编号通过租户/月度计数器并发安全生成；常规 V1 服务流程限制一份 Quote 一次转单，数据层仍保留 Quote 1:N Booking。
+- 已增加 Booking 权限、状态审计、重复转单保护、资料完整性校验、客户公司范围和跨租户负向测试。
+
+### 2.16 SO Document 与 Shipment 建档
+
+- 已建立独立 `Shipment`、`Document`、`ShipmentStatus` 和 `DocumentStatus` 数据模型及租户一致性数据库触发器。
+- 后台仅允许对 `CONFIRMED` Booking 上传 SO；支持 PDF、PNG、JPEG，单文件最大 10 MB。
+- SO 先写入 S3 兼容对象存储，再在数据库事务内创建 Document、更新 Booking 为 `SO_RELEASED` 并写入审计；数据库失败时清理孤儿对象。
+- Document 保存对象 Key、原始文件名、MIME、大小、版本、上传者、客户可见性和状态；对象 Key 不作为授权边界。
+- 客户下载前同时校验 tenant、customer scope、`customerVisible=true` 和 ACTIVE 状态；隐藏文件及跨租户 Document ID 不可下载。
+- 后台可从 `SO_RELEASED` Booking 创建 Shipment，复制客户、航线、船司和 ETD 快照并生成租户内 Shipment 编号。
+- 客户与后台 Booking 详情页均展示 SO 和 Shipment；下载通过带 Bearer Token 的 API 请求完成。
+- DEMO 数据已经实际走通 Submitted → Under Review → Confirmed → SO Released → Shipment Created，并完成真实 MinIO 上传和客户下载验证。
+
 ## 3. 已完成验证
 
 - ESLint：通过。
 - TypeScript typecheck：通过。
 - Next.js / NestJS 生产构建：通过。
-- API 自动化测试：13 个测试套件、51 个测试全部通过；Worker：3 个测试套件、5 个测试全部通过。
+- API 自动化测试：15 个测试套件、58 个测试全部通过；Worker：3 个测试套件、5 个测试全部通过。
 - 已覆盖登录、错误密码、当前用户、刷新令牌轮换、旧令牌重用、租户限定身份和数据库租户约束。
 - 已覆盖客户公司跨租户隔离、同租户代码唯一性、客户账号公司范围、创建审计和权限 Guard。
 - 已覆盖联系人跨租户/跨客户隔离、创建审计和联系方式审计脱敏。
@@ -207,10 +227,12 @@
 - 浏览器验收已覆盖后台运价创建、成本与状态编辑、多条件筛选、筛选空状态和清空筛选，页面无控制台错误。
 - 浏览器验收已覆盖标准模板上传、BullMQ/Worker 异步处理、完成状态轮询和导入后列表刷新。
 - 浏览器验收已覆盖客户账号真实查价、销售价展示和采购成本/供应方/合约号/内部备注不可见。
+- 数据库集成测试已覆盖 Quote 原子转 Booking、重复转单、Booking 完整性、状态机、SO 可见性、隐藏文件、跨租户下载拒绝和 Shipment 建档。
+- 真实本地依赖验收已覆盖 MinIO SO 上传、客户授权下载及客户 Shipment 列表读取。
 
 ## 4. 当前未完成事项与风险
 
-- Dashboard、订舱、出运、单证和账单页面目前大部分仍使用模拟数据；Rate 与 Quote 已接入真实 API。
+- Dashboard、Container、Tracking、通用 Documents、Invoice 和 Billing 页面仍有模拟数据或占位内容；Rate、Quote、Booking、SO 和 Shipment 基础查询已接入真实 API。
 - 通用 permission decorator / guard 已实现，但完整权限矩阵和其他业务模块的敏感操作权限仍需逐模块落地。
 - 前端还没有自动化组件测试和 Playwright E2E 测试基线。
 - 忘记密码和重置密码尚未实现。
@@ -218,11 +240,11 @@
 - `RateCharge` V1 规则已确认并实现；仍需在 Rate UAT 中用真实费用样本复核。
 - Quote 发送邮件通知按批准路线图属于 M5 Notifications，本阶段不提前建立完整通知域。
 - 开发环境不要在 `next dev` 运行期间执行 `next build`，否则共用 `.next` 可能导致 Webpack 模块或 CSS 清单错位。
-- 当前工作区包含尚未提交的基础、认证和前端登录改动；进入下一大模块前应先整理 diff，并由项目负责人决定是否创建阶段性提交。
+- 当前 Shipment 仅完成建档和基础查询；船名航次维护、Container、Tracking Timeline、BL 版本/可见性和 Shipment 状态机操作尚未实现。
 
 ## 5. 下一步开发计划
 
-Rate + Quote 功能开发已完成。当前先完成业务 UAT，再进入 Quote → Booking：
+Rate + Quote、Booking、SO Released 与 Shipment Created 已形成前半段纵向切片。当前先完成阶段验收，再进入 Shipment 履约明细：
 
 ### 5.1 Rate 业务 UAT
 
@@ -239,12 +261,21 @@ Rate + Quote 功能开发已完成。当前先完成业务 UAT，再进入 Quote
 
 ### 5.3 Quote → Booking
 
-- [ ] 按批准 ERD 核对 Booking、BookingContainerRequest、状态和编号规则。
-- [ ] 从 `ACCEPTED` Quote 创建 Booking，并复制必要航线和价格快照。
-- [ ] 在同一事务中创建 Booking 并将 Quote 更新为 `BOOKED`。
-- [ ] 覆盖重复转单、过期报价、非法状态和跨租户/跨客户负向测试。
+- [x] 按批准 ERD 核对 Booking、BookingContainerRequest、状态和编号规则。
+- [x] 从 `ACCEPTED` Quote 创建 Booking，并复制必要航线与箱型快照。
+- [x] 在同一事务中创建 Booking 并将 Quote 更新为 `BOOKED`。
+- [x] 覆盖重复转单、非法状态和跨租户/跨客户负向测试。
 
-### 5.4 自动化验收
+### 5.4 Booking → SO → Shipment
+
+- [x] 完成 Booking 提交、审核、确认、拒绝和取消状态动作。
+- [x] SO 上传至 S3 兼容对象存储并通过 Document 元数据授权客户下载。
+- [x] 上传 SO 后原子更新 Booking 为 `SO_RELEASED`。
+- [x] 从 Booking 创建 Shipment 并复制航线快照。
+- [x] 覆盖隐藏文件、跨租户文件访问和 Shipment 租户一致性测试。
+- [ ] 按 [Booking/SO/Shipment 阶段验收清单](./Booking_SO_Shipment_Acceptance_Checklist_V1_CN.md) 完成业务验收。
+
+### 5.5 自动化验收
 
 - [ ] 建立 Playwright 浏览器测试基线。
 - [ ] 固化后台创建 Rate → 客户查价 → 生成 Quote → 后台发送 → 客户查看/接受的黄金路径。
@@ -254,8 +285,7 @@ Rate + Quote 功能开发已完成。当前先完成业务 UAT，再进入 Quote
 
 当前后续里程碑：
 
-1. Rate/Quote 业务 UAT 与异步 PDF 下载验收。
-2. Quote → Booking、Booking 提交、审核和确认。
-3. Shipment、Container、TrackingEvent 和 Documents。
-4. Invoice、Notifications 和 Branding。
-5. 核心黄金路径 Playwright E2E 与试点加固。
+1. Rate/Quote 与 Booking/SO/Shipment 业务 UAT。
+2. Shipment 维护、Container、TrackingEvent 和 BL Documents。
+3. Invoice、Notifications 和 Branding。
+4. 核心黄金路径 Playwright E2E 与试点加固。

@@ -1,0 +1,27 @@
+import { Module } from '@nestjs/common';
+import { AdminBookingsController } from './admin-bookings.controller.js';
+import { BookingStateMachine } from './booking-state-machine.js';
+import { BookingsController } from './bookings.controller.js';
+import { BookingsService } from './bookings.service.js';
+import { DocumentStorageService } from './document-storage.service.js';
+import { DocumentsController } from './documents.controller.js';
+import { DocumentsService } from './documents.service.js';
+import { ShipmentsController } from './shipments.controller.js';
+import { ShipmentsService } from './shipments.service.js';
+
+@Module({
+  controllers: [
+    BookingsController,
+    AdminBookingsController,
+    DocumentsController,
+    ShipmentsController,
+  ],
+  providers: [
+    BookingsService,
+    BookingStateMachine,
+    DocumentStorageService,
+    DocumentsService,
+    ShipmentsService,
+  ],
+})
+export class BookingsModule {}

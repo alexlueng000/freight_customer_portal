@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { ErrorState } from '@/components/error-state';
@@ -33,6 +33,7 @@ interface Quote {
 }
 export default function QuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { apiFetch } = useAuth();
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,6 +41,7 @@ export default function QuoteDetailPage() {
   const [actionError, setActionError] = useState('');
   const [submitting, setSubmitting] = useState<'accept' | 'reject' | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [creatingBooking, setCreatingBooking] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -91,6 +93,23 @@ export default function QuoteDetailPage() {
       setDownloading(false);
     }
   };
+  const createBooking = async () => {
+    setCreatingBooking(true);
+    setActionError('');
+    try {
+      const response = await apiFetch('/api/v1/bookings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ quoteId: id }),
+      });
+      const payload = (await response.json()) as { id?: string; message?: string };
+      if (!response.ok || !payload.id) throw new Error(payload.message ?? '创建订舱失败。');
+      router.push(`/portal/bookings/${payload.id}`);
+    } catch (caught) {
+      setActionError((caught as { message?: string }).message ?? '创建订舱失败。');
+      setCreatingBooking(false);
+    }
+  };
   if (loading) return <LoadingState rows={6} />;
   if (error || !quote)
     return <ErrorState description={error || '报价不存在'} onRetry={() => void load()} />;
@@ -129,6 +148,16 @@ export default function QuoteDetailPage() {
                   {submitting === 'accept' ? '处理中…' : '接受报价'}
                 </button>
               </>
+            ) : null}
+            {quote.status === 'ACCEPTED' ? (
+              <button
+                className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+                disabled={creatingBooking}
+                onClick={() => void createBooking()}
+                type="button"
+              >
+                {creatingBooking ? '创建中…' : '创建订舱'}
+              </button>
             ) : null}
           </div>
         }
