@@ -13,6 +13,8 @@ import { HealthModule } from './modules/health/health.module.js';
 import { RatesModule } from './modules/rates/rates.module.js';
 import { QuotesModule } from './modules/quotes/quotes.module.js';
 import { UsersModule } from './modules/users/users.module.js';
+import { InvoicesModule } from './modules/invoices/invoices.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { RequestContextMiddleware } from './shared/request-context/request-context.middleware.js';
 import { RequestContextModule } from './shared/request-context/request-context.module.js';
 
@@ -31,6 +33,8 @@ import { RequestContextModule } from './shared/request-context/request-context.m
     RatesModule,
     QuotesModule,
     UsersModule,
+    InvoicesModule,
+    NotificationsModule,
     HealthModule,
   ],
   providers: [

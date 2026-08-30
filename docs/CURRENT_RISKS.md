@@ -1,7 +1,7 @@
 # Freight Customer Portal 当前风险登记
 
-> 最后更新：2026-08-29
-> 当前阶段：Phase 4 — Shipment + Document 基础
+> 最后更新：2026-08-30
+> 当前阶段：Phase 5 — Invoice / Billing 子阶段已完成
 > 适用范围：本地开发至首批试点上线前
 
 ## 1. 使用说明
@@ -19,20 +19,20 @@
 
 ## 2. 风险总览
 
-| ID        | 优先级 | 风险                                                               | 当前状态 | 最晚处理节点           |
-| --------- | ------ | ------------------------------------------------------------------ | -------- | ---------------------- |
-| SEC-01    | P1     | 登录失败审计和账号锁定策略不完整                                   | OPEN     | 外部试点前             |
-| SEC-02    | P1     | CSP、Security Headers 与 CSRF 部署策略未完成                       | OPEN     | 外部试点前             |
-| SEC-03    | P1     | 忘记密码和安全重置流程缺失                                         | OPEN     | 外部试点前             |
-| AUTH-01   | P2     | 当前用户管理按单角色操作，未来多角色语义尚未确认                   | OPEN     | 扩展角色模型前         |
-| TENANT-01 | P1     | Invoice 尚未实现跨租户自动化测试；Booking/Shipment/Document 已覆盖 | OPEN     | Invoice 完成时         |
-| TEST-01   | P1     | 缺少 Playwright 核心黄金路径 E2E                                   | OPEN     | 外部试点前             |
-| TEST-02   | P2     | 前端缺少组件和交互自动化测试基线                                   | OPEN     | Rate / Quote UI 稳定后 |
-| OBS-01    | P1     | 生产级错误监控、结构化日志聚合和告警尚未闭环                       | OPEN     | 外部试点前             |
-| INFRA-01  | P1     | 对象存储上传下载已验证；邮件、签名 URL 与生产重试恢复仍未闭环      | OPEN     | 文件/通知功能验收前    |
-| DEV-01    | P2     | `next dev` 与 `next build` 共用 `.next` 可能互相污染               | OPEN     | 持续存在，需流程规避   |
-| DATA-01   | P1     | 生产迁移、备份恢复和回滚演练尚未完成                               | OPEN     | 首次生产发布前         |
-| SCOPE-01  | P2     | 多个业务页面仍为模拟数据，容易被误认为已可交付                     | OPEN     | 对应模块完成时         |
+| ID        | 优先级 | 风险                                                          | 当前状态 | 最晚处理节点           |
+| --------- | ------ | ------------------------------------------------------------- | -------- | ---------------------- |
+| SEC-01    | P1     | 登录失败审计和账号锁定策略不完整                              | OPEN     | 外部试点前             |
+| SEC-02    | P1     | CSP、Security Headers 与 CSRF 部署策略未完成                  | OPEN     | 外部试点前             |
+| SEC-03    | P1     | 忘记密码和安全重置流程缺失                                    | OPEN     | 外部试点前             |
+| AUTH-01   | P2     | 当前用户管理按单角色操作，未来多角色语义尚未确认              | OPEN     | 扩展角色模型前         |
+| TENANT-01 | P1     | 敏感业务域跨租户自动化测试覆盖                                | CLOSED   | 2026-08-29             |
+| TEST-01   | P1     | 缺少 Playwright 核心黄金路径 E2E                              | CLOSED   | 2026-08-30             |
+| TEST-02   | P2     | 前端缺少组件和交互自动化测试基线                              | OPEN     | Rate / Quote UI 稳定后 |
+| OBS-01    | P1     | 生产级错误监控、结构化日志聚合和告警尚未闭环                  | OPEN     | 外部试点前             |
+| INFRA-01  | P1     | 对象存储上传下载已验证；邮件、签名 URL 与生产重试恢复仍未闭环 | OPEN     | 文件/通知功能验收前    |
+| DEV-01    | P2     | `next dev` 与 `next build` 共用 `.next` 可能互相污染          | CLOSED   | 2026-08-29             |
+| DATA-01   | P1     | 生产迁移、备份恢复和回滚演练尚未完成                          | OPEN     | 首次生产发布前         |
+| SCOPE-01  | P2     | 多个业务页面仍为模拟数据，容易被误认为已可交付                | OPEN     | 对应模块完成时         |
 
 ## 3. 详细风险与关闭标准
 
@@ -70,19 +70,27 @@
 
 ### TENANT-01 — 后续业务域的租户隔离测试尚未落地
 
-- **现状**：Customer、Contact、User、Rate、Quote、Booking、Shipment 和 Document 已覆盖跨租户或跨客户负向测试；Invoice 尚未实现。
+- **状态**：CLOSED
+- **现状**：Customer、Contact、User、Rate、Quote、Booking、Shipment、Document 和 Invoice 已覆盖跨租户或跨客户负向测试。
 - **影响**：如果新模块只依赖前端过滤或按对象 ID 查询，可能形成严重数据越权。
 - **当前缓解**：Booking/Shipment/Document 查询均强制 tenant/customer scope；Document 下载额外校验客户可见性，数据库触发器校验 Shipment/Document 父对象租户一致性。
 - **建议措施**：把跨租户读取和修改失败测试作为每个敏感域的 Definition of Done，不允许延期到项目末尾集中补测。
 - **关闭标准**：AGENTS.md 指定的每个敏感域均至少有一组跨租户访问失败测试。
+- **关闭日期**：2026-08-29
+- **验证证据**：Invoice 数据库集成测试证明 Tenant B 客户无法读取 Tenant A Invoice；服务端查询强制 tenant/customer scope，数据库触发器阻止 Invoice 与 Shipment/Customer/Document 跨租户绑定；统一异常边界会把已认证敏感资源 403/404 记录为请求方租户下的 `ACCESS_DENIED`，单元测试验证 Invoice ID 探测审计且不泄露目标租户。
 
 ### TEST-01 — 缺少核心黄金路径 Playwright E2E
 
-- **现状**：已有 API 集成测试、真实 MinIO 上传下载验证和人工浏览器验收，但没有可重复执行的浏览器端黄金路径。
+- **状态**：CLOSED
+
+- **现状**：已建立 Playwright/Chromium 基线并接入 CI，Shipment 与 Invoice/Billing 的内部/客户权限共 4 个用例已通过；完整黄金路径使用真实 API、PostgreSQL、MinIO 与客户页面完成 Rate → Quote → Booking → SO → Shipment → 两个 Container → Tracking → BL → Invoice → 附件 → 客户确认。
 - **影响**：页面路由、Cookie 刷新、权限分流和完整业务链可能在单元/接口测试均通过时发生回归。
-- **当前缓解**：当前关键页面已进行人工浏览器回归；API 有 15 个测试套件、58 个自动化用例，Worker 有 3 个测试套件、5 个自动化用例。
-- **建议措施**：先建立登录、客户列表、用户列表的冒烟 E2E，再随业务模块扩展至 Rate → Quote → Booking → Shipment → Document → Invoice。
+- **当前缓解**：关键页面已进行人工浏览器回归；Shipment 与 Invoice/Billing 冒烟 E2E 可重复执行，失败时保留截图、视频、trace 和 HTML 报告；API 与 Worker 继续提供领域和租户隔离覆盖。
+- **处理结果**：CI 启动 S3 兼容对象存储，幂等 seed 后串行执行全部 Chromium 用例；黄金路径每次使用唯一业务编号，失败保留截图、视频、trace 和 HTML 报告。
 - **关闭标准**：CI 中可稳定运行核心黄金路径及关键负向路径，失败时保留截图、trace 或视频证据。
+- **关闭日期**：2026-08-30
+- **验证证据**：本地 `pnpm test:e2e:golden` 真实执行通过；Shipment/Invoice 冒烟、API 租户隔离和隐藏文件负向测试继续保留。
+- **剩余风险**：需观察 CI 多次运行稳定性；业务 UAT 签署仍独立进行。
 
 ### TEST-02 — 前端自动化测试基线不足
 
@@ -102,7 +110,7 @@
 
 ### INFRA-01 — 队列、对象存储和外部副作用尚未完整验证
 
-- **现状**：Rate Excel 导入与 Quote PDF 已通过 BullMQ/Redis/S3 路径；SO 已通过真实 MinIO 上传、版本化 Document 元数据和受权限保护下载。邮件、预签名 URL、对象存储生产凭据轮换及大文件策略仍未完成。
+- **现状**：Rate Excel 导入与 Quote PDF 已通过 BullMQ/Redis/S3 路径；SO 已通过真实 MinIO 上传、版本化 Document 元数据和受权限保护下载。Notification message log、Invoice 发布事件与 BullMQ 三次退避已完成，本地邮件仍为显式 log transport；生产邮件服务、预签名 URL、对象存储生产凭据轮换及大文件策略仍未完成。
 - **影响**：连接配置、重试、幂等、租户上下文和签名 URL 授权问题可能到较晚阶段才暴露。
 - **当前缓解**：Docker Compose 和环境变量已提供基础依赖配置；对象 Key 按租户/业务对象隔离但不作为权限边界；SO 数据库写入失败时会尝试删除孤儿对象；客户下载执行 tenant/customer/visibility/status 四层校验。
 - **建议措施**：在对应模块首次使用时增加集成测试，验证失败重试、重复执行、文件权限和租户上下文传播。
@@ -110,15 +118,21 @@
 
 ### DEV-01 — Next.js 开发与构建产物冲突
 
+- **状态**：CLOSED
+
 - **现状**：`next dev` 与 `next build` 共用 `.next`，在开发服务运行时执行生产构建曾导致 Webpack 模块或 CSS 清单错位。
 - **影响**：本地页面可能出现难以复现的 500、样式丢失或热更新异常。
 - **当前缓解**：执行生产构建前停止开发服务，构建完成后再重新启动。
-- **建议措施**：将该顺序固化到开发脚本或使用独立构建目录，避免依赖人工记忆。
+- **处理结果**：Next.js 配置支持 `NEXT_DIST_DIR`，生产构建脚本固定输出到 `.next-build`，开发服务继续使用 `.next`；两者不再共享缓存。
 - **关闭标准**：开发与生产构建可连续执行且不会污染正在使用的页面缓存，或仓库脚本自动处理服务/目录隔离。
+- **关闭日期**：2026-08-29
+- **关闭提交**：工作区待提交
+- **验证证据**：Web lint、typecheck、生产构建通过；清理旧冲突缓存并重启开发服务后，后台与客户 Shipment 页面浏览器渲染通过。
+- **剩余风险**：无；CI/本地自定义构建命令需继续使用仓库 `build` 脚本或显式设置独立 `NEXT_DIST_DIR`。
 
 ### DATA-01 — 生产迁移和恢复流程尚未演练
 
-- **现状**：当前 15 个 Prisma migration 已在本地应用，但还没有针对试点数据的备份、恢复、迁移失败和回滚演练记录。
+- **现状**：当前 19 个 Prisma migration 已在本地测试数据库应用，但还没有针对试点数据的备份、恢复、迁移失败和回滚演练记录。
 - **影响**：首次发布或后续模型变更时，失败恢复时间和数据损失风险不可量化。
 - **当前缓解**：迁移已纳入版本控制；禁止修改已应用迁移；Demo seed 与生产开关分离。
 - **建议措施**：建立发布前备份、migration deploy、校验和故障恢复流程；使用接近生产的数据量演练。
@@ -126,7 +140,7 @@
 
 ### SCOPE-01 — 模拟页面可能造成完成度误判
 
-- **现状**：Rate、Quote、Booking、SO Document 与 Shipment 建档已连接真实 API；Dashboard、Container、Tracking、通用 Document 管理和 Invoice 仍有模拟数据或占位内容。
+- **现状**：Rate、Quote、Booking、SO Document、Shipment 与 Invoice/Billing 已连接真实 API；Dashboard 和通用 Document 管理仍有模拟数据或占位内容。
 - **影响**：演示时可能把可视页面误认为已具备真实持久化、权限和业务规则。
 - **当前缓解**：开发进度日志已明确真实 API 覆盖范围。
 - **建议措施**：页面显式标记未接入模块；模块完成时同时替换模拟数据、补齐后端授权和测试。

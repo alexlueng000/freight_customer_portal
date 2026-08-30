@@ -72,7 +72,7 @@ export default function AdminQuotesPage() {
             <LoadingState rows={6} />
           ) : !data?.items.length ? (
             <div className="p-4">
-              <EmptyState title="暂无报价" description="客户生成报价后会显示在这里。" />
+              <EmptyState title="暂无报价" description="客户提交报价申请后会显示在这里。" />
             </div>
           ) : (
             <>
@@ -120,7 +120,7 @@ export default function AdminQuotesPage() {
                               type="button"
                             >
                               <Send className="size-3.5" />
-                              {sending === quote.id ? '发送中…' : '发送'}
+                              {sending === quote.id ? '发送中…' : '审核并发送'}
                             </button>
                           ) : (
                             '—'
@@ -181,7 +181,7 @@ function label(status: string) {
   return (
     (
       {
-        DRAFT: '草稿',
+        DRAFT: '待销售确认',
         SENT: '已发送',
         VIEWED: '已查看',
         ACCEPTED: '已接受',

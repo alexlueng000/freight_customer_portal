@@ -16,6 +16,12 @@ import {
   QUOTE_PDF_QUEUE,
   type QuotePdfJobData,
 } from './quote-pdf.processor.js';
+import {
+  EMAIL_NOTIFICATION_QUEUE,
+  processEmailNotification,
+  SEND_EMAIL_NOTIFICATION_JOB,
+  type EmailNotificationJobData,
+} from './email-notification.processor.js';
 
 const config = loadWorkerConfig();
 const connectionOptions = {
@@ -53,6 +59,24 @@ const quotePdfWorker = new Worker<QuotePdfJobData>(
   async (job) => {
     if (job.name !== QUOTE_PDF_JOB) throw new Error(`Unsupported job: ${job.name}`);
     return processQuotePdf(s3, config.s3.bucket, job.data);
+  },
+  { connection: new Redis(connectionOptions), concurrency: config.concurrency },
+);
+const emailEvents = new QueueEvents(EMAIL_NOTIFICATION_QUEUE, {
+  connection: new Redis(connectionOptions),
+});
+const emailWorker = new Worker<EmailNotificationJobData>(
+  EMAIL_NOTIFICATION_QUEUE,
+  async (job) => {
+    if (job.name !== SEND_EMAIL_NOTIFICATION_JOB) throw new Error(`Unsupported job: ${job.name}`);
+    return processEmailNotification(prisma, {
+      send(message) {
+        if (config.emailDeliveryMode !== 'log')
+          throw new Error(`Unsupported EMAIL_DELIVERY_MODE: ${config.emailDeliveryMode}`);
+        console.info(JSON.stringify({ level: 'info', message: 'Email delivery (log mode)', ...message }));
+        return Promise.resolve();
+      },
+    }, job.data);
   },
   { connection: new Redis(connectionOptions), concurrency: config.concurrency },
 );
@@ -120,8 +144,10 @@ async function shutdown(signal: NodeJS.Signals) {
   clearInterval(expiryTimer);
   await worker.close();
   await quotePdfWorker.close();
+  await emailWorker.close();
   await queueEvents.close();
   await quotePdfEvents.close();
+  await emailEvents.close();
   await prisma.$disconnect();
   s3.destroy();
   await Promise.all([eventConnection.quit(), workerConnection.quit()]);

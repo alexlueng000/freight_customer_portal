@@ -1,6 +1,7 @@
 'use client';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { EmptyState } from '@/components/empty-state';
@@ -27,6 +28,7 @@ interface QuoteList {
 }
 export default function QuotesPage() {
   const { apiFetch } = useAuth();
+  const router = useRouter();
   const [page, setPage] = useState(1);
   const [data, setData] = useState<QuoteList | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,7 +56,7 @@ export default function QuotesPage() {
       <PageHeader
         eyebrow="客户门户"
         title="我的报价"
-        description="查看由运价方案生成的报价及其价格快照。"
+        description="查看报价申请、销售确认进度及已发送的正式报价。"
       />
       <section className="overflow-hidden rounded border border-border bg-surface">
         {loading ? (
@@ -67,7 +69,7 @@ export default function QuotesPage() {
           </div>
         ) : !data?.items.length ? (
           <div className="p-4">
-            <EmptyState title="暂无报价" description="请先前往运价查询，选择方案生成报价。" />
+            <EmptyState title="暂无报价" description="请先前往运价查询，选择方案提交报价申请。" />
           </div>
         ) : (
           <>
@@ -81,37 +83,60 @@ export default function QuotesPage() {
                     <th className={head}>金额</th>
                     <th className={head}>有效期</th>
                     <th className={head}>状态</th>
+                    <th className={`${head} min-w-28 whitespace-nowrap text-right`}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((quote) => (
-                    <tr className="border-b border-border last:border-0" key={quote.id}>
-                      <td className={cell}>
-                        <Link
-                          className="font-semibold text-primary hover:underline"
-                          href={`/portal/quotes/${quote.id}`}
-                        >
-                          {quote.quoteNo}
-                        </Link>
-                      </td>
-                      <td className={cell}>
-                        {quote.polCode} → {quote.podCode}
-                      </td>
-                      <td className={cell}>
-                        {quote.carrierCode ?? '—'}
-                        <div className="text-xs text-muted">
-                          {quote.etd ? quote.etd.slice(0, 10) : '船期待确认'}
-                        </div>
-                      </td>
-                      <td className={`${cell} font-semibold`}>
-                        {money(quote.totalAmount, quote.currency)}
-                      </td>
-                      <td className={cell}>{quote.validUntil.slice(0, 10)}</td>
-                      <td className={cell}>
-                        <StatusBadge>{quote.status}</StatusBadge>
-                      </td>
-                    </tr>
-                  ))}
+                  {data.items.map((quote) => {
+                    const href = `/portal/quotes/${quote.id}`;
+                    return (
+                      <tr
+                        aria-label={`查看报价 ${quote.quoteNo}`}
+                        className="cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-sidebar/70 focus:bg-sidebar focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary/20"
+                        key={quote.id}
+                        onClick={() => router.push(href)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            router.push(href);
+                          }
+                        }}
+                        role="link"
+                        tabIndex={0}
+                      >
+                        <td className={cell}>
+                          <span className="font-semibold text-primary">{quote.quoteNo}</span>
+                        </td>
+                        <td className={cell}>
+                          {quote.polCode} → {quote.podCode}
+                        </td>
+                        <td className={cell}>
+                          {quote.carrierCode ?? '—'}
+                          <div className="text-xs text-muted">
+                            {quote.etd ? quote.etd.slice(0, 10) : '船期待确认'}
+                          </div>
+                        </td>
+                        <td className={`${cell} font-semibold`}>
+                          {money(quote.totalAmount, quote.currency)}
+                        </td>
+                        <td className={cell}>{quote.validUntil.slice(0, 10)}</td>
+                        <td className={cell}>
+                          <StatusBadge>{customerQuoteStatus(quote.status)}</StatusBadge>
+                        </td>
+                        <td className={`${cell} min-w-28 whitespace-nowrap text-right`}>
+                          <Link
+                            aria-label={`查看报价 ${quote.quoteNo}`}
+                            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            href={href}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <Eye aria-hidden className="size-3.5" />
+                            查看
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -150,4 +175,20 @@ const cell = 'px-4 py-3 align-middle';
 const button = 'grid size-9 place-items-center rounded border border-border disabled:opacity-40';
 function money(value: string, currency: string) {
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
+}
+function customerQuoteStatus(status: string) {
+  return (
+    (
+      {
+        DRAFT: '待销售确认',
+        SENT: '已发送',
+        VIEWED: '已查看',
+        ACCEPTED: '已接受',
+        REJECTED: '已拒绝',
+        EXPIRED: '已过期',
+        BOOKED: '已转订舱',
+        CANCELLED: '已取消',
+      } as Record<string, string>
+    )[status] ?? status
+  );
 }

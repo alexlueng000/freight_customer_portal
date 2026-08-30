@@ -121,14 +121,16 @@ export default function QuoteDetailPage() {
       <PageHeader
         actions={
           <div className="flex gap-2">
-            <button
-              className="h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40"
-              disabled={downloading}
-              onClick={() => void downloadPdf()}
-              type="button"
-            >
-              {downloading ? '生成中…' : '下载 PDF'}
-            </button>
+            {quote.status !== 'DRAFT' ? (
+              <button
+                className="h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40"
+                disabled={downloading}
+                onClick={() => void downloadPdf()}
+                type="button"
+              >
+                {downloading ? '生成中…' : '下载 PDF'}
+              </button>
+            ) : null}
             {['SENT', 'VIEWED'].includes(quote.status) ? (
               <>
                 <button
@@ -170,6 +172,11 @@ export default function QuoteDetailPage() {
           {actionError}
         </div>
       ) : null}
+      {quote.status === 'DRAFT' ? (
+        <div className="rounded border border-warning/25 bg-warning/10 px-4 py-3 text-sm text-foreground">
+          报价申请已提交，正在等待销售确认。销售正式发送后，你可以下载 PDF、接受或拒绝报价。
+        </div>
+      ) : null}
       {quote.status === 'EXPIRED' ? (
         <div className="rounded border border-warning/25 bg-warning/10 px-4 py-3 text-sm text-warning">
           该报价已过有效期，不能接受或拒绝。
@@ -177,7 +184,7 @@ export default function QuoteDetailPage() {
       ) : null}
       <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="状态">
-          <StatusBadge>{quote.status}</StatusBadge>
+          <StatusBadge>{customerQuoteStatus(quote.status)}</StatusBadge>
         </Fact>
         <Fact label="船司" value={quote.carrierCode ?? '—'} />
         <Fact label="ETD" value={quote.etd?.slice(0, 10) ?? '船期待确认'} />
@@ -253,4 +260,9 @@ const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
 function money(value: string, currency: string) {
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
+}
+function customerQuoteStatus(status: string) {
+  return (
+    ({ DRAFT: '待销售确认', SENT: '已发送', VIEWED: '已查看', ACCEPTED: '已接受', REJECTED: '已拒绝', EXPIRED: '已过期', BOOKED: '已转订舱', CANCELLED: '已取消' } as Record<string, string>)[status] ?? status
+  );
 }

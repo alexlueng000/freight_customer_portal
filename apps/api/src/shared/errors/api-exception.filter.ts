@@ -7,6 +7,7 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../request-context/request-context.service.js';
 
 interface ExceptionPayload {
@@ -19,9 +20,12 @@ interface ExceptionPayload {
 export class ApiExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(ApiExceptionFilter.name);
 
-  constructor(private readonly requestContext: RequestContextService) {}
+  constructor(
+    private readonly requestContext: RequestContextService,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  catch(exception: unknown, host: ArgumentsHost): void {
+  async catch(exception: unknown, host: ArgumentsHost): Promise<void> {
     const http = host.switchToHttp();
     const request = http.getRequest<Request>();
     const response = http.getResponse<Response>();
@@ -31,6 +35,17 @@ export class ApiExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
     const payload = this.getPayload(exception);
+
+    await this.auditDeniedSensitiveAccess(request, status, payload.code).catch((error: unknown) =>
+      this.logger.error(
+        JSON.stringify({
+          level: 'error',
+          message: 'Failed to persist access denial audit',
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    );
 
     if (!(exception instanceof HttpException)) {
       const error = exception instanceof Error ? exception : new Error('Unknown server error');
@@ -55,8 +70,62 @@ export class ApiExceptionFilter implements ExceptionFilter {
     });
   }
 
-  private getPayload(exception: unknown): Required<Pick<ExceptionPayload, 'code' | 'message'>> &
-    Pick<ExceptionPayload, 'details'> {
+  private async auditDeniedSensitiveAccess(
+    request: Request,
+    status: number,
+    code: string,
+  ): Promise<void> {
+    if (status !== 403 && status !== 404) return;
+    const context = this.requestContext.get();
+    if (!context?.tenantId || !context.userId) return;
+    const path = request.path;
+    const match = path.match(
+      /^\/api\/v\d+\/(?:admin\/)?(customers|rates|quotes|bookings|shipments|documents|invoices)(?:\/([^/]+))?/,
+    );
+    if (!match) return;
+    const entityType = this.entityType(match[1]!);
+    const routeId = request.params?.id;
+    const candidateId =
+      typeof routeId === 'string'
+        ? routeId
+        : Array.isArray(routeId)
+          ? routeId[0] ?? 'collection'
+          : match[2] ?? 'collection';
+    const entityId = candidateId.slice(0, 100);
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        entityType,
+        entityId,
+        action: 'ACCESS_DENIED',
+        afterData: {
+          status,
+          code,
+          method: request.method,
+          path,
+          requestId: context.requestId,
+        },
+        ipAddress: request.ip?.slice(0, 64),
+        userAgent: request.header('user-agent')?.slice(0, 1000),
+      },
+    });
+  }
+
+  private entityType(segment: string): string {
+    const names: Record<string, string> = {
+      customers: 'CustomerCompany',
+      rates: 'Rate',
+      quotes: 'Quote',
+      bookings: 'Booking',
+      shipments: 'Shipment',
+      documents: 'Document',
+      invoices: 'Invoice',
+    };
+    return names[segment] ?? 'SensitiveResource';
+  }
+
+  private getPayload(exception: unknown): { code: string; message: string; details?: unknown } {
     if (!(exception instanceof HttpException)) {
       return { code: 'INTERNAL_SERVER_ERROR', message: 'An unexpected error occurred' };
     }

@@ -110,10 +110,16 @@ export class QuotesService {
       customer.defaultMarkupType,
       customer.defaultMarkupValue,
     );
+    const containerQuantity = new Prisma.Decimal(dto.quantity);
     const eligibleCharges = rate.charges.filter((charge) => charge.currency === price.currency);
-    const totalAmount = eligibleCharges.reduce(
-      (total, charge) => total.plus(charge.amount),
-      sellAmount,
+    const oceanFreightAmount = sellAmount.mul(containerQuantity);
+    const chargeSnapshots = eligibleCharges.map((charge) => {
+      const quantity = new Prisma.Decimal(charge.chargeBasis === 'PER_CONTAINER' ? dto.quantity : 1);
+      return { ...charge, quantity, totalAmount: charge.amount.mul(quantity) };
+    });
+    const totalAmount = chargeSnapshots.reduce(
+      (total, charge) => total.plus(charge.totalAmount),
+      oceanFreightAmount,
     );
     return this.prisma.$transaction(async (tx) => {
       const now = new Date();
@@ -151,21 +157,21 @@ export class QuotesService {
                 chargeCode: 'OCEAN_FREIGHT',
                 chargeName: '海运费',
                 containerType: price.containerType,
-                quantity: new Prisma.Decimal(1),
+                quantity: containerQuantity,
                 unitPrice: sellAmount,
-                amount: sellAmount,
+                amount: oceanFreightAmount,
                 currency: price.currency,
                 costAmount: price.costAmount,
                 sortOrder: 0,
               },
-              ...eligibleCharges.map((charge, index) => ({
+              ...chargeSnapshots.map((charge, index) => ({
                 tenantId: context.tenantId,
                 chargeCode: charge.chargeCode,
                 chargeName: charge.chargeName,
                 containerType: charge.chargeBasis === 'PER_CONTAINER' ? charge.containerType : null,
-                quantity: new Prisma.Decimal(1),
+                quantity: charge.quantity,
                 unitPrice: charge.amount,
-                amount: charge.amount,
+                amount: charge.totalAmount,
                 currency: charge.currency,
                 costAmount: charge.amount,
                 sortOrder: index + 1,
@@ -186,6 +192,7 @@ export class QuotesService {
             quoteNo,
             sourceRateId: rate.id,
             containerType: price.containerType,
+            quantity: dto.quantity,
             totalAmount: totalAmount.toString(),
             chargeCount: eligibleCharges.length,
             currency: price.currency,
@@ -351,6 +358,11 @@ export class QuotesService {
     });
     if (!quote)
       throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
+    if (!internal && quote.status === QuoteStatus.DRAFT)
+      throw new BadRequestException({
+        code: 'QUOTE_NOT_SENT',
+        message: 'The quote is awaiting sales confirmation and is not available as a formal PDF',
+      });
     return {
       tenantId: quote.tenantId,
       quoteId: quote.id,

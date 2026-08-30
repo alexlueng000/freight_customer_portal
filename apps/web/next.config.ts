@@ -2,6 +2,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
   output: process.env.NEXT_STANDALONE === 'true' ? 'standalone' : undefined,
   async rewrites() {
     return [

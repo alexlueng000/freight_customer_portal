@@ -27,8 +27,14 @@ const permissions = [
   ['booking.manage', 'Review, confirm, reject, or cancel tenant bookings'],
   ['shipment.create', 'Create shipments from confirmed bookings'],
   ['shipment.read', 'View shipments within the permitted customer scope'],
+  ['shipment.manage', 'Manage shipment details and lifecycle'],
+  ['tracking.manage', 'Create shipment tracking events'],
   ['document.upload', 'Upload shipment and booking documents'],
   ['document.read', 'View and download authorized documents'],
+  ['document.manage', 'Manage shipment document visibility and versions'],
+  ['invoice.read', 'View invoices within the permitted customer scope'],
+  ['invoice.manage', 'Create, issue, void, and mark invoices paid'],
+  ['invoice.confirm', 'Confirm issued invoices within the customer scope'],
 ];
 
 const rolePermissions = {
@@ -43,6 +49,7 @@ const rolePermissions = {
     'booking.read',
     'shipment.read',
     'document.read',
+    'invoice.read',
   ],
   [RoleCode.OPERATION]: [
     'customer.read',
@@ -51,10 +58,19 @@ const rolePermissions = {
     'booking.manage',
     'shipment.create',
     'shipment.read',
+    'shipment.manage',
+    'tracking.manage',
     'document.upload',
     'document.read',
+    'document.manage',
   ],
-  [RoleCode.FINANCE]: ['customer.read', 'shipment.read', 'document.read'],
+  [RoleCode.FINANCE]: [
+    'customer.read',
+    'shipment.read',
+    'document.read',
+    'invoice.read',
+    'invoice.manage',
+  ],
   [RoleCode.CUSTOMER_ADMIN]: [
     'customer.read',
     'customer_user.read',
@@ -69,6 +85,8 @@ const rolePermissions = {
     'booking.submit',
     'shipment.read',
     'document.read',
+    'invoice.read',
+    'invoice.confirm',
   ],
   [RoleCode.CUSTOMER_USER]: [
     'customer.read',
@@ -82,6 +100,8 @@ const rolePermissions = {
     'booking.submit',
     'shipment.read',
     'document.read',
+    'invoice.read',
+    'invoice.confirm',
   ],
 };
 
@@ -165,6 +185,8 @@ async function seedDemoTenant(permissionRecords) {
   const pepper = requireDemoSecret('PASSWORD_HASH_PEPPER');
   const adminPassword = requireDemoSecret('DEMO_ADMIN_PASSWORD');
   const customerPassword = requireDemoSecret('DEMO_CUSTOMER_PASSWORD');
+  const internalPasswordHash = await hashDemoPassword(adminPassword, pepper);
+  const customerPasswordHash = await hashDemoPassword(customerPassword, pepper);
   const customerCompany = await prisma.customerCompany.upsert({
     where: { tenantId_code: { tenantId: tenant.id, code: 'NORTHSTAR' } },
     update: { name: 'Northstar Trading Co., Ltd.', status: 'ACTIVE' },
@@ -180,34 +202,83 @@ async function seedDemoTenant(permissionRecords) {
   const admin = await upsertDemoUser({
     tenantId: tenant.id,
     email: 'admin@demo.freight.local',
-    passwordHash: await hashDemoPassword(adminPassword, pepper),
+    passwordHash: internalPasswordHash,
     displayName: 'Demo Tenant Admin',
     userType: 'INTERNAL',
     roleId: requireRole(roleRecords, RoleCode.TENANT_ADMIN).id,
+  });
+  const sales = await upsertDemoUser({
+    tenantId: tenant.id,
+    email: 'sales@demo.freight.local',
+    passwordHash: internalPasswordHash,
+    displayName: 'Demo Sales',
+    userType: 'INTERNAL',
+    roleId: requireRole(roleRecords, RoleCode.SALES).id,
+  });
+  await upsertDemoUser({
+    tenantId: tenant.id,
+    email: 'operation@demo.freight.local',
+    passwordHash: internalPasswordHash,
+    displayName: 'Demo Operation',
+    userType: 'INTERNAL',
+    roleId: requireRole(roleRecords, RoleCode.OPERATION).id,
+  });
+  await upsertDemoUser({
+    tenantId: tenant.id,
+    email: 'finance@demo.freight.local',
+    passwordHash: internalPasswordHash,
+    displayName: 'Demo Finance',
+    userType: 'INTERNAL',
+    roleId: requireRole(roleRecords, RoleCode.FINANCE).id,
   });
   const customerUser = await upsertDemoUser({
     tenantId: tenant.id,
     customerCompanyId: customerCompany.id,
     email: 'customer@demo.freight.local',
-    passwordHash: await hashDemoPassword(customerPassword, pepper),
+    passwordHash: customerPasswordHash,
     displayName: 'Demo Customer Admin',
     userType: 'CUSTOMER',
     roleId: requireRole(roleRecords, RoleCode.CUSTOMER_ADMIN).id,
+  });
+  await upsertDemoUser({
+    tenantId: tenant.id,
+    customerCompanyId: customerCompany.id,
+    email: 'customer-user@demo.freight.local',
+    passwordHash: customerPasswordHash,
+    displayName: 'Demo Customer User',
+    userType: 'CUSTOMER',
+    roleId: requireRole(roleRecords, RoleCode.CUSTOMER_USER).id,
+  });
+
+  await prisma.customerCompany.update({
+    where: { id: customerCompany.id },
+    data: { salesOwnerId: sales.id },
+  });
+  await prisma.quote.updateMany({
+    where: { tenantId: tenant.id, customerCompanyId: customerCompany.id },
+    data: { salesOwnerId: sales.id },
   });
 
   await seedDemoBookingFlow({
     tenantId: tenant.id,
     customerCompanyId: customerCompany.id,
     adminUserId: admin.id,
+    salesUserId: sales.id,
     customerUserId: customerUser.id,
   });
 
   console.info(
-    `Demo users ready for tenant ${tenant.code}: ${admin.email} and customer@demo.freight.local`,
+    `Demo role users ready for tenant ${tenant.code}: tenant admin, sales, operation, finance, customer admin, and customer user.`,
   );
 }
 
-async function seedDemoBookingFlow({ tenantId, customerCompanyId, adminUserId, customerUserId }) {
+async function seedDemoBookingFlow({
+  tenantId,
+  customerCompanyId,
+  adminUserId,
+  salesUserId,
+  customerUserId,
+}) {
   const now = new Date();
   const etd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
   const validUntil = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -219,6 +290,7 @@ async function seedDemoBookingFlow({ tenantId, customerCompanyId, adminUserId, c
       bookedAt: null,
       validUntil,
       etd,
+      salesOwnerId: salesUserId,
       updatedById: customerUserId,
     },
     create: {
@@ -226,7 +298,7 @@ async function seedDemoBookingFlow({ tenantId, customerCompanyId, adminUserId, c
       tenantId,
       quoteNo: 'QT-DEMO-ACCEPTED',
       customerCompanyId,
-      salesOwnerId: adminUserId,
+      salesOwnerId: salesUserId,
       status: 'ACCEPTED',
       polCode: 'CNSZX',
       podCode: 'USLAX',
@@ -261,13 +333,13 @@ async function seedDemoBookingFlow({ tenantId, customerCompanyId, adminUserId, c
 
   const bookedQuote = await prisma.quote.upsert({
     where: { tenantId_quoteNo: { tenantId, quoteNo: 'QT-DEMO-BOOKED' } },
-    update: { status: 'BOOKED', bookedAt: now, validUntil, etd },
+    update: { status: 'BOOKED', bookedAt: now, validUntil, etd, salesOwnerId: salesUserId },
     create: {
       id: 'demo_quote_booked_v1',
       tenantId,
       quoteNo: 'QT-DEMO-BOOKED',
       customerCompanyId,
-      salesOwnerId: adminUserId,
+      salesOwnerId: salesUserId,
       status: 'BOOKED',
       polCode: 'CNSHA',
       podCode: 'USLGB',
@@ -343,7 +415,121 @@ async function seedDemoBookingFlow({ tenantId, customerCompanyId, adminUserId, c
       sortOrder: 0,
     },
   });
-  console.info('Demo booking flow ready: one accepted quote and one draft booking.');
+  const shipmentBooking = await prisma.booking.upsert({
+    where: { tenantId_bookingNo: { tenantId, bookingNo: 'BOOK-DEMO-SHIPPED' } },
+    update: {
+      status: 'SO_RELEASED',
+      etd,
+      confirmedAt: now,
+      updatedById: adminUserId,
+    },
+    create: {
+      id: 'demo_booking_shipped_v1',
+      tenantId,
+      bookingNo: 'BOOK-DEMO-SHIPPED',
+      customerCompanyId,
+      status: 'SO_RELEASED',
+      polCode: 'CNSHA',
+      podCode: 'USLGB',
+      carrierCode: 'OOCL',
+      etd,
+      commodity: 'Consumer electronics accessories',
+      packages: 320,
+      grossWeight: '9800.00',
+      volumeCbm: '54.50',
+      shipperName: 'Northstar Trading Co., Ltd.',
+      bookingContactName: 'Demo Customer Admin',
+      bookingContactEmail: 'customer@demo.freight.local',
+      confirmedAt: now,
+      createdById: customerUserId,
+      updatedById: adminUserId,
+    },
+  });
+  await prisma.bookingContainerRequest.upsert({
+    where: {
+      bookingId_containerType: { bookingId: shipmentBooking.id, containerType: '40GP' },
+    },
+    update: { quantity: 1, weightPerContainer: '9800.00', sortOrder: 0 },
+    create: {
+      id: 'demo_booking_container_shipped_v1',
+      tenantId,
+      bookingId: shipmentBooking.id,
+      containerType: '40GP',
+      quantity: 1,
+      weightPerContainer: '9800.00',
+      sortOrder: 0,
+    },
+  });
+  const demoShipment = await prisma.shipment.upsert({
+    where: { tenantId_shipmentNo: { tenantId, shipmentNo: 'SHP-DEMO-PLANNED' } },
+    update: { bookingId: shipmentBooking.id, etd, createdById: adminUserId },
+    create: {
+      id: 'demo_shipment_planned_v1',
+      tenantId,
+      shipmentNo: 'SHP-DEMO-PLANNED',
+      bookingId: shipmentBooking.id,
+      customerCompanyId,
+      status: 'PLANNED',
+      carrierCode: 'OOCL',
+      vessel: 'EVER DEMO',
+      voyage: 'EV2608',
+      polCode: 'CNSHA',
+      podCode: 'USLGB',
+      etd,
+      createdById: adminUserId,
+    },
+  });
+  const dueDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const demoInvoice = await prisma.invoice.upsert({
+    where: { tenantId_invoiceNo: { tenantId, invoiceNo: 'INV-DEMO-ISSUED' } },
+    update: {
+      shipmentId: demoShipment.id,
+      customerCompanyId,
+      dueDate,
+      status: 'ISSUED',
+      issuedAt: now,
+    },
+    create: {
+      id: 'demo_invoice_issued_v1',
+      tenantId,
+      invoiceNo: 'INV-DEMO-ISSUED',
+      shipmentId: demoShipment.id,
+      customerCompanyId,
+      currency: 'USD',
+      subtotal: '1850.00',
+      taxAmount: '0.00',
+      totalAmount: '1850.00',
+      dueDate,
+      status: 'ISSUED',
+      issuedAt: now,
+      createdById: adminUserId,
+    },
+  });
+  await prisma.invoiceLine.upsert({
+    where: { id: 'demo_invoice_line_issued_v1' },
+    update: {
+      chargeCode: 'OCEAN_FREIGHT',
+      quantity: '1',
+      unitPrice: '1850.00',
+      amount: '1850.00',
+      currency: 'USD',
+    },
+    create: {
+      id: 'demo_invoice_line_issued_v1',
+      tenantId,
+      invoiceId: demoInvoice.id,
+      chargeCode: 'OCEAN_FREIGHT',
+      description: 'Ocean freight',
+      quantity: '1',
+      unitPrice: '1850.00',
+      amount: '1850.00',
+      currency: 'USD',
+      sortOrder: 0,
+    },
+  });
+  console.info(
+    'Demo flow ready: accepted quote, draft booking, planned shipment, and issued invoice.',
+  );
 }
 
 function requireDemoSecret(name) {

@@ -1,7 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, RoleCode } from '@prisma/client';
+import { Prisma, RoleCode, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
+import type { CreateContainerDto } from './dto/create-container.dto.js';
+import type { CreateTrackingEventDto } from './dto/create-tracking-event.dto.js';
+import type { ShipmentActionDto } from './dto/shipment-action.dto.js';
+import type { UpdateShipmentDto } from './dto/update-shipment.dto.js';
+import { ShipmentStateMachine } from './shipment-state-machine.js';
 
 const select = {
   id: true,
@@ -14,10 +19,29 @@ const select = {
   polCode: true,
   podCode: true,
   etd: true,
+  atd: true,
   eta: true,
+  ata: true,
+  mblNo: true,
+  hblNo: true,
+  completedAt: true,
   createdAt: true,
   booking: { select: { bookingNo: true } },
   customer: { select: { id: true, name: true } },
+  containers: { orderBy: { createdAt: 'asc' as const } },
+  trackingEvents: { orderBy: { eventTime: 'desc' as const } },
+  documents: {
+    where: { status: 'ACTIVE' as const },
+    orderBy: [{ documentType: 'asc' as const }, { version: 'desc' as const }],
+    select: {
+      id: true,
+      documentType: true,
+      originalFilename: true,
+      version: true,
+      customerVisible: true,
+      createdAt: true,
+    },
+  },
 } satisfies Prisma.ShipmentSelect;
 
 @Injectable()
@@ -25,16 +49,14 @@ export class ShipmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly requestContext: RequestContextService,
+    private readonly stateMachine: ShipmentStateMachine,
   ) {}
 
   list() {
     const context = this.requestContext.requireAuthenticated();
-    return this.prisma.shipment.findMany({
-      where: this.scope(context),
-      select,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+    return this.prisma.shipment
+      .findMany({ where: this.scope(context), select, orderBy: { createdAt: 'desc' }, take: 100 })
+      .then((rows) => rows.map((row) => this.redact(row, !!context.customerCompanyId)));
   }
 
   async get(id: string) {
@@ -45,9 +67,190 @@ export class ShipmentsService {
     });
     if (!shipment)
       throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
-    return shipment;
+    return this.redact(shipment, !!context.customerCompanyId);
   }
 
+  async update(id: string, dto: UpdateShipmentDto) {
+    const context = this.requireInternal();
+    const current = await this.findInternal(id, context.tenantId);
+    const data = {
+      ...(dto.vessel !== undefined ? { vessel: dto.vessel.trim() } : {}),
+      ...(dto.voyage !== undefined ? { voyage: dto.voyage.trim() } : {}),
+      ...(dto.etd !== undefined ? { etd: new Date(dto.etd) } : {}),
+      ...(dto.eta !== undefined ? { eta: new Date(dto.eta) } : {}),
+      ...(dto.mblNo !== undefined ? { mblNo: dto.mblNo.trim() || null } : {}),
+      ...(dto.hblNo !== undefined ? { hblNo: dto.hblNo.trim() || null } : {}),
+    };
+    return this.prisma.$transaction(async (tx) => {
+      const shipment = await tx.shipment.update({ where: { id: current.id }, data, select });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'Shipment',
+          entityId: id,
+          action: 'UPDATE_DETAILS',
+          beforeData: {
+            vessel: current.vessel,
+            voyage: current.voyage,
+            etd: current.etd,
+            eta: current.eta,
+            mblNo: current.mblNo,
+            hblNo: current.hblNo,
+          },
+          afterData: data,
+        },
+      });
+      return shipment;
+    });
+  }
+
+  async addContainer(id: string, dto: CreateContainerDto) {
+    const context = this.requireInternal();
+    await this.findInternal(id, context.tenantId);
+    return this.prisma.$transaction(async (tx) => {
+      const container = await tx.container.create({
+        data: {
+          tenantId: context.tenantId,
+          shipmentId: id,
+          containerNo: dto.containerNo.toUpperCase(),
+          containerType: dto.containerType.toUpperCase(),
+          sealNo: dto.sealNo?.trim(),
+          vgmWeight: dto.vgmWeight ? new Prisma.Decimal(dto.vgmWeight) : undefined,
+          pickupAt: dto.pickupAt ? new Date(dto.pickupAt) : undefined,
+          gateInAt: dto.gateInAt ? new Date(dto.gateInAt) : undefined,
+          loadedAt: dto.loadedAt ? new Date(dto.loadedAt) : undefined,
+          dischargedAt: dto.dischargedAt ? new Date(dto.dischargedAt) : undefined,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'Container',
+          entityId: container.id,
+          action: 'CREATE',
+          afterData: {
+            shipmentId: id,
+            containerNo: container.containerNo,
+            containerType: container.containerType,
+          },
+        },
+      });
+      return container;
+    });
+  }
+
+  async addEvent(id: string, dto: CreateTrackingEventDto) {
+    const context = this.requireInternal();
+    await this.findInternal(id, context.tenantId);
+    return this.prisma.$transaction(async (tx) => {
+      const event = await tx.trackingEvent.create({
+        data: {
+          tenantId: context.tenantId,
+          shipmentId: id,
+          eventType: dto.eventType,
+          eventTime: new Date(dto.eventTime),
+          locationCode: dto.locationCode?.trim(),
+          locationName: dto.locationName?.trim(),
+          remark: dto.remark?.trim(),
+          customerVisible: dto.customerVisible ?? true,
+          createdById: context.userId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'TrackingEvent',
+          entityId: event.id,
+          action: 'CREATE',
+          afterData: {
+            shipmentId: id,
+            eventType: event.eventType,
+            eventTime: event.eventTime,
+            customerVisible: event.customerVisible,
+          },
+        },
+      });
+      return event;
+    });
+  }
+
+  transition(id: string, to: ShipmentStatus, dto: ShipmentActionDto) {
+    const context = this.requireInternal();
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.shipment.findFirst({ where: { id, tenantId: context.tenantId } });
+      if (!current)
+        throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
+      this.stateMachine.assertTransition(current.status, to);
+      const now = new Date();
+      const times =
+        to === ShipmentStatus.DEPARTED
+          ? { atd: now }
+          : to === ShipmentStatus.ARRIVED
+            ? { ata: now }
+            : to === ShipmentStatus.COMPLETED
+              ? { completedAt: now }
+              : {};
+      const shipment = await tx.shipment.update({
+        where: { id },
+        data: { status: to, ...times },
+        select,
+      });
+      await tx.trackingEvent.create({
+        data: {
+          tenantId: context.tenantId,
+          shipmentId: id,
+          eventType: `SHIPMENT_${to}`,
+          eventTime: now,
+          remark: dto.remark?.trim(),
+          sourceType: 'SYSTEM',
+          customerVisible: true,
+          createdById: context.userId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'Shipment',
+          entityId: id,
+          action: 'STATUS_TRANSITION',
+          beforeData: { status: current.status },
+          afterData: { status: to, remark: dto.remark },
+        },
+      });
+      return shipment;
+    });
+  }
+
+  private async findInternal(id: string, tenantId: string) {
+    const row = await this.prisma.shipment.findFirst({ where: { id, tenantId } });
+    if (!row)
+      throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
+    return row;
+  }
+  private requireInternal() {
+    const context = this.requestContext.requireAuthenticated();
+    if (context.customerCompanyId)
+      throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
+    return context;
+  }
+  private redact<
+    T extends {
+      trackingEvents: { customerVisible: boolean }[];
+      documents: { customerVisible: boolean }[];
+    },
+  >(row: T, customer: boolean) {
+    return customer
+      ? {
+          ...row,
+          trackingEvents: row.trackingEvents.filter((e) => e.customerVisible),
+          documents: row.documents.filter((d) => d.customerVisible),
+        }
+      : row;
+  }
   private scope(context: {
     tenantId: string;
     userId: string;

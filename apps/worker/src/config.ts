@@ -2,6 +2,7 @@ export interface WorkerConfig {
   concurrency: number;
   databaseUrl: string;
   quoteExpiryIntervalMs: number;
+  emailDeliveryMode: string;
   redis: {
     host: string;
     port: number;
@@ -24,6 +25,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     concurrency: Number(env.WORKER_CONCURRENCY ?? 5),
     databaseUrl,
     quoteExpiryIntervalMs: Number(env.QUOTE_EXPIRY_INTERVAL_MS ?? 60_000),
+    emailDeliveryMode: env.EMAIL_DELIVERY_MODE ?? 'log',
     redis: {
       host: env.REDIS_HOST ?? 'localhost',
       port: Number(env.REDIS_PORT ?? 6379),

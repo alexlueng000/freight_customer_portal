@@ -1,7 +1,7 @@
 # Freight Customer Portal V1 — Booking / SO / Shipment 阶段验收清单
 
-> 文档版本：V1.0
-> 日期：2026-08-29
+> 文档版本：V1.1
+> 日期：2026-08-30
 > 适用范围：Accepted Quote 转 Booking、Booking 提交/审核/确认、SO 上传下载、Shipment 建档
 > 当前结论：功能开发与自动化验证完成，待业务 UAT 签署
 
@@ -24,7 +24,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 ## 2. 验收前置条件
 
 - Web、API、PostgreSQL、Redis 和 MinIO 均已启动且 readiness 正常。
-- 15 个 Prisma migration 已应用，权限和 DEMO seed 已执行。
+- 当前 19 个 Prisma migration 已应用，权限和 DEMO seed 已执行。
 - 准备 Tenant Admin/Operation、Customer Admin 和另一个租户的测试账号。
 - 准备一份 PDF、PNG 或 JPEG 格式 SO，大小不超过 10 MB。
 - 验收不得通过直接修改数据库跳过状态动作。
@@ -139,10 +139,11 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 - [x] 两个新 migration 在本地 PostgreSQL 成功应用。
 - [x] API/Web TypeScript typecheck 通过。
 - [x] API/Web ESLint 通过。
-- [x] API 15 个测试套件、58 项测试通过。
+- [x] 当前全量 API 18 个测试套件、63 项测试通过。
 - [x] Next.js/NestJS/Worker 全量生产构建通过。
 - [x] 真实 MinIO 上传、客户下载和 Shipment 查询返回成功。
 - [x] 隐藏文件与跨租户 Document 下载负向测试通过。
+- [x] Shipment 后台/客户权限 Playwright E2E 共 2 项通过。
 
 ## 8. 验收签署
 

@@ -1,5 +1,5 @@
-import { Transform } from 'class-transformer';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsInt, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateQuoteDto {
   @IsString() @MinLength(1) @MaxLength(100) rateId!: string;
@@ -9,4 +9,10 @@ export class CreateQuoteDto {
   @IsString()
   @Matches(/^[A-Z0-9]{2,20}$/)
   containerType!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  quantity!: number;
 }

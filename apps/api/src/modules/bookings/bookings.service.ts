@@ -117,7 +117,10 @@ export class BookingsService {
           status: QuoteStatus.ACCEPTED,
         },
         include: {
-          items: { where: { containerType: { not: null } }, orderBy: { sortOrder: 'asc' } },
+          items: {
+            where: { chargeCode: 'OCEAN_FREIGHT', containerType: { not: null } },
+            orderBy: { sortOrder: 'asc' },
+          },
         },
       });
       if (!quote)

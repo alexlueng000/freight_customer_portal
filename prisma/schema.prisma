@@ -104,6 +104,31 @@ enum DocumentStatus {
   DELETED
 }
 
+enum EventSourceType {
+  MANUAL
+  API
+  SYSTEM
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  CUSTOMER_CONFIRMED
+  PAID
+  VOID
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 model Tenant {
   id              String       @id @default(cuid())
   code            String       @unique @db.VarChar(50)
@@ -129,7 +154,35 @@ model Tenant {
   quotes                 Quote[]
   bookings               Booking[]
   shipments              Shipment[]
+  containers             Container[]
+  trackingEvents         TrackingEvent[]
   documents              Document[]
+  invoices               Invoice[]
+  notifications          Notification[]
+}
+
+model Notification {
+  id              String             @id @default(cuid())
+  tenantId        String
+  recipientUserId String?
+  recipient       String             @db.VarChar(320)
+  type            String             @db.VarChar(100)
+  channel         NotificationChannel
+  status          NotificationStatus @default(PENDING)
+  payload         Json
+  attempts        Int                @default(0)
+  lastError       String?            @db.VarChar(1000)
+  sentAt          DateTime?          @db.Timestamptz(3)
+  failedAt        DateTime?          @db.Timestamptz(3)
+  readAt          DateTime?          @db.Timestamptz(3)
+  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  recipientUser User?  @relation(fields: [recipientUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, recipientUserId, channel, createdAt])
+  @@index([tenantId, status, createdAt])
 }
 
 model RateImportJob {
@@ -245,11 +298,13 @@ model User {
   ownedCustomers        CustomerCompany[] @relation("CustomerSalesOwner")
   auditLogs             AuditLog[]        @relation("AuditActor")
   refreshSessions       RefreshSession[]
+  notifications         Notification[]
   ownedQuotes           Quote[]           @relation("QuoteSalesOwner")
   priceOverriddenQuotes Quote[]           @relation("QuotePriceOverrideBy")
   createdBookings       Booking[]         @relation("BookingCreatedBy")
   updatedBookings       Booking[]         @relation("BookingUpdatedBy")
   createdShipments      Shipment[]        @relation("ShipmentCreatedBy")
+  createdTrackingEvents TrackingEvent[]   @relation("TrackingEventCreatedBy")
   uploadedDocuments     Document[]        @relation("DocumentUploadedBy")
 
   @@unique([tenantId, email])
@@ -335,6 +390,7 @@ model CustomerCompany {
   quotes        Quote[]
   bookings      Booking[]
   shipments     Shipment[]
+  invoices      Invoice[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -562,7 +618,12 @@ model Shipment {
   polCode           String         @db.VarChar(10)
   podCode           String         @db.VarChar(10)
   etd               DateTime?      @db.Timestamptz(3)
+  atd               DateTime?      @db.Timestamptz(3)
   eta               DateTime?      @db.Timestamptz(3)
+  ata               DateTime?      @db.Timestamptz(3)
+  mblNo             String?        @db.VarChar(100)
+  hblNo             String?        @db.VarChar(100)
+  completedAt       DateTime?      @db.Timestamptz(3)
   createdById       String?
   createdAt         DateTime       @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
@@ -571,11 +632,59 @@ model Shipment {
   booking   Booking         @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   customer  CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
   createdBy User?           @relation("ShipmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  containers Container[]
+  trackingEvents TrackingEvent[]
   documents Document[]
+  invoices Invoice[]
 
   @@unique([tenantId, shipmentNo])
   @@index([tenantId, customerCompanyId, status])
   @@index([tenantId, bookingId])
+}
+
+model Container {
+  id           String   @id @default(cuid())
+  tenantId     String
+  shipmentId   String
+  containerNo  String   @db.VarChar(20)
+  containerType String  @db.VarChar(20)
+  sealNo       String?  @db.VarChar(50)
+  vgmWeight    Decimal? @db.Decimal(18, 4)
+  pickupAt     DateTime? @db.Timestamptz(3)
+  gateInAt     DateTime? @db.Timestamptz(3)
+  loadedAt     DateTime? @db.Timestamptz(3)
+  dischargedAt DateTime? @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, shipmentId, containerNo])
+  @@index([tenantId, containerNo])
+  @@index([tenantId, shipmentId])
+}
+
+model TrackingEvent {
+  id              String          @id @default(cuid())
+  tenantId        String
+  shipmentId      String
+  eventType       String          @db.VarChar(50)
+  eventTime       DateTime        @db.Timestamptz(3)
+  locationCode    String?         @db.VarChar(10)
+  locationName    String?         @db.VarChar(150)
+  remark          String?         @db.VarChar(500)
+  sourceType      EventSourceType @default(MANUAL)
+  customerVisible Boolean         @default(true)
+  createdById     String?
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  shipment  Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation("TrackingEventCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, shipmentId, eventTime])
+  @@index([tenantId, eventType, eventTime])
 }
 
 model Document {
@@ -583,6 +692,7 @@ model Document {
   tenantId         String
   bookingId        String?
   shipmentId       String?
+  invoiceId        String?
   documentType     String         @db.VarChar(50)
   objectKey        String         @unique @db.VarChar(1000)
   originalFilename String         @db.VarChar(255)
@@ -597,9 +707,62 @@ model Document {
   tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   booking    Booking?  @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   shipment   Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  invoice    Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
   uploadedBy User?     @relation("DocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, bookingId, documentType, version])
+  @@unique([tenantId, shipmentId, documentType, version])
+  @@unique([tenantId, invoiceId, documentType, version])
   @@index([tenantId, shipmentId, documentType, status])
   @@index([tenantId, bookingId, documentType, status])
+  @@index([tenantId, invoiceId, documentType, status])
+}
+
+model Invoice {
+  id                String        @id @default(cuid())
+  tenantId          String
+  invoiceNo         String        @db.VarChar(50)
+  shipmentId        String
+  customerCompanyId String
+  currency          String        @db.VarChar(3)
+  subtotal          Decimal       @db.Decimal(18, 4)
+  taxAmount         Decimal       @default(0) @db.Decimal(18, 4)
+  totalAmount       Decimal       @db.Decimal(18, 4)
+  dueDate           DateTime      @db.Date
+  status            InvoiceStatus @default(DRAFT)
+  issuedAt          DateTime?     @db.Timestamptz(3)
+  confirmedAt       DateTime?     @db.Timestamptz(3)
+  paidAt            DateTime?     @db.Timestamptz(3)
+  voidedAt          DateTime?     @db.Timestamptz(3)
+  createdById       String?
+  createdAt         DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  shipment Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  customer CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  lines    InvoiceLine[]
+  documents Document[]
+
+  @@unique([tenantId, invoiceNo])
+  @@index([tenantId, customerCompanyId, status])
+  @@index([tenantId, shipmentId])
+  @@index([tenantId, dueDate, status])
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  tenantId    String
+  invoiceId   String
+  chargeCode  String  @db.VarChar(50)
+  description String  @db.VarChar(200)
+  quantity    Decimal @default(1) @db.Decimal(18, 4)
+  unitPrice   Decimal @db.Decimal(18, 4)
+  amount      Decimal @db.Decimal(18, 4)
+  currency    String  @db.VarChar(3)
+  sortOrder   Int     @default(0)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, invoiceId])
 }

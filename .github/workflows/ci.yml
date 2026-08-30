@@ -46,9 +46,60 @@ jobs:
       - run: pnpm prisma:validate
         env:
           DATABASE_URL: postgresql://freight:freight@localhost:5432/freight_portal?schema=public
+      - run: pnpm prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://freight:freight@localhost:5432/freight_portal?schema=public
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
         env:
           DATABASE_URL: postgresql://freight:freight@localhost:5432/freight_portal?schema=public
       - run: pnpm build
+      - run: pnpm prisma:seed
+        env:
+          DATABASE_URL: postgresql://freight:freight@localhost:5432/freight_portal?schema=public
+          SEED_DEMO_DATA: 'true'
+          PASSWORD_HASH_PEPPER: ci-demo-password-pepper-32-characters-minimum
+          DEMO_ADMIN_PASSWORD: DemoAdmin!2026
+          DEMO_CUSTOMER_PASSWORD: DemoCustomer!2026
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Start S3-compatible storage for document E2E
+        run: |
+          docker run -d --name freight-e2e-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minio \
+            -e MINIO_ROOT_PASSWORD=ci-minio-secret \
+            minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then exit 0; fi
+            sleep 1
+          done
+          docker logs freight-e2e-minio
+          exit 1
+      - run: pnpm test:e2e
+        env:
+          CI: 'true'
+          NODE_ENV: development
+          DATABASE_URL: postgresql://freight:freight@localhost:5432/freight_portal?schema=public
+          API_INTERNAL_URL: http://127.0.0.1:4000
+          AUTH_ACCESS_TOKEN_SECRET: ci-access-token-secret-at-least-32-characters
+          AUTH_REFRESH_TOKEN_SECRET: ci-refresh-token-secret-at-least-32-characters
+          PASSWORD_HASH_PEPPER: ci-demo-password-pepper-32-characters-minimum
+          S3_ENDPOINT: http://127.0.0.1:9000
+          S3_REGION: us-east-1
+          S3_BUCKET: freight-documents
+          S3_ACCESS_KEY_ID: minio
+          S3_SECRET_ACCESS_KEY: ci-minio-secret
+          S3_FORCE_PATH_STYLE: 'true'
+          E2E_ADMIN_PASSWORD: DemoAdmin!2026
+          E2E_CUSTOMER_PASSWORD: DemoCustomer!2026
+      - name: Upload Playwright evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-evidence
+          path: |
+            playwright-report
+            test-results/playwright
+          if-no-files-found: ignore
+          retention-days: 14

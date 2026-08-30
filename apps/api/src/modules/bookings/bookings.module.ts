@@ -8,6 +8,7 @@ import { DocumentsController } from './documents.controller.js';
 import { DocumentsService } from './documents.service.js';
 import { ShipmentsController } from './shipments.controller.js';
 import { ShipmentsService } from './shipments.service.js';
+import { ShipmentStateMachine } from './shipment-state-machine.js';
 
 @Module({
   controllers: [
@@ -22,6 +23,7 @@ import { ShipmentsService } from './shipments.service.js';
     DocumentStorageService,
     DocumentsService,
     ShipmentsService,
+    ShipmentStateMachine,
   ],
 })
 export class BookingsModule {}

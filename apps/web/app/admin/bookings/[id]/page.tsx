@@ -281,9 +281,13 @@ export default function AdminBookingDetail() {
             </button>
           ))}
           {b.shipments.map((shipment) => (
-            <div className="rounded bg-sidebar px-3 py-2" key={shipment.id}>
+            <Link
+              className="block rounded bg-sidebar px-3 py-2 text-primary hover:underline"
+              href={`/admin/shipments/${shipment.id}`}
+              key={shipment.id}
+            >
               Shipment：{shipment.shipmentNo} · {shipment.status}
-            </div>
+            </Link>
           ))}
           {!documents.length && !b.shipments.length ? (
             <div className="text-muted">暂无 SO 或 Shipment</div>

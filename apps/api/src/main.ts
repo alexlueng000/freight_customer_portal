@@ -6,6 +6,7 @@ import type { Express } from 'express';
 import { AppModule } from './app.module.js';
 import { ApiExceptionFilter } from './shared/errors/api-exception.filter.js';
 import { RequestContextService } from './shared/request-context/request-context.service.js';
+import { PrismaService } from './database/prisma.service.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -18,7 +19,9 @@ async function bootstrap() {
     type: VersioningType.URI,
     defaultVersion: '1',
   });
-  app.useGlobalFilters(new ApiExceptionFilter(app.get(RequestContextService)));
+  app.useGlobalFilters(
+    new ApiExceptionFilter(app.get(RequestContextService), app.get(PrismaService)),
+  );
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

@@ -1,12 +1,12 @@
 # Freight Customer Portal 开发进度日志
 
-> 最后更新：2026-08-29
-> 当前阶段：Phase 4 — Shipment + Document 基础
-> 当前目标：验收 Rate → Quote → Booking → SO Released → Shipment Created 前半段核心链路
+> 最后更新：2026-08-30
+> 当前阶段：Phase 5 — Notifications 子阶段开发中
+> 当前目标：完成邮件生产传输、通知页面与 Branding
 
 ## 1. 项目当前状态
 
-项目基础环境已经建立，客户门户与运营后台界面可以正常运行。Rate、Quote、Booking、SO Document 与 Shipment 建档已经接入真实数据库、鉴权、权限和租户上下文；Container、Tracking、BL、Invoice 等后半段履约链路仍待开发。
+项目基础环境已经建立，客户门户与运营后台界面可以正常运行。Rate、Quote、Booking、SO Document、Shipment、Container、TrackingEvent、BL 版本化与 Invoice/Billing 已接入真实数据库、鉴权、权限、租户上下文及前端页面。
 
 本地开发入口：
 
@@ -32,8 +32,8 @@
 - 已建立 Tenant、User、Role、Permission、UserRole、CustomerCompany、CustomerContact、AuditLog、BusinessNumberCounter 等基础模型。
 - 已加入关键租户一致性约束和数据库触发器，防止跨租户绑定客户、用户和角色。
 - 已新增 RefreshSession 表，用于刷新令牌轮换和重放检测。
-- 当前 15 个 Prisma migration 已写入版本库并应用到本地数据库。
-- Demo seed 可重复执行，已经创建 DEMO 租户、系统角色、权限、演示客户公司、演示用户、Accepted Quote 与 Draft Booking。
+- 当前 22 个 Prisma migration 已写入版本库并应用到本地测试数据库。
+- Demo seed 可重复执行，已经创建 DEMO 租户、系统角色、权限、演示客户公司、演示用户、Accepted Quote、Draft Booking、确定性的 Planned Shipment 与 Issued Invoice。
 
 ### 2.3 后端认证
 
@@ -70,10 +70,14 @@
 
 租户代码：`DEMO`
 
-| 类型       | 邮箱                          | 本地演示密码        | 登录后入口 |
-| ---------- | ----------------------------- | ------------------- | ---------- |
-| 内部管理员 | `admin@demo.freight.local`    | `DemoAdmin!2026`    | `/admin`   |
-| 客户管理员 | `customer@demo.freight.local` | `DemoCustomer!2026` | `/portal`  |
+| 类型         | 邮箱                               | 本地演示密码        | 登录后入口 |
+| ------------ | ---------------------------------- | ------------------- | ---------- |
+| 货代管理员   | `admin@demo.freight.local`         | `DemoAdmin!2026`    | `/admin`   |
+| 货代销售     | `sales@demo.freight.local`         | `DemoAdmin!2026`    | `/admin`   |
+| 货代操作     | `operation@demo.freight.local`     | `DemoAdmin!2026`    | `/admin`   |
+| 货代财务     | `finance@demo.freight.local`       | `DemoAdmin!2026`    | `/admin`   |
+| 客户管理员   | `customer@demo.freight.local`      | `DemoCustomer!2026` | `/portal`  |
+| 客户普通用户 | `customer-user@demo.freight.local` | `DemoCustomer!2026` | `/portal`  |
 
 演示密码仅用于本地开发，不得用于共享、测试或生产环境。
 
@@ -175,13 +179,15 @@
 - 当前批准文档未明确标准售价与客户加价的组合顺序；采用可逆规则：以 `sellAmount` 为基价，缺失时回退到 `costAmount`，再应用 FIXED/PERCENT 客户加价。
 - 金额计算全部使用 Prisma Decimal 并保留最多 4 位小数，不使用 JavaScript 浮点权威计算。
 - 已将 `/portal/rates` 从模拟页切换为真实查询表单和结果表格，覆盖 loading、初始、无结果、错误和权限拒绝状态。
-- “生成报价”按钮已接入 Quote 创建接口，成功后进入真实报价详情。
+- “申请报价”已接入确认流程：客户必须核对方案并填写 1–999 的整数箱量，页面展示按计价单位计算的费用预估后再提交。
 
 ### 2.14 Quote 快照与状态机
 
 - 已按批准 ERD 建立 Quote、QuoteItem、QuoteStatus、租户内月度业务编号和价格快照。
 - 已实现客户报价创建、列表、详情、接受和拒绝接口，并确保客户响应不包含成本字段。
+- Quote 创建接口要求箱量；海运费和 `PER_CONTAINER` 费用按箱量计算，`PER_BL` / `PER_SHIPMENT` 费用只计算一次，QuoteItem 保存数量、单价和金额快照。
 - 已实现独立状态机：DRAFT → SENT → VIEWED → ACCEPTED/REJECTED；开放报价可转 EXPIRED，非法跳转由服务端拒绝。
+- 客户侧将 DRAFT 显示为“待销售确认”；销售发送前禁止客户下载正式 PDF、接受或拒绝，避免将报价申请误认为正式报价。
 - 客户首次查看已发送报价时原子标记 VIEWED；接受操作保存 acceptedAt，并对重复接受提供幂等结果。
 - 已新增后台报价列表、详情、发送和手工过期操作；Sales 查询限制为自己负责的客户报价。
 - 所有状态动作均写入包含 from/to 的 AuditLog；到期报价在客户决策前先持久化为 EXPIRED。
@@ -211,12 +217,75 @@
 - 客户与后台 Booking 详情页均展示 SO 和 Shipment；下载通过带 Bearer Token 的 API 请求完成。
 - DEMO 数据已经实际走通 Submitted → Under Review → Confirmed → SO Released → Shipment Created，并完成真实 MinIO 上传和客户下载验证。
 
+### 2.17 Shipment 履约明细后端
+
+- Shipment 已补齐 ATD/ATA、MBL/HBL 和完成时间字段，并实现独立状态机：PLANNED → IN_PROGRESS → DEPARTED → ARRIVED → COMPLETED，非终态可受控取消。
+- 状态动作使用语义化端点，事务内同步写入系统 TrackingEvent 与包含 before/after 的 AuditLog。
+- 已建立 Container 模型，支持柜号、箱型、封条、VGM 及提柜/进港/装船/卸船时间；柜号按批准格式校验。
+- 已建立 append-oriented TrackingEvent 模型，支持事件类型、时间、地点、备注、来源和客户可见性；客户 API 自动过滤内部节点。
+- Shipment 详情已聚合 Containers、Tracking Timeline 和 Documents；客户响应自动过滤内部文件。
+- 已实现 Shipment 的 DRAFT_BL/FINAL_BL/OTHER 上传、同类型递增版本、旧版本 SUPERSEDED、S3 对象清理和下载授权。
+- Container/TrackingEvent 增加数据库租户一致性触发器；Shipment 文档版本增加租户内唯一约束。
+- 新增 `shipment.manage`、`tracking.manage`、`document.manage` 权限，仅租户管理员、平台管理员和 Operation 默认拥有。
+
+### 2.18 Shipment 履约前端
+
+- 已将后台与客户门户的 Shipment 模拟页面替换为真实 API 列表和详情，支持关键词、状态筛选及 loading、empty、error 状态。
+- 后台详情支持维护船名航次、ETD/ETA、MBL/HBL，新增 Container、追加客户可见/内部 TrackingEvent，并执行 Shipment 状态动作。
+- 后台支持 DRAFT_BL、FINAL_BL 和 OTHER 文件上传、客户可见开关及新版本上传；客户侧只显示和下载服务端授权的文件。
+- 客户 Shipment 详情保持只读，不渲染资料维护、Container、TrackingEvent、状态动作或文件上传控件。
+- Booking 详情中的 Shipment 已链接至真实履约详情页。
+- Web 生产构建改用独立 `.next-build`，不再覆盖 `next dev` 使用的 `.next` 缓存。
+
+### 2.19 Playwright Shipment 自动化基线
+
+- 根工作区已加入 Playwright 配置、Chromium 项目和可独立运行的 `test:e2e:shipment` 脚本。
+- 自动化覆盖内部用户登录、真实 Shipment 列表/详情、维护控件，以及客户用户登录、客户范围列表、只读详情和敏感操作控件不存在。
+- Shipment 用例只读取幂等 DEMO 数据，不执行状态变更、Container 新增、Tracking 写入或文件上传，支持重复运行。
+- 本地运行通过环境变量传入 DEMO 密码；密码不写入源码、配置或测试报告。
+- CI 已加入 migration、幂等 DEMO seed、Chromium 安装和 Shipment E2E，并在失败时保留截图、视频、trace 和 HTML 报告。
+
+### 2.20 Invoice / Billing
+
+- 已按批准 ERD 建立 Invoice、InvoiceLine 与 `DRAFT → ISSUED → CUSTOMER_CONFIRMED → PAID` 状态机，并支持受控 `VOID` 终止状态。
+- 后台可从当前租户 Shipment 创建含多费用行的 Draft Invoice，费用行保存 charge code、说明、数量、单价、币种和公式计算金额；权威汇总使用 Prisma Decimal。
+- 后台支持发布、作废和人工标记收款；客户只可查看本公司已发布账单并执行确认。
+- Invoice 编号通过 tenant + yearMonth 计数器在事务内生成；创建和状态变化均写入 AuditLog。
+- 已接入后台 `/admin/invoices` 与客户 `/portal/billing` 列表/详情页面，包含 loading、empty、error 和状态操作界面。
+- 已通过数据库触发器、服务端 tenant/customer scope 与负向集成测试验证跨租户访问失败。
+
+### 2.21 Notification 基础切片
+
+- 已建立 Notification、EMAIL/IN_APP 渠道及 PENDING/SENT/FAILED 状态，保存收件人、事件类型、payload、尝试次数、发送/失败/已读时间与错误摘要。
+- 已增加 Notification 与 User 的数据库租户一致性触发器，防止跨租户收件人绑定。
+- 已实现当前用户站内通知列表与已读接口：`GET /api/v1/notifications`、`POST /api/v1/notifications/:id/read`。
+- Invoice 发布会在同一数据库事务中为目标客户的 ACTIVE 用户创建站内与邮件通知；邮件任务按 Notification ID 幂等入 BullMQ，配置 3 次指数退避。
+- Worker 会在发送前重新校验 tenant + notification ID，记录尝试次数、成功或失败状态；本地开发提供显式 `EMAIL_DELIVERY_MODE=log`。
+- Invoice 数据库集成测试已验证发布 Invoice 后生成一条站内和一条邮件通知。
+
+### 2.22 Invoice 附件闭环
+
+- Document 已增加明确的 Invoice 关联；数据库约束要求每个 Document 必须且只能归属 Booking、Shipment 或 Invoice 之一。
+- 已增加 Invoice 与 Document 的租户一致性触发器，阻止跨租户附件绑定。
+- 后台可为 Invoice 上传 PDF、PNG、JPEG 附件，单文件最大 10 MB；新版本会将旧版本标记为 SUPERSEDED。
+- Invoice 附件固定为客户可见，客户仅能在本公司已发布账单范围内列出和下载有效版本。
+- 后台和客户 Invoice 详情页均已显示附件；后台支持上传新版本，下载继续复用统一 Document 授权路径并记录审计。
+- 数据库集成测试已覆盖附件创建、客户范围读取和跨租户下载拒绝。
+
+### 2.23 越权访问安全审计
+
+- 统一 API 异常边界会对已认证用户访问 Customer、Rate、Quote、Booking、Shipment、Document、Invoice 时产生的 403/404 记录 `ACCESS_DENIED`。
+- 安全审计归属于发起请求的 tenant 和 user，不查询或暴露被猜测对象所属租户。
+- 审计保存实体类型、目标 ID、HTTP 状态、错误码、方法、路径、request ID、IP 与 User-Agent；不保存请求正文、Token 或文件内容。
+- 未认证请求和非敏感公共路径不会写入租户安全审计；审计写入失败会记录结构化错误，但不替换原始 API 响应。
+- 单元测试覆盖跨租户风格的 Invoice ID 探测以及未认证请求不写审计。
+
 ## 3. 已完成验证
 
 - ESLint：通过。
 - TypeScript typecheck：通过。
 - Next.js / NestJS 生产构建：通过。
-- API 自动化测试：15 个测试套件、58 个测试全部通过；Worker：3 个测试套件、5 个测试全部通过。
+- API 自动化测试：19 个测试套件、65 个测试全部通过；Worker：3 个测试套件、5 个测试全部通过。
 - 已覆盖登录、错误密码、当前用户、刷新令牌轮换、旧令牌重用、租户限定身份和数据库租户约束。
 - 已覆盖客户公司跨租户隔离、同租户代码唯一性、客户账号公司范围、创建审计和权限 Guard。
 - 已覆盖联系人跨租户/跨客户隔离、创建审计和联系方式审计脱敏。
@@ -227,24 +296,31 @@
 - 浏览器验收已覆盖后台运价创建、成本与状态编辑、多条件筛选、筛选空状态和清空筛选，页面无控制台错误。
 - 浏览器验收已覆盖标准模板上传、BullMQ/Worker 异步处理、完成状态轮询和导入后列表刷新。
 - 浏览器验收已覆盖客户账号真实查价、销售价展示和采购成本/供应方/合约号/内部备注不可见。
+- 浏览器验收已覆盖后台 Shipment 列表/详情、完整布局和维护控件，以及客户 Shipment 列表/只读详情与敏感操作控件隐藏。
+- Playwright Shipment E2E：2 个 Chromium 用例全部通过。
 - 数据库集成测试已覆盖 Quote 原子转 Booking、重复转单、Booking 完整性、状态机、SO 可见性、隐藏文件、跨租户下载拒绝和 Shipment 建档。
+- Invoice 状态机与数据库集成测试共 2 个测试套件、3 个测试通过，覆盖 Decimal 汇总、费用行字段、完整状态流、审计和跨租户/跨客户读取拒绝。
+- Playwright Invoice/Billing E2E：后台财务操作与客户只读/确认权限共 2 个 Chromium 用例通过；连同 Shipment 共 4 个用例串行稳定通过。
+- Playwright 完整套件：黄金路径 1 项加 Shipment/Invoice 冒烟 4 项，共 5 个 Chromium 用例串行通过。
 - 真实本地依赖验收已覆盖 MinIO SO 上传、客户授权下载及客户 Shipment 列表读取。
 
 ## 4. 当前未完成事项与风险
 
-- Dashboard、Container、Tracking、通用 Documents、Invoice 和 Billing 页面仍有模拟数据或占位内容；Rate、Quote、Booking、SO 和 Shipment 基础查询已接入真实 API。
+- Dashboard、通用 Documents 等页面仍有模拟数据或占位内容；Rate、Quote、Booking、SO、Shipment 和 Invoice/Billing 已接入真实 API。
 - 通用 permission decorator / guard 已实现，但完整权限矩阵和其他业务模块的敏感操作权限仍需逐模块落地。
-- 前端还没有自动化组件测试和 Playwright E2E 测试基线。
+- 前端仍缺少组件测试；Playwright 已覆盖 Shipment、Invoice 冒烟及完整核心黄金路径。
 - 忘记密码和重置密码尚未实现。
 - 登录失败审计、账号锁定策略、CSP 和更完整的 Security Headers 尚未完成。
 - `RateCharge` V1 规则已确认并实现；仍需在 Rate UAT 中用真实费用样本复核。
 - Quote 发送邮件通知按批准路线图属于 M5 Notifications，本阶段不提前建立完整通知域。
-- 开发环境不要在 `next dev` 运行期间执行 `next build`，否则共用 `.next` 可能导致 Webpack 模块或 CSS 清单错位。
-- 当前 Shipment 仅完成建档和基础查询；船名航次维护、Container、Tracking Timeline、BL 版本/可见性和 Shipment 状态机操作尚未实现。
+- Notification 已接通 Invoice 发布事件与本地 log transport；真实 SMTP/邮件服务商、通知中心 UI、Quote/Booking/Shipment 事件仍未完成。
+- PRD UAT-07 要求的 Invoice 附件、UAT-08 越权拒绝安全日志及完整黄金路径 Playwright 已完成；核心闭环仍需业务 UAT 签署。
+- 仓库 `build` 脚本已使用 `.next-build` 隔离生产构建；自定义 Next.js 构建命令仍应显式设置独立 `NEXT_DIST_DIR`。
+- Shipment 履约后端、前端、冒烟 E2E 和完整黄金路径已接通；仍需使用真实 Container/Tracking/BL 样本完成业务 UAT。
 
 ## 5. 下一步开发计划
 
-Rate + Quote、Booking、SO Released 与 Shipment Created 已形成前半段纵向切片。当前先完成阶段验收，再进入 Shipment 履约明细：
+Rate → Quote → Booking → Shipment → Tracking/Document → Invoice 的持久化与权限纵向切片已经形成。当前先完成各阶段业务 UAT，再进入 Notifications 与 Branding：
 
 ### 5.1 Rate 业务 UAT
 
@@ -277,15 +353,32 @@ Rate + Quote、Booking、SO Released 与 Shipment Created 已形成前半段纵�
 
 ### 5.5 自动化验收
 
-- [ ] 建立 Playwright 浏览器测试基线。
-- [ ] 固化后台创建 Rate → 客户查价 → 生成 Quote → 后台发送 → 客户查看/接受的黄金路径。
-- [ ] 在 CI 中保留失败截图、trace 或视频证据。
+- [x] 建立 Playwright 浏览器测试基线，并接入 CI 失败证据留存。
+- [x] 固化后台/客户 Shipment 列表、详情、维护权限与只读权限冒烟路径。
+- [x] 固化 Rate → Quote → Booking → SO → Shipment → 两个 Container → Tracking → BL → Invoice → 附件 → 客户确认完整黄金路径。
+- [x] 在 CI 中保留失败截图、trace、视频和 HTML 报告。
+
+### 5.6 Invoice / Billing
+
+- [x] 建立 Invoice、InvoiceLine、Decimal 汇总、租户约束和业务编号迁移。
+- [x] 完成后台创建/发布/作废/标记收款及客户查看/确认。
+- [x] 完成状态机、审计、跨租户数据库测试及后台/客户 Playwright E2E。
+- [x] 将全量 Playwright E2E 接入 CI，并通过串行执行避免触发认证限流。
+- [ ] 按 [Invoice/Billing 阶段验收清单](./Invoice_Billing_Acceptance_Checklist_V1_CN.md) 完成业务 UAT 与签署。
+
+### 5.7 Notifications 与 Branding
+
+- [x] 建立 Notification 持久化、租户约束、站内列表/已读 API 和 BullMQ 邮件任务基线。
+- [x] Invoice 发布事件生成站内与邮件 Notification message log。
+- [ ] 接入批准的生产邮件传输并验证重试、失败恢复和投递日志。
+- [ ] 接入 Quote、Booking 与 Shipment 的批准通知事件。
+- [ ] 完成通知中心前端与未读状态。
+- [ ] 完成租户品牌名、Logo、主色和自定义域名配置。
 
 ## 6. 后续里程碑
 
 当前后续里程碑：
 
-1. Rate/Quote 与 Booking/SO/Shipment 业务 UAT。
-2. Shipment 维护、Container、TrackingEvent 和 BL Documents。
-3. Invoice、Notifications 和 Branding。
-4. 核心黄金路径 Playwright E2E 与试点加固。
+1. Rate/Quote、Booking/SO/Shipment 与 Invoice/Billing 业务 UAT。
+2. Notifications 和 Branding。
+3. 安全、可观测性、备份恢复与试点加固。

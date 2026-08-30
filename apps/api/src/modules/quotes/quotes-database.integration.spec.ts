@@ -162,18 +162,22 @@ describe('quote database integration', () => {
 
   it('creates immutable cost and sell snapshots while hiding cost from customer reads', async () => {
     const created = await runAs(tenantA, userA, customerA, () =>
-      service.create({ rateId: rateA, containerType: '40HQ' }),
+      service.create({ rateId: rateA, containerType: '40HQ', quantity: 2 }),
     );
     expect(created.quoteNo).toMatch(/^QT\d{12}$/);
     quoteId = created.id;
-    expect(created.totalAmount.toString()).toBe('1360');
+    expect(created.totalAmount.toString()).toBe('2700');
+    await expect(
+      runAs(tenantA, userA, customerA, () => service.getPdfJobData(created.id, false)),
+    ).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_SENT' } });
     await prisma.ratePrice.update({
       where: { rateId_containerType: { rateId: rateA, containerType: '40HQ' } },
       data: { costAmount: new Prisma.Decimal(9999), sellAmount: new Prisma.Decimal(9999) },
     });
     const detail = await runAs(tenantA, userA, customerA, () => service.get(created.id));
-    expect(detail.items.map((item) => item.amount.toString())).toEqual(['1300', '20', '40']);
-    expect(detail.totalAmount.toString()).toBe('1360');
+    expect(detail.items.map((item) => item.quantity.toString())).toEqual(['2', '1', '2']);
+    expect(detail.items.map((item) => item.amount.toString())).toEqual(['2600', '20', '80']);
+    expect(detail.totalAmount.toString()).toBe('2700');
     expect(JSON.stringify(detail)).not.toContain('costAmount');
     const stored = await prisma.quoteItem.findFirstOrThrow({ where: { quoteId: created.id } });
     expect(stored.costAmount?.toString()).toBe('1000');
@@ -188,7 +192,7 @@ describe('quote database integration', () => {
     ).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
     await expect(
       runAs(tenantB, userB, customerB, () =>
-        service.create({ rateId: rateA, containerType: '40HQ' }),
+        service.create({ rateId: rateA, containerType: '40HQ', quantity: 1 }),
       ),
     ).rejects.toMatchObject({ response: { code: 'RATE_NOT_AVAILABLE' } });
   });
@@ -202,7 +206,7 @@ describe('quote database integration', () => {
         items: [{ itemId: item.id, unitPrice: '1400' }],
       }),
     );
-    expect(updated.totalAmount.toString()).toBe('1460');
+    expect(updated.totalAmount.toString()).toBe('2900');
     expect(updated.version).toBe(2);
     const stored = await prisma.quoteItem.findUniqueOrThrow({ where: { id: item.id } });
     expect(stored.originalUnitPrice?.toString()).toBe('1300');
@@ -212,7 +216,7 @@ describe('quote database integration', () => {
     });
     expect(audit.afterData).toMatchObject({
       reason: 'Approved sales adjustment',
-      totalAmount: '1460',
+      totalAmount: '2900',
     });
   });
   it('enforces send, viewed and accept transitions with idempotent acceptance', async () => {
@@ -230,7 +234,7 @@ describe('quote database integration', () => {
   });
   it('expires overdue quotes before a customer can accept them', async () => {
     const created = await runAs(tenantA, userA, customerA, () =>
-      service.create({ rateId: rateA, containerType: '40HQ' }),
+      service.create({ rateId: rateA, containerType: '40HQ', quantity: 1 }),
     );
     await runInternal(() => service.send(created.id));
     await prisma.quote.update({ where: { id: created.id }, data: { validUntil: day(-1) } });
