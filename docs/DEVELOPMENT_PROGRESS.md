@@ -1,8 +1,8 @@
 # Freight Customer Portal 开发进度日志
 
-> 最后更新：2026-08-30
-> 当前阶段：Phase 5 — Notifications 子阶段开发中
-> 当前目标：完成邮件生产传输、通知页面与 Branding
+> 最后更新：2026-08-31
+> 当前阶段：Phase 5 功能闭环完成，进入业务 UAT 与 Pilot Hardening
+> 当前目标：完成真实样本 UAT、关闭 P1 缺口，并推进生产邮件、通知页面与 Branding
 
 ## 1. 项目当前状态
 
@@ -281,6 +281,8 @@
 - 单元测试覆盖跨租户风格的 Invoice ID 探测以及未认证请求不写审计。
 
 ## 3. 已完成验证
+
+> 2026-08-31 复核说明：当天 `pnpm lint` 与 `pnpm typecheck` 通过。完整 `pnpm test` 因本地 PostgreSQL `localhost:5433` 未运行而在数据库初始化阶段中止；下列 API/Worker/E2E 通过数量是 2026-08-30 及此前已保存的验证基线，不代表 2026-08-31 已重新全量通过。详见 [2026-08-31 代码与测试审阅报告](./TEST_REPORT_2026-08-31_CN.md)。
 
 - ESLint：通过。
 - TypeScript typecheck：通过。

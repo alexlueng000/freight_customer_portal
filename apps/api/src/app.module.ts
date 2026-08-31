@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { resolve } from 'node:path';
 import { validateEnvironment } from './config/environment.js';
 import { PrismaModule } from './database/prisma.module.js';
 import { AuthGuard } from './modules/auth/auth.guard.js';
@@ -21,6 +22,7 @@ import { RequestContextModule } from './shared/request-context/request-context.m
 @Module({
   imports: [
     ConfigModule.forRoot({
+      envFilePath: [resolve(process.cwd(), '.env'), resolve(process.cwd(), '../../.env')],
       isGlobal: true,
       validate: validateEnvironment,
     }),

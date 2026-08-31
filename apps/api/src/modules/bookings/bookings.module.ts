@@ -25,5 +25,6 @@ import { ShipmentStateMachine } from './shipment-state-machine.js';
     ShipmentsService,
     ShipmentStateMachine,
   ],
+  exports: [DocumentStorageService],
 })
 export class BookingsModule {}

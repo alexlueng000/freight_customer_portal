@@ -26,8 +26,8 @@ export class DocumentStorageService implements OnModuleDestroy {
   private bucketReady?: Promise<void>;
 
   async upload(objectKey: string, file: Express.Multer.File) {
-    await this.ensureBucket();
     try {
+      await this.ensureBucket();
       await this.s3.send(
         new PutObjectCommand({
           Bucket: this.bucket,
@@ -36,11 +36,16 @@ export class DocumentStorageService implements OnModuleDestroy {
           ContentType: file.mimetype,
         }),
       );
-    } catch {
-      throw new ServiceUnavailableException({
-        code: 'DOCUMENT_STORAGE_UNAVAILABLE',
-        message: 'Document storage is unavailable',
-      });
+    } catch (error) {
+      throw this.unavailable(error);
+    }
+  }
+
+  async checkReady() {
+    try {
+      await this.ensureBucket();
+    } catch (error) {
+      throw this.unavailable(error);
     }
   }
 
@@ -63,14 +68,51 @@ export class DocumentStorageService implements OnModuleDestroy {
   }
 
   private ensureBucket() {
-    this.bucketReady ??= this.s3
-      .send(new HeadBucketCommand({ Bucket: this.bucket }))
-      .then(() => undefined)
-      .catch(async (error: { $metadata?: { httpStatusCode?: number } }) => {
-        if (error.$metadata?.httpStatusCode !== 404) throw error;
-        await this.s3.send(new CreateBucketCommand({ Bucket: this.bucket }));
-      });
+    // Validate before the SDK falls back to an unintended default AWS endpoint.
+    this.assertConfigured();
+    this.bucketReady ??= this.prepareBucket().catch((error: unknown) => {
+      // A rejected cached promise would keep storage unavailable after MinIO recovers.
+      this.bucketReady = undefined;
+      throw error;
+    });
     return this.bucketReady;
+  }
+
+  private async prepareBucket() {
+    try {
+      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } catch (error) {
+      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+        ?.httpStatusCode;
+      if (status !== 404) throw error;
+      await this.s3.send(new CreateBucketCommand({ Bucket: this.bucket }));
+    }
+  }
+
+  private assertConfigured() {
+    const missing = [
+      ['S3_ENDPOINT', process.env.S3_ENDPOINT],
+      ['S3_ACCESS_KEY_ID', process.env.S3_ACCESS_KEY_ID],
+      ['S3_SECRET_ACCESS_KEY', process.env.S3_SECRET_ACCESS_KEY],
+    ]
+      .filter(([, value]) => !value)
+      .map(([key]) => key);
+    if (missing.length) {
+      throw new ServiceUnavailableException({
+        code: 'DOCUMENT_STORAGE_NOT_CONFIGURED',
+        message: '文件存储服务尚未配置，请联系系统管理员。',
+        details: { missing },
+      });
+    }
+  }
+
+  private unavailable(error: unknown) {
+    if (error instanceof ServiceUnavailableException) return error;
+    return new ServiceUnavailableException({
+      code: 'DOCUMENT_STORAGE_UNAVAILABLE',
+      message: '文件存储服务暂时不可用，请稍后重试或联系系统管理员。',
+      details: { dependency: 's3' },
+    });
   }
 
   onModuleDestroy() {

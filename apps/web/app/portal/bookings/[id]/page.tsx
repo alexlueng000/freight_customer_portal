@@ -42,6 +42,12 @@ interface DocumentRecord {
   originalFilename: string;
   version: number;
 }
+type FieldErrors = Partial<Record<keyof Booking | 'bookingContact' | 'containerRequests', string>>;
+interface ApiErrorPayload {
+  code?: string;
+  message?: string;
+  details?: { errors?: string[]; missing?: string[] };
+}
 export default function BookingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { apiFetch } = useAuth();
@@ -50,6 +56,8 @@ export default function BookingDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,35 +87,39 @@ export default function BookingDetailPage() {
   }, [load]);
   const change = (key: keyof Booking, value: unknown) =>
     setForm((v) => (v ? { ...v, [key]: value } : v));
+  const saveDraft = async (currentForm: Booking) => {
+    const r = await apiFetch(`/api/v1/bookings/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        commodity: currentForm.commodity,
+        packages: Number(currentForm.packages),
+        grossWeight: currentForm.grossWeight,
+        volumeCbm: currentForm.volumeCbm,
+        isDangerousGoods: currentForm.isDangerousGoods,
+        shipperName: currentForm.shipperName,
+        shipperAddress: currentForm.shipperAddress,
+        bookingContactName: currentForm.bookingContactName,
+        bookingContactEmail: currentForm.bookingContactEmail || undefined,
+        bookingContactPhone: currentForm.bookingContactPhone || undefined,
+        containerRequests: currentForm.containerRequests.map((c) => ({
+          containerType: c.containerType,
+          quantity: Number(c.quantity),
+          weightPerContainer: c.weightPerContainer || undefined,
+          remark: c.remark || undefined,
+        })),
+      }),
+    });
+    const payload = (await r.json()) as ApiErrorPayload;
+    if (!r.ok) throw new Error(formatApiError(payload, '保存失败。'));
+  };
   const save = async () => {
     if (!form) return;
     setBusy(true);
     setError('');
+    setFieldErrors({});
     try {
-      const r = await apiFetch(`/api/v1/bookings/${id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          commodity: form.commodity,
-          packages: Number(form.packages),
-          grossWeight: form.grossWeight,
-          volumeCbm: form.volumeCbm,
-          isDangerousGoods: form.isDangerousGoods,
-          shipperName: form.shipperName,
-          shipperAddress: form.shipperAddress,
-          bookingContactName: form.bookingContactName,
-          bookingContactEmail: form.bookingContactEmail || undefined,
-          bookingContactPhone: form.bookingContactPhone || undefined,
-          containerRequests: form.containerRequests.map((c) => ({
-            containerType: c.containerType,
-            quantity: Number(c.quantity),
-            weightPerContainer: c.weightPerContainer || undefined,
-            remark: c.remark || undefined,
-          })),
-        }),
-      });
-      const p = (await r.json()) as { message?: string };
-      if (!r.ok) throw new Error(p.message ?? '保存失败。');
+      await saveDraft(form);
       await load();
     } catch (e) {
       setError((e as { message?: string }).message ?? '保存失败。');
@@ -116,22 +128,52 @@ export default function BookingDetailPage() {
     }
   };
   const action = async (name: 'submit' | 'cancel') => {
+    if (!form) return false;
     setBusy(true);
     setError('');
+    setFieldErrors({});
     try {
+      if (name === 'submit') {
+        const validationErrors = validateForSubmit(form);
+        if (Object.keys(validationErrors).length) {
+          setFieldErrors(validationErrors);
+          setError('请补充或修正下方标红的必填信息后再提交。');
+          return false;
+        }
+        await saveDraft(form);
+      }
       const r = await apiFetch(`/api/v1/bookings/${id}/${name}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ remark: name === 'cancel' ? '客户取消订舱' : undefined }),
       });
-      const p = (await r.json()) as { message?: string };
-      if (!r.ok) throw new Error(p.message ?? '操作失败。');
+      const p = (await r.json()) as ApiErrorPayload;
+      if (!r.ok) {
+        if (p.code === 'BOOKING_INCOMPLETE') setFieldErrors(mapMissingFields(p.details?.missing));
+        throw new Error(formatApiError(p, '操作失败。'));
+      }
       await load();
+      return true;
     } catch (e) {
       setError((e as { message?: string }).message ?? '操作失败。');
+      return false;
     } finally {
       setBusy(false);
     }
+  };
+  const openSubmitConfirmation = () => {
+    if (!form) return;
+    setError('');
+    const validationErrors = validateForSubmit(form);
+    setFieldErrors(validationErrors);
+    if (Object.keys(validationErrors).length) {
+      setError('请补充或修正下方标红的必填信息后再提交。');
+      return;
+    }
+    setConfirmingSubmit(true);
+  };
+  const confirmSubmit = async () => {
+    if (await action('submit')) setConfirmingSubmit(false);
   };
   const downloadDocument = async (document: DocumentRecord) => {
     const response = await apiFetch(`/api/v1/documents/${document.id}/download`);
@@ -170,7 +212,7 @@ export default function BookingDetailPage() {
                 <button className={secondary} disabled={busy} onClick={() => void save()}>
                   保存草稿
                 </button>
-                <button className={primary} disabled={busy} onClick={() => void action('submit')}>
+                <button className={primary} disabled={busy} onClick={openSubmitConfirmation}>
                   提交审核
                 </button>
               </>
@@ -196,17 +238,21 @@ export default function BookingDetailPage() {
         <Fact label="状态备注" value={booking.lastStatusRemark ?? '—'} />
       </section>
       <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-2">
-        <Field label="品名 *">
+        <div className="sm:col-span-2 rounded bg-sidebar px-3 py-2 text-sm text-muted">
+          标有 <span className="font-bold text-danger">*</span>{' '}
+          的项目为必填项；联系人邮箱和电话至少填写一项。
+        </div>
+        <Field label="品名" required error={fieldErrors.commodity}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.commodity)}
             disabled={!editable}
             value={form.commodity ?? ''}
             onChange={(e) => change('commodity', e.target.value)}
           />
         </Field>
-        <Field label="件数 *">
+        <Field label="件数" required error={fieldErrors.packages}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.packages)}
             disabled={!editable}
             type="number"
             min="1"
@@ -214,60 +260,60 @@ export default function BookingDetailPage() {
             onChange={(e) => change('packages', e.target.value)}
           />
         </Field>
-        <Field label="毛重 KG *">
+        <Field label="毛重 KG" required error={fieldErrors.grossWeight}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.grossWeight)}
             disabled={!editable}
             inputMode="decimal"
             value={form.grossWeight ?? ''}
             onChange={(e) => change('grossWeight', e.target.value)}
           />
         </Field>
-        <Field label="体积 CBM *">
+        <Field label="体积 CBM" required error={fieldErrors.volumeCbm}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.volumeCbm)}
             disabled={!editable}
             inputMode="decimal"
             value={form.volumeCbm ?? ''}
             onChange={(e) => change('volumeCbm', e.target.value)}
           />
         </Field>
-        <Field label="发货人名称 *">
+        <Field label="发货人名称" required error={fieldErrors.shipperName}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.shipperName)}
             disabled={!editable}
             value={form.shipperName ?? ''}
             onChange={(e) => change('shipperName', e.target.value)}
           />
         </Field>
-        <Field label="订舱联系人 *">
+        <Field label="订舱联系人" required error={fieldErrors.bookingContactName}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.bookingContactName)}
             disabled={!editable}
             value={form.bookingContactName ?? ''}
             onChange={(e) => change('bookingContactName', e.target.value)}
           />
         </Field>
-        <Field label="联系人邮箱">
+        <Field label="联系人邮箱" error={fieldErrors.bookingContact}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.bookingContact)}
             disabled={!editable}
             type="email"
             value={form.bookingContactEmail ?? ''}
             onChange={(e) => change('bookingContactEmail', e.target.value)}
           />
         </Field>
-        <Field label="联系人电话">
+        <Field label="联系人电话" error={fieldErrors.bookingContact}>
           <input
-            className={input}
+            className={inputClass(fieldErrors.bookingContact)}
             disabled={!editable}
             value={form.bookingContactPhone ?? ''}
             onChange={(e) => change('bookingContactPhone', e.target.value)}
           />
         </Field>
-        <Field label="发货人地址 *" wide>
+        <Field label="发货人地址" required error={fieldErrors.shipperAddress} wide>
           <textarea
-            className={`${input} min-h-24 py-2`}
+            className={`${inputClass(fieldErrors.shipperAddress)} min-h-24 py-2`}
             disabled={!editable}
             value={form.shipperAddress ?? ''}
             onChange={(e) => change('shipperAddress', e.target.value)}
@@ -307,7 +353,12 @@ export default function BookingDetailPage() {
         </div>
       </section>
       <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">箱量需求 *</h2>
+        <h2 className="font-semibold">
+          箱量需求 <span className="text-danger">*</span>
+        </h2>
+        {fieldErrors.containerRequests ? (
+          <p className="mt-1 text-sm text-danger">{fieldErrors.containerRequests}</p>
+        ) : null}
         <div className="mt-4 space-y-3">
           {form.containerRequests.map((c, i) => (
             <div className="grid gap-3 sm:grid-cols-4" key={`${c.containerType}-${i}`}>
@@ -372,6 +423,60 @@ export default function BookingDetailPage() {
           ))}
         </div>
       </section>
+      {confirmingSubmit ? (
+        <div
+          aria-labelledby="submit-booking-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
+          role="dialog"
+        >
+          <div className="w-full max-w-lg rounded border border-border bg-surface shadow-xl">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="text-base font-semibold" id="submit-booking-title">
+                确认提交订舱审核
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                提交后将发送给货代操作团队审核，当前草稿将不能继续编辑。
+              </p>
+            </div>
+            <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2 px-5 py-4 text-sm">
+              <dt className="text-muted">提交给</dt>
+              <dd className="font-semibold text-primary">货代操作团队（Operation）</dd>
+              <dt className="text-muted">订舱编号</dt>
+              <dd className="font-medium">{booking.bookingNo}</dd>
+              <dt className="text-muted">航线</dt>
+              <dd>
+                {booking.polCode} → {booking.podCode}
+              </dd>
+              <dt className="text-muted">箱量需求</dt>
+              <dd>{formatContainerRequests(form.containerRequests)}</dd>
+              <dt className="text-muted">货物</dt>
+              <dd>{form.commodity}</dd>
+            </dl>
+            <div className="rounded bg-sidebar px-5 py-3 text-sm text-muted">
+              操作团队审核后会确认或拒绝订舱；确认后将继续处理 SO 和 Shipment。
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button
+                className={secondary}
+                disabled={busy}
+                onClick={() => setConfirmingSubmit(false)}
+                type="button"
+              >
+                返回检查
+              </button>
+              <button
+                className={primary}
+                disabled={busy}
+                onClick={() => void confirmSubmit()}
+                type="button"
+              >
+                {busy ? '提交中…' : '确认提交给操作团队'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -393,22 +498,89 @@ function Fact({
 }
 function Field({
   label,
+  required,
+  error,
   wide,
   children,
 }: {
   label: string;
+  required?: boolean;
+  error?: string;
   wide?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <label className={wide ? 'sm:col-span-2' : ''}>
-      <span className="mb-1 block text-sm font-medium">{label}</span>
+      <span className="mb-1 block text-sm font-medium">
+        {label} {required ? <span className="font-bold text-danger">*</span> : null}
+      </span>
       {children}
+      {error ? <span className="mt-1 block text-sm text-danger">{error}</span> : null}
     </label>
   );
 }
 const input =
   'h-10 w-full rounded border border-border bg-surface px-3 text-sm disabled:bg-sidebar';
+const inputClass = (error?: string) =>
+  `${input} ${error ? 'border-danger bg-danger/5 ring-1 ring-danger/20' : ''}`;
 const primary =
   'h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40';
 const secondary = 'h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40';
+
+function validateForSubmit(form: Booking): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!form.commodity?.trim()) errors.commodity = '请输入品名。';
+  if (!Number.isInteger(Number(form.packages)) || Number(form.packages) < 1)
+    errors.packages = '请输入大于或等于 1 的整数。';
+  if (!isPositiveDecimal(form.grossWeight)) errors.grossWeight = '请输入大于 0 的毛重。';
+  if (!isPositiveDecimal(form.volumeCbm)) errors.volumeCbm = '请输入大于 0 的体积。';
+  if (!form.shipperName?.trim()) errors.shipperName = '请输入发货人名称。';
+  if (!form.shipperAddress?.trim()) errors.shipperAddress = '请输入发货人地址。';
+  if (!form.bookingContactName?.trim()) errors.bookingContactName = '请输入订舱联系人。';
+  if (!form.bookingContactEmail?.trim() && !form.bookingContactPhone?.trim())
+    errors.bookingContact = '联系人邮箱和电话至少填写一项。';
+  if (form.bookingContactEmail && !/^\S+@\S+\.\S+$/.test(form.bookingContactEmail))
+    errors.bookingContact = '请输入有效的联系人邮箱。';
+  if (
+    !form.containerRequests.length ||
+    form.containerRequests.some(
+      (item) => !item.containerType.trim() || !Number.isInteger(item.quantity) || item.quantity < 1,
+    )
+  )
+    errors.containerRequests = '请至少填写一条有效的箱型和箱量，箱量必须大于或等于 1。';
+  return errors;
+}
+
+function isPositiveDecimal(value: string | null) {
+  return Boolean(value && /^\d{1,14}(?:\.\d{1,4})?$/.test(value) && Number(value) > 0);
+}
+
+function mapMissingFields(missing: string[] = []): FieldErrors {
+  const labels: Record<string, [keyof FieldErrors, string]> = {
+    commodity: ['commodity', '请输入品名。'],
+    packages: ['packages', '请输入件数。'],
+    grossWeight: ['grossWeight', '请输入毛重。'],
+    volumeCbm: ['volumeCbm', '请输入体积。'],
+    shipperName: ['shipperName', '请输入发货人名称。'],
+    shipperAddress: ['shipperAddress', '请输入发货人地址。'],
+    bookingContactName: ['bookingContactName', '请输入订舱联系人。'],
+    bookingContactEmailOrPhone: ['bookingContact', '联系人邮箱和电话至少填写一项。'],
+    containerRequests: ['containerRequests', '请至少填写一条箱量需求。'],
+  };
+  return missing.reduce<FieldErrors>((result, field) => {
+    const mapped = labels[field];
+    if (mapped) result[mapped[0]] = mapped[1];
+    return result;
+  }, {});
+}
+
+function formatApiError(payload: ApiErrorPayload, fallback: string) {
+  if (payload.code === 'BOOKING_INCOMPLETE') return '订舱资料不完整，请检查标红的必填项。';
+  const firstValidationError = payload.details?.errors?.[0];
+  if (firstValidationError) return `资料校验失败：${firstValidationError}`;
+  return payload.message ?? fallback;
+}
+
+function formatContainerRequests(items: Container[]) {
+  return items.map((item) => `${item.containerType} × ${item.quantity}`).join('、');
+}

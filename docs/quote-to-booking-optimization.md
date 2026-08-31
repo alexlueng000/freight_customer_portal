@@ -35,6 +35,95 @@ Quote = ACCEPTED
 
 > **基于 Accepted Quote 自动继承数据，只让客户补充真正缺少的订舱信息。**
 
+## 1.1 UAT 补充结论：降低客户填写负担（P0）
+
+**发现时间：** 2026-08-31
+
+**发现阶段：** 客户 Booking Draft → Shipment 闭环手工测试
+
+**优先级：** P0
+
+**实施时机：** 当前测试闭环完成后立即优化；本轮先记录，不中断现有闭环测试。
+
+手工测试中，客户需要在同一页面填写品名、件数、毛重、体积、发货人名称、发货人地址、订舱联系人、邮箱、电话、危险品等大量字段，同时页面还提前展示尚未发生的 SO 与 Shipment 信息。
+
+测试数据中已经出现为了通过必填校验而输入无业务意义内容的情况，例如发货人名称或联系人使用简单数字。这说明当前交互虽然能够强制字段非空，但不能保证业务数据真实，反而会提高客户放弃率、错误率和客服沟通成本。
+
+产品决策：
+
+> Booking 页面不得把系统已经知道、可以从 Quote 继承、可以从当前用户带入或可以从常用资料复用的信息，重复要求客户手工填写。
+
+字段应按以下三类处理：
+
+### A. 系统自动继承并锁定
+
+客户不填写，只负责核对：
+
+```text
+Source Quote / Quote Number
+POL / POD
+Carrier / Service
+ETD
+Container Type
+Container Quantity
+Quote 运输方案与价格摘要
+```
+
+### B. 默认带入或从地址簿选择
+
+客户不应每票从零输入：
+
+```text
+Shipper Name
+Shipper Address
+Booking Contact Name
+Booking Contact Email
+Booking Contact Phone
+```
+
+处理要求：
+
+- Booking Contact 默认使用当前登录用户及其联系方式。
+- Shipper 默认使用客户公司常用发货人；支持从 Shipper Address Book 选择。
+- 客户只在资料变化时切换、编辑或新增，不要求重复录入。
+- 自动带入的数据仍允许客户在提交前确认，避免使用过期联系方式。
+
+### C. 每票必须由客户确认的最小变量
+
+货代不能替客户猜测，但页面应保持最小化：
+
+```text
+Commodity
+Package Type
+Package Quantity
+Gross Weight
+Volume CBM
+Cargo Ready Date
+Dangerous Goods Yes / No
+Special Instructions（选填）
+```
+
+对于尚未准备完整资料的客户，应支持保存草稿；是否允许部分字段在“提交订舱”后补充，需要在实施前结合业务 UAT 确认，不得静默降低后端数据完整性要求。
+
+页面精简要求：
+
+- DRAFT 阶段隐藏 `SO 与 Shipment` 空状态区块。
+- `提交审核` 改为客户语言 `提交订舱`。
+- DRAFT 阶段的 `取消订舱` 改为 `删除草稿`。
+- 页面首先展示来源 Quote 与已经自动带入的信息，让客户明确无需重复填写。
+- 必填项只保留真正阻塞订舱处理的字段；选填项不得伪装成必填。
+- 字段校验必须展示具体中文原因，不能只显示 `Request validation failed`。
+
+P0 验收标准：
+
+1. 客户从 Accepted Quote 创建 Booking 后，航线、船司、ETD、箱型和箱量自动继承且无需重填。
+2. 当前用户的联系人姓名、邮箱和电话自动带入；客户可以确认或切换联系人。
+3. 已保存的 Shipper 可以直接选择；同一客户下一票不需要重复输入完整发货人资料。
+4. DRAFT 页面不显示无操作价值的 SO/Shipment 空状态。
+5. 客户只填写每票变化的最少货物资料即可提交，不需要使用无意义占位值绕过校验。
+6. 提交失败时页面直接指出具体字段和修改方法。
+7. 自动化测试覆盖 Quote 信息继承、联系人自动带入、Shipper 复用、必填校验和 DRAFT 页面精简。
+
 ---
 
 # 2. 核心产品原则
@@ -946,6 +1035,62 @@ SHP202609000021
 [查看 Shipment]
 ```
 
+## 29.1 SO 来源与上传/放出流程（UAT P0）
+
+SO 不是本系统自动生成的文件。V1 不接船公司订舱 API/EDI，SO 通常由船公司、订舱代理或 NVOCC 在舱位确认后通过外部网站、邮件或代理渠道返回，再由 Operation 上传到门户。
+
+页面必须直接解释该来源，不能只显示一个没有上下文的文件选择框。建议文案：
+
+```text
+上传船公司/订舱代理返回的 SO
+
+请从船公司网站、邮件或订舱代理处取得订舱确认文件后上传。
+系统不会自动生成 SO。
+```
+
+当前“上传并放出 SO”把内部归档与客户授权合并为一个动作，不符合文档可见性安全要求。优化后拆分为：
+
+```text
+1. 上传 SO
+   → 创建 Document 版本
+   → 默认仅内部可见
+
+2. 内部核对
+   → 检查 Booking、客户、文件名、版本和内容
+
+3. 放给客户
+   → 二次确认
+   → customerVisible = true
+   → 写入 AuditLog
+```
+
+建议展示和记录：
+
+```text
+SO Number
+SO Source：Carrier / Booking Agent / NVOCC
+Carrier / Agent
+Received At
+CY Cut-off
+SI Cut-off
+VGM Cut-off
+Uploaded By / Uploaded At
+Version
+Customer Visibility
+```
+
+建议流程语义：
+
+```text
+CONFIRMED
+→ 等待外部 SO
+→ SO 已上传（内部可见）
+→ SO 已放给客户
+→ 可创建 Shipment
+```
+
+具体使用 Booking Status、Document Status 还是独立可见性动作表达，需要在实施前核对批准 ERD；不得仅为了前端显示直接扩展状态枚举。客户下载仍必须同时校验 tenant、customer company、Document 状态和客户可见性。
+
 ---
 
 # 30. Quote Snapshot 继承
@@ -1252,6 +1397,16 @@ SUBMITTED：
 本轮必须完成：
 
 ```text
+降低客户填写负担（UAT P0）
+
+合并无业务内容的内部双步骤：
+SUBMITTED → 确认订舱 / 拒绝订舱
+不再强制先执行“开始审核”
+
+明确 SO 来自船公司/订舱代理/NVOCC
+拆分“上传 SO”与“放给客户”
+上传后默认内部可见，核对后再发布
+
 显示 Source Quote
 
 显示并锁定：
@@ -1276,6 +1431,10 @@ Quote → Booking Duplicate Protection
 Booking Status 统一
 ```
 
+实施排期说明：上述 P0 已经确认，但为避免在当前 Rate → Quote → Booking → Shipment → Document → Invoice 手工测试中途改变数据结构和页面行为，先完成现有测试闭环并保存问题证据；闭环完成后，本优化作为 Booking 第一优先级实施。
+
+内部审核流程补充决策：当前 `SUBMITTED → UNDER_REVIEW → CONFIRMED` 的两个页面和业务内容完全相同，“开始审核”没有处理人认领、审核清单、资料补充、SLA 或记录锁定，因此 V1 新流程应直接允许 Operation 从 `SUBMITTED` 确认或拒绝。`UNDER_REVIEW` 只为历史数据兼容保留；未来若重新启用，必须先定义它独立且可验收的业务价值。
+
 ---
 
 # 40. P1
@@ -1283,6 +1442,9 @@ Booking Status 统一
 建议后续：
 
 ```text
+Booking 操作按有效权限显示
+Sales 只读，Operation 执行审核与 Shipment 操作
+
 Address Book
 Consignee / Notify Party
 Booking Timeline
@@ -1291,6 +1453,8 @@ Special Instructions
 SO Information
 Shipment Link
 ```
+
+权限可见性要求：页面操作必须同时满足“当前对象状态允许”和“当前用户拥有对应服务端权限”。不得只根据 `booking.status` 显示按钮，再依赖点击后的 403 作为正常交互。前端隐藏或只读展示不替代服务端 Guard；`booking.manage`、`shipment.create` 等权限仍必须由 API 强制执行。
 
 ---
 
