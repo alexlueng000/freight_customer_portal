@@ -31,6 +31,7 @@ describe('rate import processor', () => {
     await prisma.ratePrice.deleteMany({ where: { tenantId } });
     await prisma.rate.deleteMany({ where: { tenantId } });
     await prisma.rateImportJob.deleteMany({ where: { tenantId } });
+    await prisma.businessNumberCounter.deleteMany({ where: { tenantId } });
     await prisma.user.deleteMany({ where: { tenantId } });
     await prisma.tenant.delete({ where: { id: tenantId } });
     await prisma.$disconnect();
@@ -117,6 +118,24 @@ describe('rate import processor', () => {
     await expect(prisma.rate.count({ where: { tenantId, rateNo: 'IMPORT-VALID' } })).resolves.toBe(
       1,
     );
+  });
+
+  it('persists a confirmed normalized preview and generates a concurrency-safe rate number', async () => {
+    const importJob = await prisma.rateImportJob.create({ data: { tenantId, originalFileName: 'mapped.xlsx', createdById: actorUserId } });
+    await processRateImport(prisma, {
+      importJobId: importJob.id, tenantId, actorUserId, originalFileName: 'mapped.xlsx', totalRows: 1,
+      normalizedRates: [{
+        source: { sheet: 'Customer Rates', row: 5 }, sourceRows: [5],
+        polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX', podName: 'Los Angeles', carrierCode: 'COSCO',
+        effectiveDate: '2026-09-01', expiryDate: '2026-09-30', currency: 'USD', status: 'ACTIVE',
+        prices: [{ containerType: '40HQ', costAmount: '1250', sellAmount: '1400', currency: 'USD', sourceColumns: [8, 9] }],
+      }],
+    });
+    const completed = await prisma.rateImportJob.findUniqueOrThrow({ where: { id: importJob.id } });
+    expect(completed).toMatchObject({ status: RateImportStatus.COMPLETED, totalRows: 1, successRows: 1 });
+    const generated = await prisma.rate.findFirstOrThrow({ where: { tenantId, rateNo: { startsWith: 'RATE' }, prices: { some: { containerType: '40HQ', costAmount: '1250' } } }, include: { prices: true } });
+    expect(generated.rateNo).toMatch(/^RATE\d{12}$/);
+    expect(generated.prices[0]?.sellAmount?.toString()).toBe('1400');
   });
 });
 

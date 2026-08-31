@@ -7,6 +7,7 @@ export interface ApiEnvironment {
   DATABASE_URL: string;
   NODE_ENV: 'development' | 'test' | 'production';
   PASSWORD_HASH_PEPPER: string;
+  RATE_IMPORT_PREVIEW_TTL_SECONDS: number;
 }
 
 const allowedNodeEnvironments = new Set<ApiEnvironment['NODE_ENV']>([
@@ -40,6 +41,11 @@ export function validateEnvironment(config: Record<string, unknown>): Record<str
     604_800,
     'AUTH_REFRESH_TOKEN_TTL_SECONDS',
   );
+  const rateImportPreviewTtlSeconds = parsePositiveInteger(
+    config.RATE_IMPORT_PREVIEW_TTL_SECONDS,
+    1800,
+    'RATE_IMPORT_PREVIEW_TTL_SECONDS',
+  );
 
   return {
     ...config,
@@ -51,6 +57,7 @@ export function validateEnvironment(config: Record<string, unknown>): Record<str
     DATABASE_URL: databaseUrl,
     NODE_ENV: nodeEnvironment,
     PASSWORD_HASH_PEPPER: passwordHashPepper,
+    RATE_IMPORT_PREVIEW_TTL_SECONDS: rateImportPreviewTtlSeconds,
   };
 }
 

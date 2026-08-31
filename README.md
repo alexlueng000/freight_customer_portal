@@ -95,8 +95,8 @@ slice through Invoice/Billing:
 
 Notifications, tenant branding, complete dashboard/document hubs, the full
 browser golden path, production hardening, and business UAT remain open. See
-[development progress](docs/DEVELOPMENT_PROGRESS.md) and
-[current risks](docs/CURRENT_RISKS.md) for the authoritative status.
+[development progress](docs/05-project-management/DEVELOPMENT_PROGRESS.md) and
+[current risks](docs/05-project-management/CURRENT_RISKS.md) for the authoritative status.
 
 ## Browser E2E
 

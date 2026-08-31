@@ -8,6 +8,7 @@ import { ListRatesDto } from './dto/list-rates.dto.js';
 import { UpdateRateDto } from './dto/update-rate.dto.js';
 import { RatesService } from './rates.service.js';
 import { RateImportsService } from './rate-imports.service.js';
+import { ConfirmRateImportDto } from './dto/confirm-rate-import.dto.js';
 @ApiTags('rates') @ApiBearerAuth() @Controller({ path: 'rates', version: '1' })
 export class RatesController {
   constructor(private readonly rates: RatesService, private readonly imports: RateImportsService) {}
@@ -20,6 +21,24 @@ export class RatesController {
   @ApiBody({ schema: { type: 'object', required: ['file'], properties: { file: { type: 'string', format: 'binary' } } } })
   @ApiCreatedResponse({ description: 'Asynchronous rate import accepted' })
   importRates(@UploadedFile() file: Express.Multer.File | undefined) { return this.imports.create(file); }
+  @Post('import/analyze')
+  @RequirePermissions('rate.manage')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', required: ['file'], properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiOkResponse({ description: 'Analyze sheets, header candidates and mapping suggestions without writing rate data' })
+  analyzeImport(@UploadedFile() file: Express.Multer.File | undefined) { return this.imports.analyze(file); }
+  @Post('import/preview')
+  @RequirePermissions('rate.manage')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', required: ['file', 'configuration'], properties: { file: { type: 'string', format: 'binary' }, configuration: { type: 'string', description: 'JSON containing sheetName, headerRow, headerDepth and mappings' } } } })
+  @ApiOkResponse({ description: 'Normalize mapped workbook rows and return preview errors/warnings without writing data' })
+  previewImport(@UploadedFile() file: Express.Multer.File | undefined, @Body('configuration') configuration?: string) { return this.imports.preview(file, configuration); }
+  @Post('import/confirm')
+  @RequirePermissions('rate.manage')
+  @ApiCreatedResponse({ description: 'Validate and enqueue a tenant/user-bound normalized preview exactly once' })
+  confirmImport(@Body() dto: ConfirmRateImportDto) { return this.imports.confirmPreview(dto); }
   @Get('import-template')
   @RequirePermissions('rate.manage')
   async importTemplate(@Res() response: Response) {

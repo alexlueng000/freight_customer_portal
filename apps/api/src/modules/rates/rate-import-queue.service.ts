@@ -1,5 +1,6 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { Queue } from 'bullmq';
+import type { NormalizedRateImport } from './rate-import-normalizer.js';
 
 export const RATE_IMPORT_QUEUE = 'rate-imports';
 export const RATE_IMPORT_JOB = 'process-rate-import';
@@ -9,7 +10,9 @@ export interface RateImportJobData {
   tenantId: string;
   actorUserId: string;
   originalFileName: string;
-  workbookBase64: string;
+  workbookBase64?: string;
+  normalizedRates?: NormalizedRateImport[];
+  totalRows?: number;
 }
 
 @Injectable()

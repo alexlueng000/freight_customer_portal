@@ -9,7 +9,17 @@ export interface RateImportJobData {
   tenantId: string;
   actorUserId: string;
   originalFileName: string;
-  workbookBase64: string;
+  workbookBase64?: string;
+  normalizedRates?: NormalizedRateImportJobRate[];
+  totalRows?: number;
+}
+export interface NormalizedRateImportJobRate {
+  source: { sheet: string; row: number };
+  sourceRows: number[];
+  rateNo?: string; polCode?: string; polName?: string; podCode?: string; podName?: string;
+  carrierCode?: string; serviceName?: string; effectiveDate?: string; expiryDate?: string; etd?: string;
+  transitDays?: number; supplierName?: string; contractNo?: string; currency?: string; status: string; remark?: string;
+  prices: Array<{ containerType: string; costAmount?: string; sellAmount?: string; currency: string; sourceColumns: number[] }>;
 }
 interface RowError {
   row: number;
@@ -38,6 +48,7 @@ interface ParsedRow {
   sellAmount?: string;
   priceCurrency: string;
   remark?: string;
+  generateRateNo?: boolean;
 }
 
 const headers = [
@@ -117,9 +128,9 @@ export async function processRateImport(prisma: PrismaClient, data: RateImportJo
     },
   });
   try {
-    const { rows, errors, totalRows } = await parseWorkbook(
-      Buffer.from(data.workbookBase64, 'base64'),
-    );
+    const { rows, errors, totalRows } = data.normalizedRates
+      ? normalizedPreviewRows(data.normalizedRates, data.totalRows)
+      : await parseWorkbook(Buffer.from(data.workbookBase64 ?? '', 'base64'));
     await validateDatabaseDuplicates(prisma, data.tenantId, rows, errors);
     validateGroupedRates(rows, errors);
     if (errors.length) {
@@ -142,10 +153,11 @@ export async function processRateImport(prisma: PrismaClient, data: RateImportJo
         for (const group of grouped.values()) {
           const first = group[0];
           if (!first) continue;
+          const rateNo = first.generateRateNo ? await nextRateNumber(tx, data.tenantId) : first.rateNo;
           const rate = await tx.rate.create({
             data: {
               tenantId: data.tenantId,
-              rateNo: first.rateNo,
+              rateNo,
               polCode: first.polCode,
               polName: first.polName,
               podCode: first.podCode,
@@ -183,7 +195,7 @@ export async function processRateImport(prisma: PrismaClient, data: RateImportJo
               action: 'RATE_IMPORTED',
               afterData: {
                 importJobId: data.importJobId,
-                rateNo: first.rateNo,
+                rateNo,
                 priceRows: group.length,
               },
             },
@@ -342,7 +354,7 @@ async function validateDatabaseDuplicates(
   rows: ParsedRow[],
   errors: RowError[],
 ) {
-  const rateNumbers = [...new Set(rows.map((row) => row.rateNo))];
+  const rateNumbers = [...new Set(rows.filter((row) => !row.generateRateNo).map((row) => row.rateNo))];
   const existing = await prisma.rate.findMany({
     where: { tenantId, rateNo: { in: rateNumbers } },
     select: { rateNo: true },
@@ -357,6 +369,36 @@ async function validateDatabaseDuplicates(
         message: 'rateNo already exists in this tenant',
       }),
     );
+}
+
+export function normalizedPreviewRows(rates: NormalizedRateImportJobRate[], requestedTotalRows?: number) {
+  const errors: RowError[] = [];
+  const rows: ParsedRow[] = [];
+  rates.forEach((rate, rateIndex) => {
+    const row = rate.source.row;
+    const requiredValues = { polCode: rate.polCode, polName: rate.polName, podCode: rate.podCode, podName: rate.podName, carrierCode: rate.carrierCode, effectiveDate: rate.effectiveDate, expiryDate: rate.expiryDate, currency: rate.currency };
+    Object.entries(requiredValues).forEach(([field, value]) => { if (!value) errors.push({ row, field, message: `${field} is required` }); });
+    const effectiveDate = rate.effectiveDate ? dateValue(rate.effectiveDate) : undefined;
+    const expiryDate = rate.expiryDate ? dateValue(rate.expiryDate) : undefined;
+    if (!effectiveDate || !expiryDate || !Object.values(RateStatus).includes(rate.status as RateStatus)) { errors.push({ row, field: 'normalizedRate', message: 'Confirmed preview contains invalid date or status data' }); return; }
+    rate.prices.forEach((price) => {
+      if (!price.containerType || !price.costAmount || !decimal(price.costAmount) || !/^[A-Z]{3}$/.test(price.currency)) { errors.push({ row, field: 'prices', message: 'Confirmed preview contains an invalid price' }); return; }
+      rows.push({ row, rateNo: rate.rateNo ?? `GENERATED-${rateIndex + 1}`, generateRateNo: !rate.rateNo, polCode: rate.polCode!, polName: rate.polName!, podCode: rate.podCode!, podName: rate.podName!, carrierCode: rate.carrierCode!, serviceName: rate.serviceName, effectiveDate, expiryDate, etd: rate.etd ? dateTimeValue(rate.etd) : undefined, transitDays: rate.transitDays, supplierName: rate.supplierName, contractNo: rate.contractNo, currency: rate.currency!, status: rate.status as RateStatus, containerType: price.containerType, costAmount: price.costAmount, sellAmount: price.sellAmount, priceCurrency: price.currency, remark: rate.remark });
+    });
+  });
+  return { rows, errors, totalRows: requestedTotalRows ?? rates.reduce((sum, rate) => sum + rate.sourceRows.length, 0) };
+}
+
+async function nextRateNumber(tx: Prisma.TransactionClient, tenantId: string) {
+  const now = new Date();
+  const yearMonth = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const counter = await tx.businessNumberCounter.upsert({
+    where: { tenantId_type_yearMonth: { tenantId, type: 'RATE', yearMonth } },
+    create: { tenantId, type: 'RATE', yearMonth, value: 1 },
+    update: { value: { increment: 1 } },
+    select: { value: true },
+  });
+  return `RATE${yearMonth}${String(counter.value).padStart(6, '0')}`;
 }
 function validateGroupedRates(rows: ParsedRow[], errors: RowError[]) {
   for (const group of groupRows(rows).values()) {

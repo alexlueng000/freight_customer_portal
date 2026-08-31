@@ -7,5 +7,6 @@ import { RateImportsController } from './rate-imports.controller.js';
 import { CustomerRatesController } from './customer-rates.controller.js';
 import { CustomerRatesService } from './customer-rates.service.js';
 import { CustomerRatePricingService } from './customer-rate-pricing.service.js';
-@Module({ controllers: [RatesController, RateImportsController, CustomerRatesController], providers: [RatesService, RateImportsService, RateImportQueueService, CustomerRatesService, CustomerRatePricingService] })
+import { RateImportPreviewStoreService } from './rate-import-preview-store.service.js';
+@Module({ controllers: [RatesController, RateImportsController, CustomerRatesController], providers: [RatesService, RateImportsService, RateImportQueueService, RateImportPreviewStoreService, CustomerRatesService, CustomerRatePricingService] })
 export class RatesModule {}

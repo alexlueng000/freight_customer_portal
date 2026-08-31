@@ -44,9 +44,9 @@ Before implementing or materially changing a module, read the relevant project d
 
 Expected documents:
 
-1. `docs/Freight_Customer_Portal_PRD_V1.0_CN.docx`
-2. `docs/Freight_Customer_Portal_Technical_Design_V1.0_CN.docx`
-3. `docs/Freight_Customer_Portal_Database_ERD_Prisma_Design_V1.0_CN.docx`
+1. `docs/01-product/Freight_Customer_Portal_PRD_V1.0_CN.docx`
+2. `docs/02-architecture/Freight_Customer_Portal_Technical_Design_V1.0_CN.docx`
+3. `docs/02-architecture/Freight_Customer_Portal_Database_ERD_Prisma_Design_V1.0_CN.docx`
 
 If Markdown/PDF exports of these documents exist, prefer the most readable local version, but treat the latest approved V1 content as authoritative.
 

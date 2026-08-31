@@ -1,9 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, RateImportStatus } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
 import { RateImportQueueService } from './rate-import-queue.service.js';
+import { analyzeRateImportWorkbook, RATE_IMPORT_TARGET_FIELDS } from './rate-import-workbook-analyzer.js';
+import { previewRateImportWorkbook, type RateImportPreviewConfig } from './rate-import-normalizer.js';
+import type { CreateRateImportMappingProfileDto } from './dto/create-rate-import-mapping-profile.dto.js';
+import { RateImportPreviewStoreService } from './rate-import-preview-store.service.js';
+import type { ConfirmRateImportDto } from './dto/confirm-rate-import.dto.js';
+import { randomUUID } from 'node:crypto';
 
 const importSelect = {
   id: true,
@@ -26,19 +32,12 @@ export class RateImportsService {
     private readonly prisma: PrismaService,
     private readonly requestContext: RequestContextService,
     private readonly queue: RateImportQueueService,
+    private readonly previewStore: RateImportPreviewStoreService,
   ) {}
 
   async create(file: Express.Multer.File | undefined) {
     const context = this.requireInternal();
-    if (!file) {
-      throw new BadRequestException({ code: 'RATE_IMPORT_FILE_REQUIRED', message: 'Excel file is required' });
-    }
-    if (!file.originalname.toLowerCase().endsWith('.xlsx')) {
-      throw new BadRequestException({ code: 'RATE_IMPORT_FILE_TYPE_INVALID', message: 'Only .xlsx files are supported' });
-    }
-    if (!file.buffer.length) {
-      throw new BadRequestException({ code: 'RATE_IMPORT_FILE_EMPTY', message: 'Excel file is empty' });
-    }
+    this.validateFile(file);
 
     const importJob = await this.prisma.rateImportJob.create({
       data: {
@@ -66,6 +65,122 @@ export class RateImportsService {
           completedAt: new Date(),
         },
       });
+      throw error;
+    }
+  }
+
+  async analyze(file: Express.Multer.File | undefined) {
+    this.requireInternal();
+    this.validateFile(file);
+    return analyzeRateImportWorkbook(file.originalname.slice(0, 255), file.buffer);
+  }
+
+  async preview(file: Express.Multer.File | undefined, rawConfiguration: string | undefined) {
+    const context = this.requireInternal();
+    this.validateFile(file);
+    if (!rawConfiguration) {
+      throw new BadRequestException({ code: 'RATE_IMPORT_PREVIEW_CONFIG_REQUIRED', message: '请先确认 Sheet、表头和字段 Mapping。' });
+    }
+    let configuration: RateImportPreviewConfig;
+    try {
+      configuration = JSON.parse(rawConfiguration) as RateImportPreviewConfig;
+    } catch {
+      throw new BadRequestException({ code: 'RATE_IMPORT_PREVIEW_CONFIG_INVALID', message: '预览配置不是有效的 JSON。' });
+    }
+    this.validateMappings(configuration.mappings);
+    const preview = await previewRateImportWorkbook(file.buffer, configuration);
+    const stored = await this.previewStore.save({
+      tenantId: context.tenantId,
+      userId: context.userId,
+      originalFileName: file.originalname.slice(0, 255),
+      workbookBase64: file.buffer.toString('base64'),
+      configuration,
+      preview,
+    });
+    return { ...preview, ...stored };
+  }
+
+  async confirmPreview(dto: ConfirmRateImportDto) {
+    const context = this.requireInternal();
+    const stored = await this.previewStore.get(dto.previewToken, context.tenantId, context.userId);
+    if (!stored) throw new GoneException({ code: 'RATE_IMPORT_PREVIEW_EXPIRED', message: '预览已过期或不属于当前用户，请重新生成。' });
+    if (stored.preview.summary.errorCount > 0) throw new BadRequestException({ code: 'RATE_IMPORT_PREVIEW_HAS_ERRORS', message: '预览仍包含 Error，修正 Excel 或 Mapping 后才能导入。' });
+    if (stored.preview.summary.warningCount > 0 && !dto.acceptWarnings) throw new BadRequestException({ code: 'RATE_IMPORT_WARNINGS_NOT_ACCEPTED', message: '请明确确认预览中的 Warning 后继续。' });
+    const claim = await this.previewStore.claim(dto.previewToken, context.tenantId, context.userId, randomUUID());
+    if (claim.status === 'NOT_FOUND') throw new GoneException({ code: 'RATE_IMPORT_PREVIEW_EXPIRED', message: '预览已过期，请重新生成。' });
+    const importJob = await this.prisma.rateImportJob.upsert({
+      where: { id: claim.importJobId },
+      create: { id: claim.importJobId, tenantId: context.tenantId, originalFileName: stored.originalFileName, createdById: context.userId },
+      update: {},
+      select: importSelect,
+    });
+    if (importJob.status === RateImportStatus.PENDING) {
+      try {
+        await this.queue.enqueue({ importJobId: importJob.id, tenantId: context.tenantId, actorUserId: context.userId, originalFileName: stored.originalFileName, normalizedRates: stored.preview.rates, totalRows: stored.preview.rates.reduce((sum, rate) => sum + rate.sourceRows.length, 0) });
+      } catch (error) {
+        await this.prisma.rateImportJob.update({ where: { id: importJob.id }, data: { status: RateImportStatus.FAILED, errorMessage: 'Unable to enqueue confirmed rate import', completedAt: new Date() } });
+        throw error;
+      }
+    }
+    return importJob;
+  }
+
+  async listMappingProfiles() {
+    const context = this.requireInternal();
+    return this.prisma.rateImportMappingProfile.findMany({
+      where: { tenantId: context.tenantId },
+      select: {
+        id: true,
+        name: true,
+        supplierName: true,
+        sheetName: true,
+        headerRow: true,
+        headerDepth: true,
+        mappings: true,
+        sourceFingerprint: true,
+        updatedAt: true,
+      },
+      orderBy: [{ updatedAt: 'desc' }, { name: 'asc' }],
+    });
+  }
+
+  async createMappingProfile(dto: CreateRateImportMappingProfileDto) {
+    const context = this.requireInternal();
+    this.validateMappings(dto.mappings);
+    try {
+      const profile = await this.prisma.rateImportMappingProfile.create({
+        data: {
+          tenantId: context.tenantId,
+          name: dto.name.trim(),
+          supplierName: dto.supplierName?.trim() || undefined,
+          sheetName: dto.sheetName.trim(),
+          headerRow: dto.headerRow,
+          headerDepth: dto.headerDepth,
+          mappings: dto.mappings as unknown as Prisma.InputJsonValue,
+          sourceFingerprint: dto.sourceFingerprint?.trim() || undefined,
+          createdById: context.userId,
+          updatedById: context.userId,
+        },
+        select: { id: true, name: true, supplierName: true, sheetName: true, headerRow: true, headerDepth: true, mappings: true, sourceFingerprint: true, updatedAt: true },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'RateImportMappingProfile',
+          entityId: profile.id,
+          action: 'RATE_IMPORT_MAPPING_CREATED',
+          afterData: { name: profile.name, sheetName: profile.sheetName, mappingCount: dto.mappings.length },
+        },
+      });
+      return profile;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'RATE_IMPORT_MAPPING_NAME_EXISTS',
+          message: '当前租户已存在同名 Mapping Profile。',
+        });
+      }
       throw error;
     }
   }
@@ -126,6 +241,38 @@ export class RateImportsService {
       throw new BadRequestException({ code: 'RATE_ADMIN_SCOPE_RESTRICTED', message: 'Customer users cannot import rates' });
     }
     return context;
+  }
+
+  private validateFile(file: Express.Multer.File | undefined): asserts file is Express.Multer.File {
+    if (!file) {
+      throw new BadRequestException({ code: 'RATE_IMPORT_FILE_REQUIRED', message: '请选择需要导入的 Excel 文件。' });
+    }
+    if (!file.originalname.toLowerCase().endsWith('.xlsx')) {
+      throw new BadRequestException({ code: 'RATE_IMPORT_FILE_TYPE_INVALID', message: '目前仅支持 .xlsx 文件。' });
+    }
+    if (!file.buffer.length) {
+      throw new BadRequestException({ code: 'RATE_IMPORT_FILE_EMPTY', message: '上传的 Excel 文件为空。' });
+    }
+  }
+
+  private validateMappings(mappings: CreateRateImportMappingProfileDto['mappings']) {
+    if (!Array.isArray(mappings) || !mappings.length || mappings.some((mapping) => !mapping || !Number.isInteger(mapping.sourceColumn) || mapping.sourceColumn < 1 || !RATE_IMPORT_TARGET_FIELDS.includes(mapping.targetField))) {
+      throw new BadRequestException({ code: 'RATE_IMPORT_MAPPING_INVALID', message: '字段 Mapping 不完整或包含不支持的字段。' });
+    }
+    const sourceColumns = mappings.map((mapping) => mapping.sourceColumn);
+    const targetFields = mappings.map((mapping) => mapping.targetField);
+    if (new Set(sourceColumns).size !== sourceColumns.length) {
+      throw new BadRequestException({
+        code: 'RATE_IMPORT_MAPPING_SOURCE_DUPLICATE',
+        message: '同一 Excel 列不能重复映射。',
+      });
+    }
+    if (new Set(targetFields).size !== targetFields.length) {
+      throw new BadRequestException({
+        code: 'RATE_IMPORT_MAPPING_TARGET_DUPLICATE',
+        message: '同一标准字段不能重复映射。',
+      });
+    }
   }
 }
 

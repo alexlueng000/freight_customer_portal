@@ -151,6 +151,7 @@ model Tenant {
   refreshSessions        RefreshSession[]
   rates                  Rate[]
   rateImportJobs         RateImportJob[]
+  rateImportMappings     RateImportMappingProfile[]
   quotes                 Quote[]
   bookings               Booking[]
   shipments              Shipment[]
@@ -205,6 +206,27 @@ model RateImportJob {
 
   @@index([tenantId, status, createdAt])
   @@index([tenantId, createdById, createdAt])
+}
+
+model RateImportMappingProfile {
+  id                String   @id @default(cuid())
+  tenantId          String
+  name              String   @db.VarChar(120)
+  supplierName      String?  @db.VarChar(200)
+  sheetName         String   @db.VarChar(120)
+  headerRow         Int
+  headerDepth       Int      @default(1)
+  mappings          Json
+  sourceFingerprint String?  @db.VarChar(128)
+  createdById       String
+  updatedById       String
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, name])
+  @@index([tenantId, supplierName, updatedAt])
 }
 
 model Rate {
