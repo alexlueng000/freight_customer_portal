@@ -62,6 +62,30 @@ const headers = [
   'priceCurrency',
   'remark',
 ] as const;
+
+const headerAliases: Record<(typeof headers)[number], string[]> = {
+  rateNo: ['rateNo', '运价编号'],
+  polCode: ['polCode', '起运港代码'],
+  polName: ['polName', '起运港名称'],
+  podCode: ['podCode', '目的港代码'],
+  podName: ['podName', '目的港名称'],
+  carrierCode: ['carrierCode', '船司代码'],
+  serviceName: ['serviceName', '航线服务'],
+  effectiveDate: ['effectiveDate', '生效日期'],
+  expiryDate: ['expiryDate', '失效日期'],
+  etd: ['etd', '预计开船时间'],
+  transitDays: ['transitDays', '航程天数'],
+  supplierName: ['supplierName', '供应商名称'],
+  contractNo: ['contractNo', '合约号'],
+  currency: ['currency', '运价币种'],
+  status: ['status', '状态'],
+  containerType: ['containerType', '箱型'],
+  costAmount: ['costAmount', '采购成本'],
+  sellAmount: ['sellAmount', '标准售价'],
+  priceCurrency: ['priceCurrency', '价格币种'],
+  remark: ['remark', '备注'],
+};
+
 const required = new Set<(typeof headers)[number]>([
   'rateNo',
   'polCode',
@@ -206,11 +230,11 @@ async function parseWorkbook(buffer: Buffer) {
   const actualHeaders = headers.map((_, index) => text(sheet.getRow(1).getCell(index + 1).value));
   const errors: RowError[] = [];
   headers.forEach((header, index) => {
-    if (actualHeaders[index] !== header)
+    if (!headerAliases[header].includes(actualHeaders[index] ?? ''))
       errors.push({
         row: 1,
         field: header,
-        message: `Expected column ${index + 1} to be ${header}`,
+        message: `Expected column ${index + 1} to be ${headerAliases[header].join(' / ')}`,
       });
   });
   const totalRows = Math.max(0, sheet.actualRowCount - 1);

@@ -61,6 +61,31 @@ describe('rate import processor', () => {
     ).resolves.toBe(1);
   });
 
+  it('accepts the Chinese template headers used by the downloaded workbook', async () => {
+    const data = await jobData(
+      '中文运价模板.xlsx',
+      [
+        validRow('IMPORT-ZH', '20GP', '850.00'),
+        validRow('IMPORT-ZH', '40HQ', '1250.00'),
+        validRow('IMPORT-ZH-002', '40GP', '1750.00'),
+      ],
+      chineseHeaders,
+    );
+    await processRateImport(prisma, data);
+    const importJob = await prisma.rateImportJob.findUniqueOrThrow({
+      where: { id: data.importJobId },
+    });
+    expect(importJob).toMatchObject({
+      status: RateImportStatus.COMPLETED,
+      totalRows: 3,
+      successRows: 3,
+      failedRows: 0,
+    });
+    await expect(
+      prisma.rate.count({ where: { tenantId, rateNo: { in: ['IMPORT-ZH', 'IMPORT-ZH-002'] } } }),
+    ).resolves.toBe(2);
+  });
+
   it('returns row errors and writes no rates when any row is invalid', async () => {
     const data = await jobData('invalid.xlsx', [
       validRow('IMPORT-INVALID', '40HQ', '1000'),
@@ -117,6 +142,28 @@ const headers = [
   'priceCurrency',
   'remark',
 ];
+const chineseHeaders = [
+  '运价编号',
+  '起运港代码',
+  '起运港名称',
+  '目的港代码',
+  '目的港名称',
+  '船司代码',
+  '航线服务',
+  '生效日期',
+  '失效日期',
+  '预计开船时间',
+  '航程天数',
+  '供应商名称',
+  '合约号',
+  '运价币种',
+  '状态',
+  '箱型',
+  '采购成本',
+  '标准售价',
+  '价格币种',
+  '备注',
+];
 function validRow(rateNo: string, containerType: string, costAmount: string) {
   return [
     rateNo,
@@ -141,10 +188,14 @@ function validRow(rateNo: string, containerType: string, costAmount: string) {
     'Test row',
   ];
 }
-async function jobData(originalFileName: string, rows: string[][]): Promise<RateImportJobData> {
+async function jobData(
+  originalFileName: string,
+  rows: string[][],
+  headerRow = headers,
+): Promise<RateImportJobData> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Rates');
-  sheet.addRow(headers);
+  sheet.addRow(headerRow);
   rows.forEach((row) => sheet.addRow(row));
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   const importJob = await prisma.rateImportJob.create({

@@ -85,19 +85,37 @@ export class RateImportsService {
   async template(): Promise<Buffer> {
     this.requireInternal();
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Rates', { views: [{ state: 'frozen', ySplit: 1 }] });
+    const sheet = workbook.addWorksheet('运价导入', { views: [{ state: 'frozen', ySplit: 1 }] });
     sheet.columns = RATE_IMPORT_COLUMNS.map(({ header, key, width }) => ({ header, key, width }));
     sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF155E75' } };
     sheet.autoFilter = { from: 'A1', to: 'T1' };
-    sheet.addRow({
-      rateNo: 'RATE-EXAMPLE-001', polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX',
-      podName: 'Los Angeles', carrierCode: 'COSCO', serviceName: 'Pacific Express',
-      effectiveDate: '2026-09-01', expiryDate: '2026-09-30', etd: '2026-09-05T08:00:00Z',
-      transitDays: 18, supplierName: 'Example Supplier', contractNo: 'SC-2026', currency: 'USD',
-      status: 'ACTIVE', containerType: '40HQ', costAmount: 1250, sellAmount: 1400,
-      priceCurrency: 'USD', remark: 'One row per container type',
-    });
+    sheet.addRows([
+      {
+        rateNo: 'RATE-SHA-LAX-001', polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX',
+        podName: 'Los Angeles', carrierCode: 'COSCO', serviceName: 'Pacific Express',
+        effectiveDate: '2026-09-01', expiryDate: '2026-09-30', etd: '2026-09-05T08:00:00Z',
+        transitDays: 18, supplierName: 'Example Supplier', contractNo: 'SC-2026-A', currency: 'USD',
+        status: 'ACTIVE', containerType: '20GP', costAmount: 850, sellAmount: 980,
+        priceCurrency: 'USD', remark: '同一运价编号的多行会合并为一条运价',
+      },
+      {
+        rateNo: 'RATE-SHA-LAX-001', polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX',
+        podName: 'Los Angeles', carrierCode: 'COSCO', serviceName: 'Pacific Express',
+        effectiveDate: '2026-09-01', expiryDate: '2026-09-30', etd: '2026-09-05T08:00:00Z',
+        transitDays: 18, supplierName: 'Example Supplier', contractNo: 'SC-2026-A', currency: 'USD',
+        status: 'ACTIVE', containerType: '40HQ', costAmount: 1250, sellAmount: 1400,
+        priceCurrency: 'USD', remark: '一行代表一个箱型价格',
+      },
+      {
+        rateNo: 'RATE-NGB-HAM-001', polCode: 'CNNGB', polName: 'Ningbo', podCode: 'DEHAM',
+        podName: 'Hamburg', carrierCode: 'MAEU', serviceName: 'Europe Weekly',
+        effectiveDate: '2026-09-10', expiryDate: '2026-10-10', etd: '2026-09-14T10:00:00Z',
+        transitDays: 32, supplierName: 'Example Supplier', contractNo: 'SC-2026-B', currency: 'USD',
+        status: 'ACTIVE', containerType: '40GP', costAmount: 1750, sellAmount: 1980,
+        priceCurrency: 'USD', remark: '示例第二条运价',
+      },
+    ]);
     const buffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(buffer);
   }
@@ -112,14 +130,14 @@ export class RateImportsService {
 }
 
 export const RATE_IMPORT_COLUMNS = [
-  { header: 'rateNo', key: 'rateNo', width: 22 }, { header: 'polCode', key: 'polCode', width: 12 },
-  { header: 'polName', key: 'polName', width: 20 }, { header: 'podCode', key: 'podCode', width: 12 },
-  { header: 'podName', key: 'podName', width: 20 }, { header: 'carrierCode', key: 'carrierCode', width: 15 },
-  { header: 'serviceName', key: 'serviceName', width: 20 }, { header: 'effectiveDate', key: 'effectiveDate', width: 16 },
-  { header: 'expiryDate', key: 'expiryDate', width: 16 }, { header: 'etd', key: 'etd', width: 24 },
-  { header: 'transitDays', key: 'transitDays', width: 14 }, { header: 'supplierName', key: 'supplierName', width: 22 },
-  { header: 'contractNo', key: 'contractNo', width: 18 }, { header: 'currency', key: 'currency', width: 12 },
-  { header: 'status', key: 'status', width: 12 }, { header: 'containerType', key: 'containerType', width: 16 },
-  { header: 'costAmount', key: 'costAmount', width: 16 }, { header: 'sellAmount', key: 'sellAmount', width: 16 },
-  { header: 'priceCurrency', key: 'priceCurrency', width: 16 }, { header: 'remark', key: 'remark', width: 30 },
+  { header: '运价编号', key: 'rateNo', width: 22 }, { header: '起运港代码', key: 'polCode', width: 14 },
+  { header: '起运港名称', key: 'polName', width: 20 }, { header: '目的港代码', key: 'podCode', width: 14 },
+  { header: '目的港名称', key: 'podName', width: 20 }, { header: '船司代码', key: 'carrierCode', width: 14 },
+  { header: '航线服务', key: 'serviceName', width: 20 }, { header: '生效日期', key: 'effectiveDate', width: 16 },
+  { header: '失效日期', key: 'expiryDate', width: 16 }, { header: '预计开船时间', key: 'etd', width: 24 },
+  { header: '航程天数', key: 'transitDays', width: 14 }, { header: '供应商名称', key: 'supplierName', width: 22 },
+  { header: '合约号', key: 'contractNo', width: 18 }, { header: '运价币种', key: 'currency', width: 12 },
+  { header: '状态', key: 'status', width: 12 }, { header: '箱型', key: 'containerType', width: 14 },
+  { header: '采购成本', key: 'costAmount', width: 16 }, { header: '标准售价', key: 'sellAmount', width: 16 },
+  { header: '价格币种', key: 'priceCurrency', width: 12 }, { header: '备注', key: 'remark', width: 34 },
 ] as const;

@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { quoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Item {
   id: string;
@@ -40,6 +41,7 @@ export default function QuoteDetailPage() {
   const [error, setError] = useState('');
   const [actionError, setActionError] = useState('');
   const [submitting, setSubmitting] = useState<'accept' | 'reject' | null>(null);
+  const [confirmingAccept, setConfirmingAccept] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [creatingBooking, setCreatingBooking] = useState(false);
   const load = useCallback(async () => {
@@ -74,6 +76,10 @@ export default function QuoteDetailPage() {
     } finally {
       setSubmitting(null);
     }
+  };
+  const confirmAccept = async () => {
+    await decide('accept');
+    setConfirmingAccept(false);
   };
   const downloadPdf = async () => {
     setDownloading(true);
@@ -144,7 +150,7 @@ export default function QuoteDetailPage() {
                 <button
                   className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
                   disabled={submitting !== null}
-                  onClick={() => void decide('accept')}
+                  onClick={() => setConfirmingAccept(true)}
                   type="button"
                 >
                   {submitting === 'accept' ? '处理中…' : '接受报价'}
@@ -184,7 +190,9 @@ export default function QuoteDetailPage() {
       ) : null}
       <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="状态">
-          <StatusBadge>{customerQuoteStatus(quote.status)}</StatusBadge>
+          <StatusBadge tone={quoteStatusTone(quote.status)}>
+            {quoteStatusLabel(quote.status)}
+          </StatusBadge>
         </Fact>
         <Fact label="船司" value={quote.carrierCode ?? '—'} />
         <Fact label="ETD" value={quote.etd?.slice(0, 10) ?? '船期待确认'} />
@@ -237,6 +245,49 @@ export default function QuoteDetailPage() {
           </table>
         </div>
       </section>
+      {confirmingAccept ? (
+        <div
+          aria-labelledby="accept-quote-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
+          role="dialog"
+        >
+          <div className="w-full max-w-md rounded border border-border bg-surface shadow-xl">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="text-base font-semibold" id="accept-quote-title">
+                确认接受报价
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                接受后报价将进入已接受状态，后续可基于该报价创建订舱。
+              </p>
+            </div>
+            <div className="space-y-3 px-5 py-4 text-sm">
+              <Fact label="报价编号" value={quote.quoteNo} />
+              <Fact label="航线" value={`${quote.polCode} → ${quote.podCode}`} />
+              <Fact label="有效期至" value={quote.validUntil.slice(0, 10)} />
+              <Fact label="报价总额" value={money(quote.totalAmount, quote.currency)} />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button
+                className="h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40"
+                disabled={submitting !== null}
+                onClick={() => setConfirmingAccept(false)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+                disabled={submitting !== null}
+                onClick={() => void confirmAccept()}
+                type="button"
+              >
+                {submitting === 'accept' ? '处理中…' : '确认接受'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -260,9 +311,4 @@ const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
 function money(value: string, currency: string) {
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
-}
-function customerQuoteStatus(status: string) {
-  return (
-    ({ DRAFT: '待销售确认', SENT: '已发送', VIEWED: '已查看', ACCEPTED: '已接受', REJECTED: '已拒绝', EXPIRED: '已过期', BOOKED: '已转订舱', CANCELLED: '已取消' } as Record<string, string>)[status] ?? status
-  );
 }

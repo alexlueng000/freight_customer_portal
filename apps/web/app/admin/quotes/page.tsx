@@ -8,6 +8,7 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { quoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Quote {
   id: string;
@@ -109,7 +110,9 @@ export default function AdminQuotesPage() {
                         </td>
                         <td className={cell}>{quote.validUntil.slice(0, 10)}</td>
                         <td className={cell}>
-                          <StatusBadge>{label(quote.status)}</StatusBadge>
+                          <StatusBadge tone={quoteStatusTone(quote.status)}>
+                            {quoteStatusLabel(quote.status)}
+                          </StatusBadge>
                         </td>
                         <td className={`${cell} text-right`}>
                           {quote.status === 'DRAFT' ? (
@@ -176,22 +179,6 @@ function normalize(value: unknown) {
 }
 function money(value: string, currency: string) {
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
-}
-function label(status: string) {
-  return (
-    (
-      {
-        DRAFT: '待销售确认',
-        SENT: '已发送',
-        VIEWED: '已查看',
-        ACCEPTED: '已接受',
-        REJECTED: '已拒绝',
-        EXPIRED: '已过期',
-        BOOKED: '已转订舱',
-        CANCELLED: '已取消',
-      } as Record<string, string>
-    )[status] ?? status
-  );
 }
 const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';

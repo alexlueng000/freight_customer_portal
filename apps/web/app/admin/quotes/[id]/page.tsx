@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { quoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Item {
   id: string;
@@ -38,6 +39,7 @@ export default function AdminQuoteDetailPage() {
   const [error, setError] = useState('');
   const [acting, setActing] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [confirmingSend, setConfirmingSend] = useState(false);
   const [reason, setReason] = useState('');
   const [prices, setPrices] = useState<Record<string, string>>({});
   const load = useCallback(async () => {
@@ -118,6 +120,10 @@ export default function AdminQuoteDetailPage() {
       setActing(false);
     }
   };
+  const confirmSend = async () => {
+    await act('send');
+    setConfirmingSend(false);
+  };
   if (loading) return <LoadingState rows={6} />;
   if (error && !quote) return <ErrorState description={error} onRetry={() => void load()} />;
   if (!quote) return null;
@@ -169,10 +175,10 @@ export default function AdminQuoteDetailPage() {
               <button
                 className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
                 disabled={acting}
-                onClick={() => void act('send')}
+                onClick={() => setConfirmingSend(true)}
                 type="button"
               >
-                发送客户
+                确认并发送客户
               </button>
             ) : null}
           </div>
@@ -239,7 +245,9 @@ export default function AdminQuoteDetailPage() {
       ) : null}
       <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-4">
         <Fact label="状态">
-          <StatusBadge>{quote.status}</StatusBadge>
+          <StatusBadge tone={quoteStatusTone(quote.status)}>
+            {quoteStatusLabel(quote.status)}
+          </StatusBadge>
         </Fact>
         <Fact label="客户" value={quote.customer.name} />
         <Fact label="船司" value={quote.carrierCode ?? '—'} />
@@ -285,6 +293,49 @@ export default function AdminQuoteDetailPage() {
           </tfoot>
         </table>
       </section>
+      {confirmingSend ? (
+        <div
+          aria-labelledby="send-quote-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
+          role="dialog"
+        >
+          <div className="w-full max-w-md rounded border border-border bg-surface shadow-xl">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="text-base font-semibold" id="send-quote-title">
+                确认并发送客户
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                发送后客户可下载 PDF、接受或拒绝报价。
+              </p>
+            </div>
+            <div className="space-y-3 px-5 py-4 text-sm">
+              <Fact label="报价编号" value={quote.quoteNo} />
+              <Fact label="客户" value={quote.customer.name} />
+              <Fact label="航线" value={`${quote.polCode} → ${quote.podCode}`} />
+              <Fact label="报价总额" value={money(quote.totalAmount, quote.currency)} />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button
+                className="h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40"
+                disabled={acting}
+                onClick={() => setConfirmingSend(false)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+                disabled={acting}
+                onClick={() => void confirmSend()}
+                type="button"
+              >
+                {acting ? '发送中…' : '确认发送'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
