@@ -10,6 +10,7 @@ import {
   Gauge,
   History,
   LayoutDashboard,
+  LogOut,
   PackageCheck,
   ReceiptText,
   Search,
@@ -102,7 +103,14 @@ export function AppShell({
   const auth = useAuth();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const navItems = navGroups.flatMap((group) => group.items);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await auth.logout().catch(() => undefined);
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -211,14 +219,18 @@ export function AppShell({
                 >
                   <Bell aria-hidden className="size-4" />
                 </button>
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium hover:bg-sidebar focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  onClick={() => void auth.logout()}
-                  type="button"
-                  title="退出登录"
-                >
+                <div className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium">
                   <Gauge aria-hidden className="size-4 text-primary" />
                   <span className="hidden sm:inline">{auth.user?.displayName}</span>
+                </div>
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium text-muted hover:bg-sidebar hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={loggingOut}
+                  onClick={() => void handleLogout()}
+                  type="button"
+                >
+                  <LogOut aria-hidden className="size-4" />
+                  <span>{loggingOut ? '退出中' : '退出登录'}</span>
                 </button>
               </div>
             </div>
