@@ -2,10 +2,16 @@ import { BookingStatus } from '@prisma/client';
 
 const transitions: Readonly<Record<BookingStatus, readonly BookingStatus[]>> = {
   DRAFT: [BookingStatus.SUBMITTED, BookingStatus.CANCELLED],
-  SUBMITTED: [BookingStatus.UNDER_REVIEW, BookingStatus.CANCELLED],
-  UNDER_REVIEW: [BookingStatus.CONFIRMED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
-  CONFIRMED: [BookingStatus.SO_RELEASED, BookingStatus.CANCELLED],
-  SO_RELEASED: [],
+  SUBMITTED: [
+    BookingStatus.APPROVED,
+    BookingStatus.REVISION_REQUIRED,
+    BookingStatus.REJECTED,
+    BookingStatus.CANCELLED,
+  ],
+  REVISION_REQUIRED: [BookingStatus.SUBMITTED, BookingStatus.CANCELLED],
+  APPROVED: [BookingStatus.BOOKING_SUBMITTED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
+  BOOKING_SUBMITTED: [BookingStatus.BOOKED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
+  BOOKED: [],
   REJECTED: [],
   CANCELLED: [],
 };

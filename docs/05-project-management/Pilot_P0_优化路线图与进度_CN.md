@@ -49,11 +49,11 @@ P0-B：Quote → Booking → SO 真实业务流程
 | 1. 复杂 Excel 分析 | P0 | 多 Sheet、偏移/双层表头、合并单元格、字段建议 | 已完成第一版 |
 | 2. Mapping Profile | P0 | 人工修正映射并按租户/供应商保存复用 | 已完成基础能力 |
 | 3. 标准化预览与校验 | P0 | 展示标准化 Rate、Price、Charge 和全部 Error/Warning | 已完成第一版 |
-| 4. 确认与事务导入 | P0 | 用户确认后异步、幂等、整批事务写入 | 已完成第一版，待环境集成验证 |
+| 4. 确认与事务导入 | P0 | 用户确认后异步、幂等、整批事务写入 | 已完成第一版及本地环境集成验证 |
 | 5. V2 宽表和附加费 | P0 | 推荐宽表、横向箱型、附加费 Sheet、旧模板兼容 | V2 下载模板已完成；附加费解析待开发 |
-| 6. Booking 客户侧减负 | P0 | Quote 自动继承、联系人/Shipper 复用、最小表单 | 待开发 |
-| 7. Booking 作业状态 | P0 | 待审核、待订舱、待 SO、已订舱语义统一 | 待开发 |
-| 8. SO 登记与发布 | P0 | 结构化 SO、内部保存、核对后发布、版本追溯 | 待开发 |
+| 6. Booking 客户侧减负 | P0 | Quote 自动继承、联系人/Shipper 复用、最小表单 | 已完成并通过针对性 Playwright |
+| 7. Booking 作业状态 | P0 | 待审核、待订舱、待 SO、已订舱语义统一 | 已完成并通过状态机/数据库测试 |
+| 8. SO 登记与发布 | P0 | 结构化 SO、内部保存、核对后发布、版本追溯 | 已完成并通过可见性/并发/黄金路径测试 |
 | 9. 横向体验与权限 | P1 | 权限按钮、主数据、账号、Dashboard、中文错误 | 待开发 |
 | 10. 全链路回归 | Gate | 从真实 Excel 重新回归至 Shipment，决定是否恢复后续 UAT | 待执行 |
 
@@ -196,14 +196,18 @@ P0-B：Quote → Booking → SO 真实业务流程
 - 2026-09-01 补充修复：预览 API 仅向前端返回前 100 条标准化 Rate 供展示，但 Redis 保存完整标准化结果，避免超过 100 条的真实工作簿确认导入时只入队前 100 条。
 - 2026-09-01 补充：默认下载模板已改为 V2 宽表，`运价导入` Sheet 一行一条 Rate，20GP / 40GP / 40HQ 横向展开；同时预留 `附加费导入` 和 `填写说明` Sheet。当前附加费 Sheet 仍只作为推荐结构，正式解析/持久化待后续接入。
 
-已补充标准化 Worker 事务集成测试用例，但当前本地 PostgreSQL/Redis 未启动，尚未实际执行数据库集成验证。
+已补充标准化 Worker 事务集成测试用例。2026-09-01 已在本地 PostgreSQL 17、Redis 7、BullMQ 和真实 API/Worker 进程上完成集成验证：
 
-1. 确认导入的真实 Redis、BullMQ 和 PostgreSQL 集成验证。
-2. 港口与船司主数据校验及别名确认机制。
-3. `850/1250/1400` 等单元格多价拆分和人工确认。
-4. 独立附加费 Sheet 和多币种附加费。
-5. 三类真实工作簿回放及导入后 Rate Search 验证。
-6. V1 长表、V2 宽表和自定义 Mapping 持续共用同一 Normalize/Validate/Persist 流程。
+- Worker 数据库集成测试 7/7 通过，覆盖原子写入、整批回滚、重复编号拒绝、并发安全编号、宽表多箱型和附加费持久化。
+- `01_standard_english_FCL.xlsx` 通过真实 HTTP 完成分析、预览、Redis Token、确认、BullMQ 入队和 Worker 写入。
+- 预览识别 5 条 Rate、15 条 RatePrice，Error/Warning 均为 0；Import Job 成功 5 条、失败 0 条。
+- 后台 Rate Search 可查到生成的 `RATE202609000001`–`RATE202609000005`；将首条运价设为 ACTIVE 后，客户侧可查到 `CNSZX → SGSIN / PIL / 20GP / USD 420`。
+
+1. 港口与船司主数据校验及别名确认机制。
+2. `850/1250/1400` 等单元格多价拆分和人工确认。
+3. 独立附加费 Sheet 和多币种附加费。
+4. 另外两类结构明显不同的真实工作簿回放及导入后 Rate Search 验证。
+5. V1 长表、V2 宽表和自定义 Mapping 持续共用同一 Normalize/Validate/Persist 流程。
 
 ### 4.5 验收 Gate
 
@@ -391,12 +395,13 @@ P0 完成后处理：
 | 2026-09-01 Rate Import 针对性测试 | `pnpm --filter @freight/api test -- rate-import` 通过：3 个 Suite、14 个 Test |
 | 2026-09-01 TypeScript 检查 | `pnpm --filter @freight/api typecheck`、`pnpm --filter @freight/web typecheck` 通过 |
 
-### 尚未执行
+### 后续业务项
 
-- 新 migration 尚未应用到 PostgreSQL。
+- Booking B1/B2/B3 的第 24–27 个 migration 已应用到本地 PostgreSQL；Rate Import 相关 migration 状态按 P0-A 验收记录继续跟踪。
 - Mapping Profile 数据库集成测试尚未执行。
-- 完整 `pnpm test` 尚未执行。
-- 当前 P0 前端交互尚未运行 Playwright。
+- P0-B4 API 23 个 Suite / 101 个 Test、Worker 4 个 Suite / 12 个 Test 已通过。
+- Booking、完整 Rate → Invoice、Shipment、Invoice 共 6 个 Playwright 场景已于 2026-09-02 在本地 Chromium 实跑通过。
+- P0-B4 自动化与技术 Gate 已通过，待业务负责人完成 UAT 签署。
 - 标准化预览和自定义 Mapping 的正式导入尚未完成。
 - 2026-09-01 本机未找到 `docker` 命令，真实 Redis / BullMQ / PostgreSQL 队列回放无法在当前环境执行。
 

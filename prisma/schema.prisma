@@ -82,11 +82,57 @@ enum QuoteStatus {
 enum BookingStatus {
   DRAFT
   SUBMITTED
-  UNDER_REVIEW
-  CONFIRMED
-  SO_RELEASED
+  REVISION_REQUIRED
+  APPROVED
+  BOOKING_SUBMITTED
+  BOOKED
   REJECTED
   CANCELLED
+}
+
+enum BookingReviewActionType {
+  APPROVE
+  REQUEST_REVISION
+  REJECT
+  SUBMIT_TO_CARRIER
+  CANCEL
+}
+
+enum BookingRevisionReasonCode {
+  CARGO_INCOMPLETE
+  SHIPPER_INCOMPLETE
+  CONTACT_INCOMPLETE
+  CARGO_READY_DATE_INVALID
+  CARGO_CONTAINER_CONFLICT
+  DANGEROUS_GOODS_INFO_REQUIRED
+  OTHER
+}
+
+enum BookingSoRecordStatus {
+  INTERNAL_DRAFT
+  PUBLISHED
+  SUPERSEDED
+}
+
+enum BookingSoSourceType {
+  CARRIER
+  AGENT
+  OTHER
+}
+
+enum PackageType {
+  CARTON
+  PALLET
+  CASE
+  BAG
+  DRUM
+  PACKAGE
+  OTHER
+}
+
+enum CustomerShipperStatus {
+  ACTIVE
+  INACTIVE
 }
 
 enum ShipmentStatus {
@@ -146,6 +192,9 @@ model Tenant {
   roles                  Role[]
   customerCompanies      CustomerCompany[]
   customerContacts       CustomerContact[]
+  customerShippers       CustomerShipper[]
+  bookingReviewActions   BookingReviewAction[]
+  bookingSoRecords       BookingSoRecord[]
   auditLogs              AuditLog[]
   businessNumberCounters BusinessNumberCounter[]
   refreshSessions        RefreshSession[]
@@ -163,23 +212,23 @@ model Tenant {
 }
 
 model Notification {
-  id              String             @id @default(cuid())
+  id              String              @id @default(cuid())
   tenantId        String
   recipientUserId String?
-  recipient       String             @db.VarChar(320)
-  type            String             @db.VarChar(100)
+  recipient       String              @db.VarChar(320)
+  type            String              @db.VarChar(100)
   channel         NotificationChannel
-  status          NotificationStatus @default(PENDING)
+  status          NotificationStatus  @default(PENDING)
   payload         Json
-  attempts        Int                @default(0)
-  lastError       String?            @db.VarChar(1000)
-  sentAt          DateTime?          @db.Timestamptz(3)
-  failedAt        DateTime?          @db.Timestamptz(3)
-  readAt          DateTime?          @db.Timestamptz(3)
-  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+  attempts        Int                 @default(0)
+  lastError       String?             @db.VarChar(1000)
+  sentAt          DateTime?           @db.Timestamptz(3)
+  failedAt        DateTime?           @db.Timestamptz(3)
+  readAt          DateTime?           @db.Timestamptz(3)
+  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime            @updatedAt @db.Timestamptz(3)
 
-  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   recipientUser User?  @relation(fields: [recipientUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, recipientUserId, channel, createdAt])
@@ -314,20 +363,23 @@ model User {
   createdAt         DateTime   @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime   @updatedAt @db.Timestamptz(3)
 
-  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  customerCompany       CustomerCompany?  @relation("CustomerUsers", fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customerCompany       CustomerCompany?      @relation("CustomerUsers", fields: [customerCompanyId], references: [id], onDelete: Restrict)
   userRoles             UserRole[]
-  ownedCustomers        CustomerCompany[] @relation("CustomerSalesOwner")
-  auditLogs             AuditLog[]        @relation("AuditActor")
+  ownedCustomers        CustomerCompany[]     @relation("CustomerSalesOwner")
+  auditLogs             AuditLog[]            @relation("AuditActor")
   refreshSessions       RefreshSession[]
   notifications         Notification[]
-  ownedQuotes           Quote[]           @relation("QuoteSalesOwner")
-  priceOverriddenQuotes Quote[]           @relation("QuotePriceOverrideBy")
-  createdBookings       Booking[]         @relation("BookingCreatedBy")
-  updatedBookings       Booking[]         @relation("BookingUpdatedBy")
-  createdShipments      Shipment[]        @relation("ShipmentCreatedBy")
-  createdTrackingEvents TrackingEvent[]   @relation("TrackingEventCreatedBy")
-  uploadedDocuments     Document[]        @relation("DocumentUploadedBy")
+  ownedQuotes           Quote[]               @relation("QuoteSalesOwner")
+  priceOverriddenQuotes Quote[]               @relation("QuotePriceOverrideBy")
+  createdBookings       Booking[]             @relation("BookingCreatedBy")
+  updatedBookings       Booking[]             @relation("BookingUpdatedBy")
+  bookingReviewActions  BookingReviewAction[] @relation("BookingReviewActor")
+  uploadedBookingSos    BookingSoRecord[]     @relation("BookingSoUploadedBy")
+  publishedBookingSos   BookingSoRecord[]     @relation("BookingSoPublishedBy")
+  createdShipments      Shipment[]            @relation("ShipmentCreatedBy")
+  createdTrackingEvents TrackingEvent[]       @relation("TrackingEventCreatedBy")
+  uploadedDocuments     Document[]            @relation("DocumentUploadedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -408,6 +460,7 @@ model CustomerCompany {
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   salesOwner    User?             @relation("CustomerSalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
   contacts      CustomerContact[]
+  shippers      CustomerShipper[]
   customerUsers User[]            @relation("CustomerUsers")
   quotes        Quote[]
   bookings      Booking[]
@@ -418,6 +471,30 @@ model CustomerCompany {
   @@index([tenantId, name])
   @@index([tenantId, salesOwnerId])
   @@index([tenantId, status])
+}
+
+model CustomerShipper {
+  id                String                @id @default(cuid())
+  tenantId          String
+  customerCompanyId String
+  name              String                @db.VarChar(200)
+  address           String                @db.VarChar(1000)
+  contactName       String?               @db.VarChar(150)
+  contactEmail      String?               @db.VarChar(320)
+  contactPhone      String?               @db.VarChar(50)
+  isDefault         Boolean               @default(false)
+  status            CustomerShipperStatus @default(ACTIVE)
+  createdById       String?
+  updatedById       String?
+  createdAt         DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime              @updatedAt @db.Timestamptz(3)
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer       CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  sourceBookings Booking[]       @relation("BookingSourceShipper")
+
+  @@index([tenantId, customerCompanyId, status])
+  @@index([tenantId, customerCompanyId, isDefault])
 }
 
 model CustomerContact {
@@ -576,10 +653,14 @@ model Booking {
   carrierCode         String?       @db.VarChar(20)
   etd                 DateTime?     @db.Timestamptz(3)
   commodity           String?       @db.VarChar(300)
+  packageType         PackageType?
   packages            Int?
   grossWeight         Decimal?      @db.Decimal(18, 4)
   volumeCbm           Decimal?      @db.Decimal(18, 4)
+  cargoReadyDate      DateTime?     @db.Date
   isDangerousGoods    Boolean       @default(false)
+  specialInstructions String?       @db.VarChar(2000)
+  sourceShipperId     String?
   shipperName         String?       @db.VarChar(200)
   shipperAddress      String?       @db.VarChar(1000)
   bookingContactName  String?       @db.VarChar(150)
@@ -589,6 +670,10 @@ model Booking {
   submittedAt         DateTime?     @db.Timestamptz(3)
   underReviewAt       DateTime?     @db.Timestamptz(3)
   confirmedAt         DateTime?     @db.Timestamptz(3)
+  revisionRequestedAt DateTime?     @db.Timestamptz(3)
+  approvedAt          DateTime?     @db.Timestamptz(3)
+  bookingSubmittedAt  DateTime?     @db.Timestamptz(3)
+  bookedAt            DateTime?     @db.Timestamptz(3)
   rejectedAt          DateTime?     @db.Timestamptz(3)
   cancelledAt         DateTime?     @db.Timestamptz(3)
   createdById         String?
@@ -599,16 +684,78 @@ model Booking {
   tenant            Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   quote             Quote?                    @relation(fields: [quoteId], references: [id], onDelete: Restrict)
   customer          CustomerCompany           @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  sourceShipper     CustomerShipper?          @relation("BookingSourceShipper", fields: [sourceShipperId], references: [id], onDelete: SetNull)
   createdBy         User?                     @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy         User?                     @relation("BookingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   containerRequests BookingContainerRequest[]
   shipments         Shipment[]
   documents         Document[]
+  reviewActions     BookingReviewAction[]
+  soRecords         BookingSoRecord[]
 
   @@unique([tenantId, bookingNo])
   @@index([tenantId, customerCompanyId, status])
   @@index([tenantId, quoteId])
+  @@index([tenantId, sourceShipperId])
   @@index([tenantId, createdAt])
+}
+
+model BookingSoRecord {
+  id            String                @id @default(cuid())
+  tenantId      String
+  bookingId     String
+  documentId    String                @unique
+  soNumber      String                @db.VarChar(100)
+  sourceType    BookingSoSourceType
+  sourceName    String?               @db.VarChar(200)
+  carrierCode   String?               @db.VarChar(20)
+  vessel        String?               @db.VarChar(100)
+  voyage        String?               @db.VarChar(50)
+  etd           DateTime?             @db.Timestamptz(3)
+  eta           DateTime?             @db.Timestamptz(3)
+  cyCutoffAt    DateTime?             @db.Timestamptz(3)
+  siCutoffAt    DateTime?             @db.Timestamptz(3)
+  vgmCutoffAt   DateTime?             @db.Timestamptz(3)
+  terminal      String?               @db.VarChar(300)
+  receivedAt    DateTime              @db.Timestamptz(3)
+  version       Int
+  status        BookingSoRecordStatus @default(INTERNAL_DRAFT)
+  uploadedById  String?
+  publishedById String?
+  publishedAt   DateTime?             @db.Timestamptz(3)
+  createdAt     DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime              @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  uploadedBy  User?    @relation("BookingSoUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  publishedBy User?    @relation("BookingSoPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, bookingId, version])
+  @@index([tenantId, bookingId, status, version])
+  @@index([tenantId, soNumber])
+}
+
+model BookingReviewAction {
+  id                    String                     @id @default(cuid())
+  tenantId              String
+  bookingId             String
+  action                BookingReviewActionType
+  reasonCode            BookingRevisionReasonCode?
+  customerVisibleRemark String?                    @db.VarChar(1000)
+  internalRemark        String?                    @db.VarChar(1000)
+  carrierSourceName     String?                    @db.VarChar(200)
+  carrierReference      String?                    @db.VarChar(200)
+  actorUserId           String?
+  createdAt             DateTime                   @default(now()) @db.Timestamptz(3)
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  actor   User?   @relation("BookingReviewActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, bookingId, createdAt])
+  @@index([tenantId, action, createdAt])
 }
 
 model BookingContainerRequest {
@@ -650,14 +797,14 @@ model Shipment {
   createdAt         DateTime       @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
 
-  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  booking   Booking         @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  customer  CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
-  createdBy User?           @relation("ShipmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  containers Container[]
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  booking        Booking         @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  customer       CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  createdBy      User?           @relation("ShipmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  containers     Container[]
   trackingEvents TrackingEvent[]
-  documents Document[]
-  invoices Invoice[]
+  documents      Document[]
+  invoices       Invoice[]
 
   @@unique([tenantId, shipmentNo])
   @@index([tenantId, customerCompanyId, status])
@@ -665,19 +812,19 @@ model Shipment {
 }
 
 model Container {
-  id           String   @id @default(cuid())
-  tenantId     String
-  shipmentId   String
-  containerNo  String   @db.VarChar(20)
-  containerType String  @db.VarChar(20)
-  sealNo       String?  @db.VarChar(50)
-  vgmWeight    Decimal? @db.Decimal(18, 4)
-  pickupAt     DateTime? @db.Timestamptz(3)
-  gateInAt     DateTime? @db.Timestamptz(3)
-  loadedAt     DateTime? @db.Timestamptz(3)
-  dischargedAt DateTime? @db.Timestamptz(3)
-  createdAt    DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+  id            String    @id @default(cuid())
+  tenantId      String
+  shipmentId    String
+  containerNo   String    @db.VarChar(20)
+  containerType String    @db.VarChar(20)
+  sealNo        String?   @db.VarChar(50)
+  vgmWeight     Decimal?  @db.Decimal(18, 4)
+  pickupAt      DateTime? @db.Timestamptz(3)
+  gateInAt      DateTime? @db.Timestamptz(3)
+  loadedAt      DateTime? @db.Timestamptz(3)
+  dischargedAt  DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
@@ -726,11 +873,12 @@ model Document {
   uploadedById     String?
   createdAt        DateTime       @default(now()) @db.Timestamptz(3)
 
-  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  booking    Booking?  @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  shipment   Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  invoice    Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
-  uploadedBy User?     @relation("DocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  booking         Booking?         @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  shipment        Shipment?        @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  invoice         Invoice?         @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  uploadedBy      User?            @relation("DocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  bookingSoRecord BookingSoRecord?
 
   @@unique([tenantId, bookingId, documentType, version])
   @@unique([tenantId, shipmentId, documentType, version])
@@ -760,10 +908,10 @@ model Invoice {
   createdAt         DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime      @updatedAt @db.Timestamptz(3)
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  shipment Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  customer CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
-  lines    InvoiceLine[]
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  shipment  Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  customer  CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  lines     InvoiceLine[]
   documents Document[]
 
   @@unique([tenantId, invoiceNo])

@@ -6,12 +6,28 @@ import { BookingActionDto } from './dto/booking-action.dto.js';
 import { CreateBookingDto } from './dto/create-booking.dto.js';
 import { ListBookingsDto } from './dto/list-bookings.dto.js';
 import { UpdateBookingDto } from './dto/update-booking.dto.js';
+import { CreateCustomerShipperDto } from './dto/create-customer-shipper.dto.js';
+import { UpdateCustomerShipperDto } from './dto/update-customer-shipper.dto.js';
 
 @ApiTags('bookings')
 @ApiBearerAuth()
 @Controller({ path: 'bookings', version: '1' })
 export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
+  @Get('shippers') @RequirePermissions('booking.read') listShippers() {
+    return this.bookings.listCustomerShippers();
+  }
+  @Post('shippers') @RequirePermissions('booking.create') createShipper(
+    @Body() dto: CreateCustomerShipperDto,
+  ) {
+    return this.bookings.createCustomerShipper(dto);
+  }
+  @Patch('shippers/:shipperId') @RequirePermissions('booking.create') updateShipper(
+    @Param('shipperId') shipperId: string,
+    @Body() dto: UpdateCustomerShipperDto,
+  ) {
+    return this.bookings.updateCustomerShipper(shipperId, dto);
+  }
   @Post()
   @RequirePermissions('booking.create')
   @ApiCreatedResponse({ description: 'Create a draft booking from an accepted quote' })

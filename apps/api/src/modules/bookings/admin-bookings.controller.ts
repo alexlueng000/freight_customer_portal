@@ -1,20 +1,12 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-  UploadedFile,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { BookingsService } from './bookings.service.js';
 import { BookingActionDto } from './dto/booking-action.dto.js';
 import { CreateShipmentDto } from './dto/create-shipment.dto.js';
 import { ListBookingsDto } from './dto/list-bookings.dto.js';
+import { RequestBookingRevisionDto } from './dto/request-booking-revision.dto.js';
+import { SubmitBookingToCarrierDto } from './dto/submit-booking-to-carrier.dto.js';
 
 @ApiTags('admin-bookings')
 @ApiBearerAuth()
@@ -27,17 +19,23 @@ export class AdminBookingsController {
   @Get(':id') @RequirePermissions('booking.read') get(@Param('id') id: string) {
     return this.bookings.getInternal(id);
   }
-  @Post(':id/review') @RequirePermissions('booking.manage') review(
+  @Post(':id/approve') @RequirePermissions('booking.manage') approve(
     @Param('id') id: string,
     @Body() dto: BookingActionDto,
   ) {
-    return this.bookings.review(id, dto);
+    return this.bookings.approve(id, dto);
   }
-  @Post(':id/confirm') @RequirePermissions('booking.manage') confirm(
+  @Post(':id/request-revision') @RequirePermissions('booking.manage') requestRevision(
     @Param('id') id: string,
-    @Body() dto: BookingActionDto,
+    @Body() dto: RequestBookingRevisionDto,
   ) {
-    return this.bookings.confirm(id, dto);
+    return this.bookings.requestRevision(id, dto);
+  }
+  @Post(':id/submit-to-carrier') @RequirePermissions('booking.manage') submitToCarrier(
+    @Param('id') id: string,
+    @Body() dto: SubmitBookingToCarrierDto,
+  ) {
+    return this.bookings.submitToCarrier(id, dto);
   }
   @Post(':id/reject') @RequirePermissions('booking.manage') reject(
     @Param('id') id: string,
@@ -50,13 +48,6 @@ export class AdminBookingsController {
     @Body() dto: BookingActionDto,
   ) {
     return this.bookings.cancelInternal(id, dto);
-  }
-  @Post(':id/release-so')
-  @RequirePermissions('document.upload')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024, files: 1 } }))
-  @ApiConsumes('multipart/form-data')
-  releaseSo(@Param('id') id: string, @UploadedFile() file: Express.Multer.File | undefined) {
-    return this.bookings.releaseSo(id, file);
   }
   @Post(':id/shipments')
   @RequirePermissions('shipment.create')

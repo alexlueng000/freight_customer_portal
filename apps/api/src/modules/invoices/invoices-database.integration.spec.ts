@@ -58,7 +58,7 @@ describe('invoice database integration', () => {
         tenantId: tenantA,
         bookingNo: `BOOK-${runId}`,
         customerCompanyId: customerA,
-        status: 'SO_RELEASED',
+        status: 'BOOKED',
         polCode: 'CNSHA',
         podCode: 'USLGB',
       },

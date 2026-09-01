@@ -16,17 +16,23 @@ interface Container {
   remark: string | null;
 }
 interface Booking {
+  id: string;
   bookingNo: string;
+  quoteId: string | null;
   status: string;
   polCode: string;
   podCode: string;
   carrierCode: string | null;
   etd: string | null;
   commodity: string | null;
+  packageType: string | null;
   packages: number | null;
   grossWeight: string | null;
   volumeCbm: string | null;
+  cargoReadyDate: string | null;
   isDangerousGoods: boolean;
+  specialInstructions: string | null;
+  sourceShipperId: string | null;
   shipperName: string | null;
   shipperAddress: string | null;
   bookingContactName: string | null;
@@ -35,6 +41,26 @@ interface Booking {
   lastStatusRemark: string | null;
   containerRequests: Container[];
   shipments: Array<{ id: string; shipmentNo: string; status: string }>;
+  quote: { quoteNo: string; currency: string; totalAmount: string } | null;
+}
+interface CustomerShipper {
+  id: string;
+  name: string;
+  address: string;
+  isDefault: boolean;
+  status: 'ACTIVE' | 'INACTIVE';
+}
+interface SoRecord {
+  id: string;
+  soNumber: string;
+  vessel: string | null;
+  voyage: string | null;
+  cyCutoffAt: string | null;
+  siCutoffAt: string | null;
+  vgmCutoffAt: string | null;
+  terminal: string | null;
+  version: number;
+  document: { id: string; originalFilename: string };
 }
 interface DocumentRecord {
   id: string;
@@ -59,13 +85,17 @@ export default function BookingDetailPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [shippers, setShippers] = useState<CustomerShipper[]>([]);
+  const [soRecords, setSoRecords] = useState<SoRecord[]>([]);
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [r, documentResponse] = await Promise.all([
+      const [r, documentResponse, shipperResponse, soResponse] = await Promise.all([
         apiFetch(`/api/v1/bookings/${encodeURIComponent(id)}`),
         apiFetch(`/api/v1/bookings/${encodeURIComponent(id)}/documents`),
+        apiFetch('/api/v1/bookings/shippers'),
+        apiFetch(`/api/v1/bookings/${encodeURIComponent(id)}/so-records`),
       ]);
       const p = (await r.json()) as Booking & { message?: string };
       if (!r.ok) throw new Error(p.message ?? '订舱详情加载失败。');
@@ -73,9 +103,17 @@ export default function BookingDetailPage() {
         message?: string;
       };
       if (!documentResponse.ok) throw new Error(documentPayload.message ?? '订舱文件加载失败。');
+      const shipperPayload = (await shipperResponse.json()) as CustomerShipper[] & {
+        message?: string;
+      };
+      if (!shipperResponse.ok) throw new Error(shipperPayload.message ?? '常用发货人加载失败。');
+      const soPayload = (await soResponse.json()) as SoRecord[] & { message?: string };
+      if (!soResponse.ok) throw new Error(soPayload.message ?? 'SO 记录加载失败。');
       setBooking(p);
       setForm(p);
       setDocuments(documentPayload);
+      setShippers(shipperPayload);
+      setSoRecords(soPayload);
     } catch (e) {
       setError((e as { message?: string }).message ?? '订舱详情加载失败。');
     } finally {
@@ -93,21 +131,19 @@ export default function BookingDetailPage() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         commodity: currentForm.commodity,
+        packageType: currentForm.packageType,
         packages: Number(currentForm.packages),
         grossWeight: currentForm.grossWeight,
         volumeCbm: currentForm.volumeCbm,
+        cargoReadyDate: currentForm.cargoReadyDate?.slice(0, 10),
         isDangerousGoods: currentForm.isDangerousGoods,
+        specialInstructions: currentForm.specialInstructions,
+        sourceShipperId: currentForm.sourceShipperId || undefined,
         shipperName: currentForm.shipperName,
         shipperAddress: currentForm.shipperAddress,
         bookingContactName: currentForm.bookingContactName,
         bookingContactEmail: currentForm.bookingContactEmail || undefined,
         bookingContactPhone: currentForm.bookingContactPhone || undefined,
-        containerRequests: currentForm.containerRequests.map((c) => ({
-          containerType: c.containerType,
-          quantity: Number(c.quantity),
-          weightPerContainer: c.weightPerContainer || undefined,
-          remark: c.remark || undefined,
-        })),
       }),
     });
     const payload = (await r.json()) as ApiErrorPayload;
@@ -123,6 +159,79 @@ export default function BookingDetailPage() {
       await load();
     } catch (e) {
       setError((e as { message?: string }).message ?? '保存失败。');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const selectShipper = (shipperId: string) => {
+    const shipper = shippers.find((item) => item.id === shipperId);
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            sourceShipperId: shipper?.id ?? null,
+            shipperName: shipper?.name ?? current.shipperName,
+            shipperAddress: shipper?.address ?? current.shipperAddress,
+          }
+        : current,
+    );
+  };
+  const saveCurrentShipper = async () => {
+    if (!form?.shipperName?.trim() || !form.shipperAddress?.trim()) {
+      setFieldErrors((current) => ({ ...current, shipperName: '请先填写发货人名称和地址。' }));
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await apiFetch('/api/v1/bookings/shippers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: form.shipperName,
+          address: form.shipperAddress,
+          isDefault: shippers.length === 0,
+        }),
+      });
+      const payload = (await response.json()) as CustomerShipper & ApiErrorPayload;
+      if (!response.ok) throw new Error(formatApiError(payload, '保存常用发货人失败。'));
+      setShippers((current) => [payload, ...current.filter((item) => item.id !== payload.id)]);
+      change('sourceShipperId', payload.id);
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const updateSelectedShipper = async (changes: Record<string, unknown>) => {
+    if (!form?.sourceShipperId) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await apiFetch(`/api/v1/bookings/shippers/${form.sourceShipperId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      const payload = (await response.json()) as CustomerShipper & ApiErrorPayload;
+      if (!response.ok) throw new Error(formatApiError(payload, '更新常用发货人失败。'));
+      if (payload.status === 'INACTIVE') {
+        setShippers((current) => current.filter((item) => item.id !== payload.id));
+        change('sourceShipperId', null);
+      } else {
+        setShippers((current) =>
+          current
+            .map((item) =>
+              item.id === payload.id
+                ? payload
+                : { ...item, isDefault: payload.isDefault ? false : item.isDefault },
+            )
+            .sort(
+              (a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name),
+            ),
+        );
+      }
+    } catch (caught) {
+      setError((caught as Error).message);
     } finally {
       setBusy(false);
     }
@@ -192,7 +301,7 @@ export default function BookingDetailPage() {
   if (loading) return <LoadingState rows={8} />;
   if (!booking || !form)
     return <ErrorState description={error || '订舱不存在'} onRetry={() => void load()} />;
-  const editable = booking.status === 'DRAFT';
+  const editable = ['DRAFT', 'REVISION_REQUIRED'].includes(booking.status);
   return (
     <div className="space-y-5">
       <Link className="text-sm text-primary hover:underline" href="/portal/bookings">
@@ -207,16 +316,16 @@ export default function BookingDetailPage() {
             {editable ? (
               <>
                 <button className={secondary} disabled={busy} onClick={() => void action('cancel')}>
-                  取消订舱
+                  删除草稿
                 </button>
                 <button className={secondary} disabled={busy} onClick={() => void save()}>
                   保存草稿
                 </button>
                 <button className={primary} disabled={busy} onClick={openSubmitConfirmation}>
-                  提交审核
+                  提交订舱
                 </button>
               </>
-            ) : ['SUBMITTED', 'UNDER_REVIEW', 'CONFIRMED'].includes(booking.status) ? (
+            ) : ['SUBMITTED', 'APPROVED', 'BOOKING_SUBMITTED'].includes(booking.status) ? (
               <button className={secondary} disabled={busy} onClick={() => void action('cancel')}>
                 取消订舱
               </button>
@@ -237,6 +346,39 @@ export default function BookingDetailPage() {
         <Fact label="ETD" value={booking.etd?.slice(0, 10) ?? '待确认'} />
         <Fact label="状态备注" value={booking.lastStatusRemark ?? '—'} />
       </section>
+      <section className="rounded border border-primary/20 bg-primary/5 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">来源报价</h2>
+            <p className="mt-1 text-sm text-muted">
+              以下运输方案来自已接受报价，订舱阶段不可修改。
+            </p>
+          </div>
+          {booking.quoteId ? (
+            <Link
+              className="text-sm font-semibold text-primary hover:underline"
+              href={`/portal/quotes/${booking.quoteId}`}
+            >
+              {booking.quote?.quoteNo ?? '查看报价'} →
+            </Link>
+          ) : null}
+        </div>
+        <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-4">
+          <Fact label="航线" value={`${booking.polCode} → ${booking.podCode}`} />
+          <Fact label="船司" value={booking.carrierCode ?? '—'} />
+          <Fact label="ETD" value={booking.etd?.slice(0, 10) ?? '待确认'} />
+          <Fact label="箱型与箱量" value={formatContainerRequests(booking.containerRequests)} />
+        </dl>
+        {booking.quote ? (
+          <p className="mt-3 text-sm text-muted">
+            报价摘要：{booking.quote.currency}{' '}
+            {Number(booking.quote.totalAmount).toLocaleString('zh-CN', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        ) : null}
+      </section>
       <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-2">
         <div className="sm:col-span-2 rounded bg-sidebar px-3 py-2 text-sm text-muted">
           标有 <span className="font-bold text-danger">*</span>{' '}
@@ -250,7 +392,22 @@ export default function BookingDetailPage() {
             onChange={(e) => change('commodity', e.target.value)}
           />
         </Field>
-        <Field label="件数" required error={fieldErrors.packages}>
+        <Field label="包装类型" required error={fieldErrors.packageType}>
+          <select
+            className={inputClass(fieldErrors.packageType)}
+            disabled={!editable}
+            value={form.packageType ?? ''}
+            onChange={(e) => change('packageType', e.target.value)}
+          >
+            <option value="">请选择</option>
+            {['CARTON', 'PALLET', 'CASE', 'BAG', 'DRUM', 'PACKAGE', 'OTHER'].map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="包装数量" required error={fieldErrors.packages}>
           <input
             className={inputClass(fieldErrors.packages)}
             disabled={!editable}
@@ -259,6 +416,31 @@ export default function BookingDetailPage() {
             value={form.packages ?? ''}
             onChange={(e) => change('packages', e.target.value)}
           />
+        </Field>
+        <Field label="备货日期" required error={fieldErrors.cargoReadyDate}>
+          <input
+            className={inputClass(fieldErrors.cargoReadyDate)}
+            disabled={!editable}
+            type="date"
+            value={form.cargoReadyDate?.slice(0, 10) ?? ''}
+            onChange={(e) => change('cargoReadyDate', e.target.value)}
+          />
+        </Field>
+        <Field label="选择常用发货人">
+          <select
+            className={input}
+            disabled={!editable}
+            value={form.sourceShipperId ?? ''}
+            onChange={(e) => selectShipper(e.target.value)}
+          >
+            <option value="">手工填写</option>
+            {shippers.map((shipper) => (
+              <option key={shipper.id} value={shipper.id}>
+                {shipper.name}
+                {shipper.isDefault ? '（默认）' : ''}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="毛重 KG" required error={fieldErrors.grossWeight}>
           <input
@@ -319,6 +501,54 @@ export default function BookingDetailPage() {
             onChange={(e) => change('shipperAddress', e.target.value)}
           />
         </Field>
+        {editable ? (
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            {form.sourceShipperId ? (
+              <>
+                <button
+                  className={secondary}
+                  disabled={busy}
+                  onClick={() =>
+                    void updateSelectedShipper({
+                      name: form.shipperName,
+                      address: form.shipperAddress,
+                    })
+                  }
+                  type="button"
+                >
+                  更新所选发货人
+                </button>
+                <button
+                  className={secondary}
+                  disabled={
+                    busy || shippers.find((item) => item.id === form.sourceShipperId)?.isDefault
+                  }
+                  onClick={() => void updateSelectedShipper({ isDefault: true })}
+                  type="button"
+                >
+                  设为默认
+                </button>
+                <button
+                  className="h-9 rounded border border-danger/30 px-4 text-sm font-semibold text-danger disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => void updateSelectedShipper({ status: 'INACTIVE' })}
+                  type="button"
+                >
+                  停用
+                </button>
+              </>
+            ) : (
+              <button
+                className={secondary}
+                disabled={busy}
+                onClick={() => void saveCurrentShipper()}
+                type="button"
+              >
+                保存为常用发货人
+              </button>
+            )}
+          </div>
+        ) : null}
         <label className="flex items-center gap-2 text-sm">
           <input
             checked={form.isDangerousGoods}
@@ -328,97 +558,68 @@ export default function BookingDetailPage() {
           />
           危险品
         </label>
+        <Field label="特殊要求（选填）" wide>
+          <textarea
+            className={`${input} min-h-24 py-2`}
+            disabled={!editable}
+            maxLength={2000}
+            value={form.specialInstructions ?? ''}
+            onChange={(e) => change('specialInstructions', e.target.value)}
+          />
+        </Field>
       </section>
+      {editable && !documents.length && !booking.shipments.length ? null : (
+        <section className="rounded border border-border bg-surface p-5">
+          <h2 className="font-semibold">SO 与 Shipment</h2>
+          <div className="mt-3 space-y-2 text-sm">
+            {soRecords.map((record) => (
+              <div className="rounded border border-border p-3" key={record.id}>
+                <div className="font-semibold">
+                  SO {record.soNumber} · V{record.version}
+                </div>
+                <div className="mt-1 text-muted">
+                  船名/航次：{record.vessel ?? '—'} / {record.voyage ?? '—'} · 码头：
+                  {record.terminal ?? '—'}
+                </div>
+                <div className="text-muted">
+                  截关：CY {formatDateTime(record.cyCutoffAt)} · SI{' '}
+                  {formatDateTime(record.siCutoffAt)} · VGM {formatDateTime(record.vgmCutoffAt)}
+                </div>
+              </div>
+            ))}
+            {documents.map((document) => (
+              <button
+                className="block text-primary hover:underline"
+                key={document.id}
+                onClick={() => void downloadDocument(document)}
+                type="button"
+              >
+                下载 {document.documentType}：{document.originalFilename}（V{document.version}）
+              </button>
+            ))}
+            {booking.shipments.map((shipment) => (
+              <div className="rounded bg-sidebar px-3 py-2" key={shipment.id}>
+                Shipment：{shipment.shipmentNo} · {shipment.status}
+              </div>
+            ))}
+            {!documents.length && !booking.shipments.length ? (
+              <div className="text-muted">SO 尚未放出，Shipment 尚未创建。</div>
+            ) : null}
+          </div>
+        </section>
+      )}
       <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">SO 与 Shipment</h2>
-        <div className="mt-3 space-y-2 text-sm">
-          {documents.map((document) => (
-            <button
-              className="block text-primary hover:underline"
-              key={document.id}
-              onClick={() => void downloadDocument(document)}
-              type="button"
-            >
-              下载 {document.documentType}：{document.originalFilename}（V{document.version}）
-            </button>
-          ))}
-          {booking.shipments.map((shipment) => (
-            <div className="rounded bg-sidebar px-3 py-2" key={shipment.id}>
-              Shipment：{shipment.shipmentNo} · {shipment.status}
-            </div>
-          ))}
-          {!documents.length && !booking.shipments.length ? (
-            <div className="text-muted">SO 尚未放出，Shipment 尚未创建。</div>
-          ) : null}
-        </div>
-      </section>
-      <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">
-          箱量需求 <span className="text-danger">*</span>
-        </h2>
+        <h2 className="font-semibold">箱型与箱量（来自报价，不可修改）</h2>
         {fieldErrors.containerRequests ? (
           <p className="mt-1 text-sm text-danger">{fieldErrors.containerRequests}</p>
         ) : null}
         <div className="mt-4 space-y-3">
-          {form.containerRequests.map((c, i) => (
-            <div className="grid gap-3 sm:grid-cols-4" key={`${c.containerType}-${i}`}>
-              <input
-                className={input}
-                disabled={!editable}
-                value={c.containerType}
-                onChange={(e) =>
-                  change(
-                    'containerRequests',
-                    form.containerRequests.map((x, j) =>
-                      j === i ? { ...x, containerType: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
-              <input
-                className={input}
-                disabled={!editable}
-                min="1"
-                type="number"
-                value={c.quantity}
-                onChange={(e) =>
-                  change(
-                    'containerRequests',
-                    form.containerRequests.map((x, j) =>
-                      j === i ? { ...x, quantity: Number(e.target.value) } : x,
-                    ),
-                  )
-                }
-              />
-              <input
-                className={input}
-                disabled={!editable}
-                inputMode="decimal"
-                placeholder="单柜重量 KG"
-                value={c.weightPerContainer ?? ''}
-                onChange={(e) =>
-                  change(
-                    'containerRequests',
-                    form.containerRequests.map((x, j) =>
-                      j === i ? { ...x, weightPerContainer: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
-              <input
-                className={input}
-                disabled={!editable}
-                placeholder="备注"
-                value={c.remark ?? ''}
-                onChange={(e) =>
-                  change(
-                    'containerRequests',
-                    form.containerRequests.map((x, j) =>
-                      j === i ? { ...x, remark: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
+          {form.containerRequests.map((c) => (
+            <div
+              className="rounded bg-sidebar px-3 py-2 text-sm font-semibold"
+              key={c.id ?? c.containerType}
+            >
+              {c.quantity} × {c.containerType}
             </div>
           ))}
         </div>
@@ -433,7 +634,7 @@ export default function BookingDetailPage() {
           <div className="w-full max-w-lg rounded border border-border bg-surface shadow-xl">
             <div className="border-b border-border px-5 py-4">
               <h2 className="text-base font-semibold" id="submit-booking-title">
-                确认提交订舱审核
+                确认提交订舱
               </h2>
               <p className="mt-1 text-sm text-muted">
                 提交后将发送给货代操作团队审核，当前草稿将不能继续编辑。
@@ -530,10 +731,12 @@ const secondary = 'h-9 rounded border border-border px-4 text-sm font-semibold d
 function validateForSubmit(form: Booking): FieldErrors {
   const errors: FieldErrors = {};
   if (!form.commodity?.trim()) errors.commodity = '请输入品名。';
+  if (!form.packageType) errors.packageType = '请选择包装类型。';
   if (!Number.isInteger(Number(form.packages)) || Number(form.packages) < 1)
     errors.packages = '请输入大于或等于 1 的整数。';
   if (!isPositiveDecimal(form.grossWeight)) errors.grossWeight = '请输入大于 0 的毛重。';
   if (!isPositiveDecimal(form.volumeCbm)) errors.volumeCbm = '请输入大于 0 的体积。';
+  if (!form.cargoReadyDate) errors.cargoReadyDate = '请选择备货日期。';
   if (!form.shipperName?.trim()) errors.shipperName = '请输入发货人名称。';
   if (!form.shipperAddress?.trim()) errors.shipperAddress = '请输入发货人地址。';
   if (!form.bookingContactName?.trim()) errors.bookingContactName = '请输入订舱联系人。';
@@ -558,9 +761,11 @@ function isPositiveDecimal(value: string | null) {
 function mapMissingFields(missing: string[] = []): FieldErrors {
   const labels: Record<string, [keyof FieldErrors, string]> = {
     commodity: ['commodity', '请输入品名。'],
+    packageType: ['packageType', '请选择包装类型。'],
     packages: ['packages', '请输入件数。'],
     grossWeight: ['grossWeight', '请输入毛重。'],
     volumeCbm: ['volumeCbm', '请输入体积。'],
+    cargoReadyDate: ['cargoReadyDate', '请选择备货日期。'],
     shipperName: ['shipperName', '请输入发货人名称。'],
     shipperAddress: ['shipperAddress', '请输入发货人地址。'],
     bookingContactName: ['bookingContactName', '请输入订舱联系人。'],
@@ -583,4 +788,8 @@ function formatApiError(payload: ApiErrorPayload, fallback: string) {
 
 function formatContainerRequests(items: Container[]) {
   return items.map((item) => `${item.containerType} × ${item.quantity}`).join('、');
+}
+
+function formatDateTime(value: string | null) {
+  return value ? new Date(value).toLocaleString('zh-CN') : '—';
 }

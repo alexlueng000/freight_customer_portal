@@ -19,7 +19,10 @@ import { LoginDto } from './dto/login.dto.js';
 import { Public } from './public.decorator.js';
 
 const refreshCookieName = 'freight_refresh';
-const loginRateLimit = process.env.NODE_ENV === 'development' ? 50 : 5;
+// Local development and automated E2E share a small set of demo accounts. Keep
+// the strict limit for production, while allowing serial browser suites to
+// authenticate each isolated context without tripping over earlier tests.
+const loginRateLimit = process.env.NODE_ENV === 'production' ? 5 : 50;
 
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })

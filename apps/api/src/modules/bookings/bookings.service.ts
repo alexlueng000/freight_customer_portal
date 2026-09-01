@@ -1,20 +1,29 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import { BookingStatus, Prisma, QuoteStatus, RoleCode } from '@prisma/client';
+import {
+  BookingReviewActionType,
+  BookingStatus,
+  Prisma,
+  QuoteStatus,
+  RoleCode,
+} from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
 import { BookingStateMachine } from './booking-state-machine.js';
-import { DocumentStorageService } from './document-storage.service.js';
 import type { BookingActionDto } from './dto/booking-action.dto.js';
 import type { CreateShipmentDto } from './dto/create-shipment.dto.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
 import type { ListBookingsDto } from './dto/list-bookings.dto.js';
 import type { UpdateBookingDto } from './dto/update-booking.dto.js';
+import type { CreateCustomerShipperDto } from './dto/create-customer-shipper.dto.js';
+import type { UpdateCustomerShipperDto } from './dto/update-customer-shipper.dto.js';
+import type { RequestBookingRevisionDto } from './dto/request-booking-revision.dto.js';
+import type { SubmitBookingToCarrierDto } from './dto/submit-booking-to-carrier.dto.js';
 
 const bookingSelect = {
   id: true,
@@ -26,10 +35,14 @@ const bookingSelect = {
   carrierCode: true,
   etd: true,
   commodity: true,
+  packageType: true,
   packages: true,
   grossWeight: true,
   volumeCbm: true,
+  cargoReadyDate: true,
   isDangerousGoods: true,
+  specialInstructions: true,
+  sourceShipperId: true,
   shipperName: true,
   shipperAddress: true,
   bookingContactName: true,
@@ -67,20 +80,6 @@ const bookingSelect = {
   },
 } satisfies Prisma.BookingSelect;
 
-const documentSelect = {
-  id: true,
-  bookingId: true,
-  shipmentId: true,
-  documentType: true,
-  originalFilename: true,
-  mimeType: true,
-  sizeBytes: true,
-  version: true,
-  customerVisible: true,
-  status: true,
-  createdAt: true,
-} satisfies Prisma.DocumentSelect;
-
 const shipmentSelect = {
   id: true,
   shipmentNo: true,
@@ -97,13 +96,25 @@ const shipmentSelect = {
   updatedAt: true,
 } satisfies Prisma.ShipmentSelect;
 
+const customerShipperSelect = {
+  id: true,
+  name: true,
+  address: true,
+  contactName: true,
+  contactEmail: true,
+  contactPhone: true,
+  isDefault: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.CustomerShipperSelect;
+
 @Injectable()
 export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly requestContext: RequestContextService,
     private readonly stateMachine: BookingStateMachine,
-    private readonly storage: DocumentStorageService,
   ) {}
 
   async create(dto: CreateBookingDto) {
@@ -155,13 +166,32 @@ export class BookingsService {
             item.containerType,
             Math.max(1, Math.round(Number(item.quantity))) + (grouped.get(item.containerType) ?? 0),
           );
-      const contact = await tx.customerContact.findFirst({
+      const user = await tx.user.findFirstOrThrow({
+        where: { id: context.userId, tenantId: context.tenantId },
+        select: { displayName: true, email: true },
+      });
+      const matchedContact = await tx.customerContact.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          customerCompanyId: context.customerCompanyId,
+          email: { equals: user.email, mode: 'insensitive' },
+        },
+      });
+      const defaultContact = await tx.customerContact.findFirst({
         where: {
           tenantId: context.tenantId,
           customerCompanyId: context.customerCompanyId,
           isBookingContact: true,
         },
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      });
+      const defaultShipper = await tx.customerShipper.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          customerCompanyId: context.customerCompanyId,
+          isDefault: true,
+          status: 'ACTIVE',
+        },
       });
       const booking = await tx.booking.create({
         data: {
@@ -173,9 +203,12 @@ export class BookingsService {
           podCode: quote.podCode,
           carrierCode: quote.carrierCode,
           etd: quote.etd,
-          bookingContactName: contact?.name,
-          bookingContactEmail: contact?.email,
-          bookingContactPhone: contact?.phone,
+          bookingContactName: user.displayName,
+          bookingContactEmail: user.email,
+          bookingContactPhone: matchedContact?.phone ?? defaultContact?.phone,
+          sourceShipperId: defaultShipper?.id,
+          shipperName: defaultShipper?.name,
+          shipperAddress: defaultShipper?.address,
           createdById: context.userId,
           updatedById: context.userId,
           containerRequests: {
@@ -236,6 +269,146 @@ export class BookingsService {
     return this.getScoped(id, true);
   }
 
+  async listCustomerShippers() {
+    const context = this.requireCustomer();
+    return this.prisma.customerShipper.findMany({
+      where: {
+        tenantId: context.tenantId,
+        customerCompanyId: context.customerCompanyId,
+        status: 'ACTIVE',
+      },
+      select: customerShipperSelect,
+      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  async createCustomerShipper(dto: CreateCustomerShipperDto) {
+    const context = this.requireCustomer();
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (dto.isDefault) {
+          await tx.customerShipper.updateMany({
+            where: { tenantId: context.tenantId, customerCompanyId: context.customerCompanyId },
+            data: { isDefault: false, updatedById: context.userId },
+          });
+        }
+        const shipper = await tx.customerShipper.create({
+          data: {
+            tenantId: context.tenantId,
+            customerCompanyId: context.customerCompanyId!,
+            name: dto.name.trim(),
+            address: dto.address.trim(),
+            contactName: dto.contactName?.trim() || null,
+            contactEmail: dto.contactEmail?.trim().toLowerCase() || null,
+            contactPhone: dto.contactPhone?.trim() || null,
+            isDefault: dto.isDefault ?? false,
+            status: dto.status ?? 'ACTIVE',
+            createdById: context.userId,
+            updatedById: context.userId,
+          },
+          select: customerShipperSelect,
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            entityType: 'CustomerShipper',
+            entityId: shipper.id,
+            action: 'CREATE',
+            afterData: {
+              customerCompanyId: context.customerCompanyId,
+              name: shipper.name,
+              isDefault: shipper.isDefault,
+              status: shipper.status,
+              hasContactEmail: Boolean(shipper.contactEmail),
+              hasContactPhone: Boolean(shipper.contactPhone),
+            },
+          },
+        });
+        return shipper;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'DEFAULT_SHIPPER_CONFLICT',
+          message: 'The customer already has a default shipper; refresh and try again',
+        });
+      }
+      throw error;
+    }
+  }
+
+  async updateCustomerShipper(id: string, dto: UpdateCustomerShipperDto) {
+    const context = this.requireCustomer();
+    if (dto.status === 'INACTIVE' && dto.isDefault === true)
+      throw new BadRequestException({
+        code: 'INACTIVE_DEFAULT_SHIPPER_INVALID',
+        message: 'An inactive shipper cannot be the default',
+      });
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.customerShipper.findFirst({
+          where: {
+            id,
+            tenantId: context.tenantId,
+            customerCompanyId: context.customerCompanyId,
+          },
+          select: customerShipperSelect,
+        });
+        if (!existing)
+          throw new NotFoundException({
+            code: 'CUSTOMER_SHIPPER_NOT_FOUND',
+            message: 'Customer shipper not found',
+          });
+        if (dto.isDefault === true) {
+          await tx.customerShipper.updateMany({
+            where: {
+              tenantId: context.tenantId,
+              customerCompanyId: context.customerCompanyId,
+              id: { not: id },
+            },
+            data: { isDefault: false, updatedById: context.userId },
+          });
+        }
+        const status = dto.status ?? existing.status;
+        const shipper = await tx.customerShipper.update({
+          where: { id },
+          data: {
+            name: dto.name?.trim(),
+            address: dto.address?.trim(),
+            contactName: dto.contactName?.trim() || undefined,
+            contactEmail: dto.contactEmail?.trim().toLowerCase() || undefined,
+            contactPhone: dto.contactPhone?.trim() || undefined,
+            status,
+            isDefault: status === 'INACTIVE' ? false : dto.isDefault,
+            updatedById: context.userId,
+          },
+          select: customerShipperSelect,
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            entityType: 'CustomerShipper',
+            entityId: id,
+            action: 'UPDATE',
+            beforeData: this.shipperAuditSnapshot(existing),
+            afterData: this.shipperAuditSnapshot(shipper),
+          },
+        });
+        return shipper;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'DEFAULT_SHIPPER_CONFLICT',
+          message: 'The customer already has a default shipper; refresh and try again',
+        });
+      }
+      throw error;
+    }
+  }
+
   async update(id: string, dto: UpdateBookingDto) {
     const context = this.requireCustomer();
     return this.prisma.$transaction(async (tx) => {
@@ -245,47 +418,45 @@ export class BookingsService {
       });
       if (!booking)
         throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
-      if (booking.status !== BookingStatus.DRAFT)
+      if (
+        booking.status !== BookingStatus.DRAFT &&
+        booking.status !== BookingStatus.REVISION_REQUIRED
+      )
         throw new BadRequestException({
           code: 'BOOKING_NOT_EDITABLE',
-          message: 'Only draft bookings can be edited',
+          message: 'Only draft or revision-required bookings can be edited',
         });
-      if (dto.containerRequests) {
-        const unique = new Set(
-          dto.containerRequests.map((item) => item.containerType.toUpperCase()),
-        );
-        if (unique.size !== dto.containerRequests.length)
-          throw new BadRequestException({
-            code: 'DUPLICATE_CONTAINER_TYPE',
-            message: 'Container types must be unique',
-          });
-        await tx.bookingContainerRequest.deleteMany({
-          where: { bookingId: id, tenantId: context.tenantId },
+      const shipper = dto.sourceShipperId
+        ? await tx.customerShipper.findFirst({
+            where: {
+              id: dto.sourceShipperId,
+              tenantId: context.tenantId,
+              customerCompanyId: context.customerCompanyId,
+              status: 'ACTIVE',
+            },
+          })
+        : null;
+      if (dto.sourceShipperId && !shipper)
+        throw new BadRequestException({
+          code: 'SHIPPER_NOT_IN_CUSTOMER_SCOPE',
+          message: 'The selected shipper is outside the current customer scope',
         });
-        await tx.bookingContainerRequest.createMany({
-          data: dto.containerRequests.map((item, sortOrder) => ({
-            tenantId: context.tenantId,
-            bookingId: id,
-            containerType: item.containerType.toUpperCase(),
-            quantity: item.quantity,
-            weightPerContainer: item.weightPerContainer
-              ? new Prisma.Decimal(item.weightPerContainer)
-              : null,
-            remark: item.remark?.trim() || null,
-            sortOrder,
-          })),
-        });
-      }
       const updated = await tx.booking.update({
         where: { id },
         data: {
           commodity: dto.commodity?.trim(),
+          packageType: dto.packageType,
           packages: dto.packages,
           grossWeight: dto.grossWeight ? new Prisma.Decimal(dto.grossWeight) : undefined,
           volumeCbm: dto.volumeCbm ? new Prisma.Decimal(dto.volumeCbm) : undefined,
+          cargoReadyDate: dto.cargoReadyDate
+            ? new Date(`${dto.cargoReadyDate}T00:00:00.000Z`)
+            : undefined,
           isDangerousGoods: dto.isDangerousGoods,
-          shipperName: dto.shipperName?.trim(),
-          shipperAddress: dto.shipperAddress?.trim(),
+          specialInstructions: dto.specialInstructions?.trim() || undefined,
+          sourceShipperId: shipper?.id ?? dto.sourceShipperId,
+          shipperName: shipper?.name ?? dto.shipperName?.trim(),
+          shipperAddress: shipper?.address ?? dto.shipperAddress?.trim(),
           bookingContactName: dto.bookingContactName?.trim(),
           bookingContactEmail: dto.bookingContactEmail?.trim().toLowerCase(),
           bookingContactPhone: dto.bookingContactPhone?.trim(),
@@ -318,9 +489,11 @@ export class BookingsService {
       throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
     const missing = [
       'commodity',
+      'packageType',
       'packages',
       'grossWeight',
       'volumeCbm',
+      'cargoReadyDate',
       'shipperName',
       'shipperAddress',
       'bookingContactName',
@@ -337,100 +510,16 @@ export class BookingsService {
     return this.transition(id, BookingStatus.SUBMITTED, {}, false);
   }
 
-  async releaseSo(id: string, file: Express.Multer.File | undefined) {
-    const context = this.requireInternal();
-    if (!file?.buffer.length)
-      throw new BadRequestException({ code: 'SO_FILE_REQUIRED', message: 'SO file is required' });
-    const allowedTypes = new Set(['application/pdf', 'image/png', 'image/jpeg']);
-    if (!allowedTypes.has(file.mimetype))
-      throw new BadRequestException({
-        code: 'SO_FILE_TYPE_INVALID',
-        message: 'SO must be a PDF, PNG, or JPEG file',
-      });
-    const booking = await this.prisma.booking.findFirst({
-      where: { id, ...this.internalWhere(context), status: BookingStatus.CONFIRMED },
-      select: { id: true, status: true },
-    });
-    if (!booking)
-      throw new NotFoundException({
-        code: 'CONFIRMED_BOOKING_NOT_FOUND',
-        message: 'Confirmed booking not found',
-      });
-    const latest = await this.prisma.document.aggregate({
-      where: { tenantId: context.tenantId, bookingId: id, documentType: 'SO' },
-      _max: { version: true },
-    });
-    const version = (latest._max.version ?? 0) + 1;
-    const objectKey = `tenants/${context.tenantId}/bookings/${id}/so/v${version}-${randomUUID()}`;
-    await this.storage.upload(objectKey, file);
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        const changed = await tx.booking.updateMany({
-          where: {
-            id,
-            tenantId: context.tenantId,
-            status: BookingStatus.CONFIRMED,
-          },
-          data: {
-            status: BookingStatus.SO_RELEASED,
-            updatedById: context.userId,
-            lastStatusRemark: 'SO released to customer',
-          },
-        });
-        if (changed.count !== 1)
-          throw new BadRequestException({
-            code: 'BOOKING_STATE_CONFLICT',
-            message: 'Booking status changed; refresh and try again',
-          });
-        const document = await tx.document.create({
-          data: {
-            tenantId: context.tenantId,
-            bookingId: id,
-            documentType: 'SO',
-            objectKey,
-            originalFilename: file.originalname.slice(0, 255),
-            mimeType: file.mimetype,
-            sizeBytes: file.size,
-            version,
-            customerVisible: true,
-            uploadedById: context.userId,
-          },
-          select: documentSelect,
-        });
-        await tx.auditLog.createMany({
-          data: [
-            {
-              tenantId: context.tenantId,
-              actorUserId: context.userId,
-              entityType: 'Document',
-              entityId: document.id,
-              action: 'UPLOAD_SO',
-              afterData: { bookingId: id, version, customerVisible: true },
-            },
-            {
-              tenantId: context.tenantId,
-              actorUserId: context.userId,
-              entityType: 'Booking',
-              entityId: id,
-              action: 'STATUS_SO_RELEASED',
-              beforeData: { status: BookingStatus.CONFIRMED },
-              afterData: { status: BookingStatus.SO_RELEASED, documentId: document.id },
-            },
-          ],
-        });
-        return document;
-      });
-    } catch (error) {
-      await this.storage.remove(objectKey);
-      throw error;
-    }
-  }
-
   async createShipment(id: string, dto: CreateShipmentDto) {
     const context = this.requireInternal();
     return this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findFirst({
-        where: { id, ...this.internalWhere(context), status: BookingStatus.SO_RELEASED },
+        where: {
+          id,
+          ...this.internalWhere(context),
+          status: BookingStatus.BOOKED,
+          documents: { some: { documentType: 'SO', status: 'ACTIVE', customerVisible: true } },
+        },
         select: {
           id: true,
           customerCompanyId: true,
@@ -442,8 +531,8 @@ export class BookingsService {
       });
       if (!booking)
         throw new NotFoundException({
-          code: 'SO_RELEASED_BOOKING_NOT_FOUND',
-          message: 'SO-released booking not found',
+          code: 'BOOKED_BOOKING_WITH_PUBLISHED_SO_NOT_FOUND',
+          message: 'Booked booking with a published SO not found',
         });
       const existing = await tx.shipment.findFirst({
         where: { tenantId: context.tenantId, bookingId: id },
@@ -499,11 +588,30 @@ export class BookingsService {
   cancel(id: string, dto: BookingActionDto) {
     return this.transition(id, BookingStatus.CANCELLED, dto, false);
   }
-  review(id: string, dto: BookingActionDto) {
-    return this.transition(id, BookingStatus.UNDER_REVIEW, dto, true);
+  approve(id: string, dto: BookingActionDto) {
+    return this.internalTransition(id, BookingStatus.APPROVED, BookingReviewActionType.APPROVE, {
+      internalRemark: dto.remark,
+    });
   }
-  confirm(id: string, dto: BookingActionDto) {
-    return this.transition(id, BookingStatus.CONFIRMED, dto, true);
+  requestRevision(id: string, dto: RequestBookingRevisionDto) {
+    return this.internalTransition(
+      id,
+      BookingStatus.REVISION_REQUIRED,
+      BookingReviewActionType.REQUEST_REVISION,
+      dto,
+    );
+  }
+  submitToCarrier(id: string, dto: SubmitBookingToCarrierDto) {
+    return this.internalTransition(
+      id,
+      BookingStatus.BOOKING_SUBMITTED,
+      BookingReviewActionType.SUBMIT_TO_CARRIER,
+      {
+        internalRemark: dto.internalRemark,
+        carrierSourceName: dto.sourceName,
+        carrierReference: dto.reference,
+      },
+    );
   }
   reject(id: string, dto: BookingActionDto) {
     if (!dto.remark)
@@ -511,10 +619,14 @@ export class BookingsService {
         code: 'BOOKING_REJECTION_REASON_REQUIRED',
         message: 'A rejection reason is required',
       });
-    return this.transition(id, BookingStatus.REJECTED, dto, true);
+    return this.internalTransition(id, BookingStatus.REJECTED, BookingReviewActionType.REJECT, {
+      customerVisibleRemark: dto.remark,
+    });
   }
   cancelInternal(id: string, dto: BookingActionDto) {
-    return this.transition(id, BookingStatus.CANCELLED, dto, true);
+    return this.internalTransition(id, BookingStatus.CANCELLED, BookingReviewActionType.CANCEL, {
+      customerVisibleRemark: dto.remark,
+    });
   }
 
   private async transition(
@@ -545,8 +657,10 @@ export class BookingsService {
           lastStatusRemark: dto.remark?.trim(),
           updatedById: context.userId,
           ...(target === BookingStatus.SUBMITTED ? { submittedAt: now } : {}),
-          ...(target === BookingStatus.UNDER_REVIEW ? { underReviewAt: now } : {}),
-          ...(target === BookingStatus.CONFIRMED ? { confirmedAt: now } : {}),
+          ...(target === BookingStatus.REVISION_REQUIRED ? { revisionRequestedAt: now } : {}),
+          ...(target === BookingStatus.APPROVED ? { approvedAt: now } : {}),
+          ...(target === BookingStatus.BOOKING_SUBMITTED ? { bookingSubmittedAt: now } : {}),
+          ...(target === BookingStatus.BOOKED ? { bookedAt: now } : {}),
           ...(target === BookingStatus.REJECTED ? { rejectedAt: now } : {}),
           ...(target === BookingStatus.CANCELLED ? { cancelledAt: now } : {}),
         },
@@ -565,6 +679,79 @@ export class BookingsService {
           action: `STATUS_${target}`,
           beforeData: { status: booking.status },
           afterData: { status: target, remark: dto.remark?.trim() },
+        },
+      });
+      return tx.booking.findUniqueOrThrow({ where: { id }, select: bookingSelect });
+    });
+  }
+
+  private async internalTransition(
+    id: string,
+    target: BookingStatus,
+    action: BookingReviewActionType,
+    details: {
+      reasonCode?: RequestBookingRevisionDto['reasonCode'];
+      customerVisibleRemark?: string;
+      internalRemark?: string;
+      carrierSourceName?: string;
+      carrierReference?: string;
+    },
+  ) {
+    const context = this.requireInternal();
+    return this.prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.findFirst({
+        where: { id, ...this.internalWhere(context) },
+        select: { id: true, status: true },
+      });
+      if (!booking)
+        throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
+      if (!this.stateMachine.canTransition(booking.status, target))
+        throw new BadRequestException({
+          code: 'ILLEGAL_BOOKING_TRANSITION',
+          message: `Booking cannot transition from ${booking.status} to ${target}`,
+          details: { from: booking.status, to: target },
+        });
+      const now = new Date();
+      const changed = await tx.booking.updateMany({
+        where: { id, tenantId: context.tenantId, status: booking.status },
+        data: {
+          status: target,
+          lastStatusRemark: details.customerVisibleRemark?.trim(),
+          updatedById: context.userId,
+          ...(target === BookingStatus.REVISION_REQUIRED ? { revisionRequestedAt: now } : {}),
+          ...(target === BookingStatus.APPROVED ? { approvedAt: now } : {}),
+          ...(target === BookingStatus.BOOKING_SUBMITTED ? { bookingSubmittedAt: now } : {}),
+          ...(target === BookingStatus.REJECTED ? { rejectedAt: now } : {}),
+          ...(target === BookingStatus.CANCELLED ? { cancelledAt: now } : {}),
+        },
+      });
+      if (changed.count !== 1)
+        throw new BadRequestException({
+          code: 'BOOKING_STATE_CONFLICT',
+          message: 'Booking status changed; refresh and try again',
+        });
+      const reviewAction = await tx.bookingReviewAction.create({
+        data: {
+          tenantId: context.tenantId,
+          bookingId: id,
+          action,
+          reasonCode: details.reasonCode,
+          customerVisibleRemark: details.customerVisibleRemark?.trim(),
+          internalRemark: details.internalRemark?.trim(),
+          carrierSourceName: details.carrierSourceName?.trim(),
+          carrierReference: details.carrierReference?.trim(),
+          actorUserId: context.userId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'Booking',
+          entityId: id,
+          action: `STATUS_${target}`,
+          beforeData: { status: booking.status },
+          afterData: { status: target, reviewActionId: reviewAction.id },
         },
       });
       return tx.booking.findUniqueOrThrow({ where: { id }, select: bookingSelect });
@@ -604,7 +791,32 @@ export class BookingsService {
       : { id, tenantId: context.tenantId, customerCompanyId: context.customerCompanyId };
     const booking = await this.prisma.booking.findFirst({
       where,
-      select: { ...bookingSelect, customer: { select: { id: true, name: true } } },
+      select: {
+        ...bookingSelect,
+        customer: { select: { id: true, name: true } },
+        reviewActions: {
+          select: internal
+            ? {
+                id: true,
+                action: true,
+                reasonCode: true,
+                customerVisibleRemark: true,
+                internalRemark: true,
+                carrierSourceName: true,
+                carrierReference: true,
+                createdAt: true,
+                actor: { select: { displayName: true } },
+              }
+            : {
+                id: true,
+                action: true,
+                reasonCode: true,
+                customerVisibleRemark: true,
+                createdAt: true,
+              },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
     if (!booking)
       throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
@@ -643,22 +855,48 @@ export class BookingsService {
   private auditSnapshot(value: {
     status: BookingStatus;
     commodity: string | null;
+    packageType: string | null;
     packages: number | null;
     grossWeight: { toString(): string } | null;
     volumeCbm: { toString(): string } | null;
+    cargoReadyDate: Date | null;
     isDangerousGoods: boolean;
+    specialInstructions: string | null;
+    sourceShipperId: string | null;
     shipperName: string | null;
     bookingContactName: string | null;
   }): Prisma.InputJsonObject {
     return {
       status: value.status,
       commodity: value.commodity,
+      packageType: value.packageType,
       packages: value.packages,
       grossWeight: value.grossWeight?.toString() ?? null,
       volumeCbm: value.volumeCbm?.toString() ?? null,
+      cargoReadyDate: value.cargoReadyDate?.toISOString().slice(0, 10) ?? null,
       isDangerousGoods: value.isDangerousGoods,
+      specialInstructions: value.specialInstructions,
+      sourceShipperId: value.sourceShipperId,
       shipperName: value.shipperName,
       bookingContactName: value.bookingContactName,
+    };
+  }
+
+  private shipperAuditSnapshot(value: {
+    name: string;
+    address: string;
+    isDefault: boolean;
+    status: string;
+    contactEmail: string | null;
+    contactPhone: string | null;
+  }): Prisma.InputJsonObject {
+    return {
+      name: value.name,
+      address: value.address,
+      isDefault: value.isDefault,
+      status: value.status,
+      hasContactEmail: Boolean(value.contactEmail),
+      hasContactPhone: Boolean(value.contactPhone),
     };
   }
 }

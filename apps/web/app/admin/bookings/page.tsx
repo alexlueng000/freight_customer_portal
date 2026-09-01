@@ -57,11 +57,18 @@ export default function AdminBookingsPage() {
             onChange={(e) => setStatus(e.target.value)}
           >
             <option value="">全部状态</option>
-            {['DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'CONFIRMED', 'REJECTED', 'CANCELLED'].map(
-              (s) => (
-                <option key={s}>{s}</option>
-              ),
-            )}
+            {[
+              'DRAFT',
+              'SUBMITTED',
+              'REVISION_REQUIRED',
+              'APPROVED',
+              'BOOKING_SUBMITTED',
+              'BOOKED',
+              'REJECTED',
+              'CANCELLED',
+            ].map((s) => (
+              <option key={s}>{s}</option>
+            ))}
           </select>
         </div>
         {loading ? (

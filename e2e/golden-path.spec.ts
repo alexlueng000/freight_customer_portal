@@ -119,16 +119,17 @@ test.describe('Rate to Invoice golden path', () => {
         headers: bearer(customerToken),
         data: {
           commodity: 'Consumer goods',
+          packageType: 'CARTON',
           packages: 120,
           grossWeight: '18500.00',
           volumeCbm: '62.50',
+          cargoReadyDate: dateOnly(addDays(now, 3)),
           isDangerousGoods: false,
           shipperName: 'Golden Path Shipper',
           shipperAddress: 'Shanghai, China',
           bookingContactName: 'Golden Customer',
           bookingContactEmail: customerEmail,
           bookingContactPhone: '+86-21-55550000',
-          containerRequests: [{ containerType: '40HQ', quantity: 2 }],
         },
       }),
       'complete booking',
@@ -138,27 +139,44 @@ test.describe('Rate to Invoice golden path', () => {
       'submit booking',
     );
     await apiOk(
-      request.post(`${apiBase}/admin/bookings/${booking.id}/review`, {
+      request.post(`${apiBase}/admin/bookings/${booking.id}/approve`, {
         headers: bearer(adminToken),
-        data: { remark: 'Golden path review' },
+        data: { remark: 'Golden path approval' },
       }),
-      'review booking',
+      'approve booking',
     );
     await apiOk(
-      request.post(`${apiBase}/admin/bookings/${booking.id}/confirm`, {
+      request.post(`${apiBase}/admin/bookings/${booking.id}/submit-to-carrier`, {
         headers: bearer(adminToken),
-        data: { remark: 'Space confirmed' },
+        data: { sourceName: 'Golden Carrier', reference: `GP-${run}` },
       }),
-      'confirm booking',
+      'submit booking to carrier',
     );
-    await apiOk(
-      request.post(`${apiBase}/admin/bookings/${booking.id}/release-so`, {
+    const soRecord = await apiJson<{ id: string }>(
+      await request.post(`${apiBase}/admin/bookings/${booking.id}/so-records`, {
         headers: bearer(adminToken),
         multipart: {
+          soNumber: `SO-${run}`,
+          sourceType: 'CARRIER',
+          sourceName: 'Golden Carrier',
+          receivedAt: new Date().toISOString(),
           file: { name: `SO-${run}.pdf`, mimeType: 'application/pdf', buffer: pdfFixture('SO') },
         },
       }),
-      'release SO',
+      'save SO internally',
+    );
+    const hiddenSo = await apiJson<unknown[]>(
+      await request.get(`${apiBase}/bookings/${booking.id}/so-records`, {
+        headers: bearer(customerToken),
+      }),
+      'verify draft SO is hidden',
+    );
+    expect(hiddenSo).toHaveLength(0);
+    await apiOk(
+      request.post(`${apiBase}/admin/bookings/${booking.id}/so-records/${soRecord.id}/publish`, {
+        headers: bearer(adminToken),
+      }),
+      'publish SO',
     );
 
     const shipment = await apiJson<{ id: string; shipmentNo: string }>(

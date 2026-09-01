@@ -1,9 +1,9 @@
 # Freight Customer Portal V1 — Booking / SO / Shipment 阶段验收清单
 
-> 文档版本：V1.1
-> 日期：2026-08-30
+> 文档版本：V1.2
+> 日期：2026-09-02
 > 适用范围：Accepted Quote 转 Booking、Booking 提交/审核/确认、SO 上传下载、Shipment 建档
-> 当前结论：功能开发与自动化验证完成，待业务 UAT 签署
+> 当前结论：P0-B4 自动化与技术 Gate 通过；待业务 UAT 签署
 
 ## 1. 验收目标
 
@@ -13,8 +13,10 @@
 Accepted Quote
 → Booking Draft
 → 客户补充并提交
-→ Operation 审核确认
-→ 上传并放出 SO
+→ Operation 退回补充或审核通过
+→ 提交船司/代理
+→ 内部保存 SO
+→ 核对并发布 SO
 → 客户下载 SO
 → 创建 Shipment
 ```
@@ -24,7 +26,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 ## 2. 验收前置条件
 
 - Web、API、PostgreSQL、Redis 和 MinIO 均已启动且 readiness 正常。
-- 当前 19 个 Prisma migration 已应用，权限和 DEMO seed 已执行。
+- 当前 27 个 Prisma migration 已应用，权限和 DEMO seed 已执行。
 - 准备 Tenant Admin/Operation、Customer Admin 和另一个租户的测试账号。
 - 准备一份 PDF、PNG 或 JPEG 格式 SO，大小不超过 10 MB。
 - 验收不得通过直接修改数据库跳过状态动作。
@@ -66,15 +68,16 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 ### BOOKING-UAT-003 审核、确认与拒绝
 
-1. Operation 打开 `SUBMITTED` Booking 并开始审核。
-2. 确认一份 Booking。
-3. 对另一份 Booking 填写原因并拒绝。
-4. 尝试从 DRAFT 直接确认或从 CONFIRMED 再拒绝。
+1. Operation 打开 `SUBMITTED` Booking。
+2. 退回一份 Booking，客户补料并重新提交。
+3. 审核通过并提交船司/代理。
+4. 对另一份 Booking 填写原因并拒绝。
+5. 尝试从 DRAFT 直接确认或从 CONFIRMED 再拒绝。
 
 预期结果：
 
-- 合法路径为 `SUBMITTED → UNDER_REVIEW → CONFIRMED`。
-- 拒绝仅允许 `UNDER_REVIEW → REJECTED` 且原因必填。
+- 合法路径为 `SUBMITTED → REVISION_REQUIRED → SUBMITTED → APPROVED → BOOKING_SUBMITTED`。
+- 业务拒绝原因必填，退回补充保存稳定原因代码和客户可见说明。
 - 非法跳转被服务端拒绝，前端隐藏按钮不替代服务端校验。
 - 每次状态变化保存时间、操作者、备注和审计记录。
 
@@ -82,18 +85,19 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 ## 5. SO 上传与客户下载
 
-### DOCUMENT-UAT-004 上传并放出 SO
+### DOCUMENT-UAT-004 内部保存并发布 SO
 
-1. Operation 打开 `CONFIRMED` Booking。
+1. Operation 打开 `BOOKING_SUBMITTED` Booking。
 2. 分别尝试上传不支持格式、空文件和超过 10 MB 文件。
-3. 上传合法 PDF/PNG/JPEG SO。
+3. 上传合法 PDF/PNG/JPEG SO，确认客户暂不可见。
+4. 使用独立发布动作发布 SO。
 
 预期结果：
 
 - 非法文件被拒绝，不创建 Document 或改变 Booking 状态。
 - 合法文件写入 S3 兼容对象存储，数据库只保存元数据。
-- Document 类型为 `SO`、版本从 1 开始、`customerVisible=true`。
-- Booking 原子更新为 `SO_RELEASED`；上传与状态变化均写入 AuditLog。
+- 内部保存后 Document 类型为 `SO`、版本从 1 开始、`customerVisible=false`。
+- 发布事务原子设置 Record=`PUBLISHED`、Document=`customerVisible=true`、Booking=`BOOKED`。
 - 数据库事务失败时尝试清理已上传的孤儿对象。
 
 结果：`□ 通过  □ 失败  □ 阻塞`
@@ -118,7 +122,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 ### SHIPMENT-UAT-006 从 Booking 创建 Shipment
 
-1. Operation 对 `SO_RELEASED` Booking 点击“创建 Shipment”。
+1. Operation 对存在已发布 SO 的 `BOOKED` Booking 点击“创建 Shipment”。
 2. 填写可选 Vessel、Voyage 和 ETA。
 3. 再次从同一 Booking 创建 Shipment。
 
@@ -136,14 +140,18 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 ### TECH-UAT-007
 
 - [x] Prisma schema validate/generate 通过。
-- [x] 两个新 migration 在本地 PostgreSQL 成功应用。
+- [x] P0-B1–B3 新 migration 在本地 PostgreSQL 成功应用；当前共 27 个 migration。
 - [x] API/Web TypeScript typecheck 通过。
 - [x] API/Web ESLint 通过。
-- [x] 当前全量 API 18 个测试套件、63 项测试通过。
+- [x] 当前全量 API 23 个测试套件、101 项测试通过。
+- [x] Worker 4 个测试套件、12 项测试通过，含真实 PostgreSQL 运价导入事务测试。
 - [x] Next.js/NestJS/Worker 全量生产构建通过。
 - [x] 真实 MinIO 上传、客户下载和 Shipment 查询返回成功。
 - [x] 隐藏文件与跨租户 Document 下载负向测试通过。
-- [x] Shipment 后台/客户权限 Playwright E2E 共 2 项通过。
+- [x] P0-B4 Booking、黄金路径、Shipment、Invoice 共 6 个 Playwright 场景实跑通过。
+- [x] 新增 Booking/SO action endpoint 已在 Swagger/OpenAPI JSON 中确认可见。
+
+详细执行证据与剩余项见 `P0_B4_REGRESSION_GATE_REPORT_2026-09-02_CN.md`。
 
 ## 8. 验收签署
 

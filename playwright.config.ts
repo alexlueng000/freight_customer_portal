@@ -23,7 +23,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: `API_PORT=${apiPort} pnpm --filter @freight/api start`,
+      command: `NODE_ENV=test API_PORT=${apiPort} pnpm --filter @freight/api start`,
       url: `${apiUrl}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

@@ -418,9 +418,9 @@ async function seedDemoBookingFlow({
   const shipmentBooking = await prisma.booking.upsert({
     where: { tenantId_bookingNo: { tenantId, bookingNo: 'BOOK-DEMO-SHIPPED' } },
     update: {
-      status: 'SO_RELEASED',
+      status: 'BOOKED',
       etd,
-      confirmedAt: now,
+      bookedAt: now,
       updatedById: adminUserId,
     },
     create: {
@@ -428,7 +428,7 @@ async function seedDemoBookingFlow({
       tenantId,
       bookingNo: 'BOOK-DEMO-SHIPPED',
       customerCompanyId,
-      status: 'SO_RELEASED',
+      status: 'BOOKED',
       polCode: 'CNSHA',
       podCode: 'USLGB',
       carrierCode: 'OOCL',
@@ -440,7 +440,7 @@ async function seedDemoBookingFlow({
       shipperName: 'Northstar Trading Co., Ltd.',
       bookingContactName: 'Demo Customer Admin',
       bookingContactEmail: 'customer@demo.freight.local',
-      confirmedAt: now,
+      bookedAt: now,
       createdById: customerUserId,
       updatedById: adminUserId,
     },
@@ -458,6 +458,47 @@ async function seedDemoBookingFlow({
       quantity: 1,
       weightPerContainer: '9800.00',
       sortOrder: 0,
+    },
+  });
+  const demoSoDocument = await prisma.document.upsert({
+    where: { objectKey: `tenants/${tenantId}/bookings/${shipmentBooking.id}/so/demo-seed-v1` },
+    update: { customerVisible: true, status: 'ACTIVE', uploadedById: adminUserId },
+    create: {
+      id: 'demo_booking_so_document_v1',
+      tenantId,
+      bookingId: shipmentBooking.id,
+      documentType: 'SO',
+      objectKey: `tenants/${tenantId}/bookings/${shipmentBooking.id}/so/demo-seed-v1`,
+      originalFilename: 'SO-DEMO.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 0,
+      version: 1,
+      customerVisible: true,
+      status: 'ACTIVE',
+      uploadedById: adminUserId,
+    },
+  });
+  await prisma.bookingSoRecord.upsert({
+    where: { documentId: demoSoDocument.id },
+    update: { status: 'PUBLISHED', publishedById: adminUserId, publishedAt: now },
+    create: {
+      id: 'demo_booking_so_record_v1',
+      tenantId,
+      bookingId: shipmentBooking.id,
+      documentId: demoSoDocument.id,
+      soNumber: 'SO-DEMO-001',
+      sourceType: 'CARRIER',
+      sourceName: 'OOCL',
+      carrierCode: 'OOCL',
+      vessel: 'EVER DEMO',
+      voyage: 'EV2608',
+      etd,
+      receivedAt: now,
+      version: 1,
+      status: 'PUBLISHED',
+      uploadedById: adminUserId,
+      publishedById: adminUserId,
+      publishedAt: now,
     },
   });
   const demoShipment = await prisma.shipment.upsert({
