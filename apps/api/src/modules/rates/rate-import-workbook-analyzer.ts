@@ -29,6 +29,19 @@ export const RATE_IMPORT_TARGET_FIELDS = [
   'price40GpSell',
   'price40HqCost',
   'price40HqSell',
+  'price45HqCost',
+  'price45HqSell',
+  'vesselVoyage',
+  'sailingPattern',
+  'freeTime',
+  'freeTimeDemurrage',
+  'freeTimeDetention',
+  'commodityRestriction',
+  'surcharge',
+  'surchargeBaf',
+  'surchargePss',
+  'surchargeDoc',
+  'surchargeSeal',
 ] as const;
 
 export type RateImportTargetField = (typeof RATE_IMPORT_TARGET_FIELDS)[number];
@@ -47,32 +60,45 @@ export interface RateImportHeaderCandidate {
 }
 
 const aliases: Record<RateImportTargetField, string[]> = {
-  rateNo: ['运价编号', '费率编号', '报价编号', 'rate no', 'rateno'],
-  polCode: ['起运港代码', 'pol code', 'polcode'],
-  polName: ['起运港', '装货港', '始发港', 'pol', 'origin'],
-  podCode: ['目的港代码', 'pod code', 'podcode'],
-  podName: ['目的港', '卸货港', 'pod', 'destination'],
-  carrierCode: ['船司代码', '船公司', '船东', 'carrier', 'shipping line'],
-  serviceName: ['航线服务', '航线', 'service', 'route'],
-  effectiveDate: ['生效日期', '开始日期', '有效期起', 'valid from', 'effective date'],
-  expiryDate: ['失效日期', '截止日期', '有效期止', 'valid to', 'expiry date'],
-  etd: ['预计开船时间', '开船日', '船期', 'etd'],
-  transitDays: ['航程天数', '航程', 'transit days', 'transit time'],
+  rateNo: ['运价编号', '费率编号', '报价编号', 'rate no', 'rateno', 'rate id'],
+  polCode: ['起运港代码', 'pol code', 'polcode', 'origin code', 'port of loading code', 'pol'],
+  polName: ['起运港', '装港', '装货港', '始发港', 'origin', 'from', 'load port', 'port of loading', 'loading port'],
+  podCode: ['目的港代码', 'pod code', 'podcode', 'destination code', 'port of discharge code', 'pod'],
+  podName: ['目的港', '卸港', '卸货港', 'destination', 'to', 'discharge port', 'port of discharge', 'destination port'],
+  carrierCode: ['船司代码', '船公司', '船东', 'carrier', 'line', 'shipping line', 'carrier code'],
+  serviceName: ['航线服务', '航线/服务', '航线', 'service', 'service name', 'product', 'svc', 'route', 'loop'],
+  effectiveDate: ['生效日期', '生效', '开始日期', '有效期起', 'valid from', 'effective date', 'valid start', 'validity from', 'validity'],
+  expiryDate: ['失效日期', '截止日期', '截止', '有效期止', 'valid to', 'expiry date', 'valid end', 'validity to', 'valid until'],
+  etd: ['预计开船时间', 'etd', 'sailing date'],
+  transitDays: ['航程天数', '航程', '天数', 'transit days', 'transit time', 'transit', 't/t', 'tt(day)', 'transit(day)'],
   supplierName: ['供应商名称', '供应商', '代理', 'supplier', 'vendor'],
   contractNo: ['合约号', '约号', 'contract no', 'contract'],
-  currency: ['运价币种', '基础币种', 'currency', 'curr'],
+  currency: ['运价币种', '基础币种', '价格币种', '币种', 'currency', 'curr.', 'curr', 'cur', 'usd rate', 'rate currency'],
   status: ['状态', 'status'],
   containerType: ['箱型', '柜型', 'container type', 'equipment'],
   costAmount: ['采购成本', '成本价', 'buy rate', 'cost'],
   sellAmount: ['标准售价', '销售价', 'sell rate', 'selling price'],
   priceCurrency: ['价格币种', 'price currency'],
-  remark: ['备注', '条款', '说明', 'remark', 'remarks', 'note'],
-  price20GpCost: ['20gp采购成本', '20gp成本', '20dc成本', '20gp buy', '20 cost'],
-  price20GpSell: ['20gp标准售价', '20gp售价', '20dc售价', '20gp sell', '20 sell'],
-  price40GpCost: ['40gp采购成本', '40gp成本', '40dc成本', '40gp buy', '40 cost'],
-  price40GpSell: ['40gp标准售价', '40gp售价', '40dc售价', '40gp sell', '40 sell'],
-  price40HqCost: ['40hq采购成本', '40hq成本', '40hc成本', '40hq buy', '40hc buy'],
-  price40HqSell: ['40hq标准售价', '40hq售价', '40hc售价', '40hq sell', '40hc sell'],
+  remark: ['备注', '条款', '说明', '其他', 'remark', 'remarks', 'note', 'notes'],
+  price20GpCost: ['20gp采购成本', '20gp成本', '20dc成本', '20std成本', '20尺普柜采购成本', '20尺柜采购成本', '20gp buy', '20 cost'],
+  price20GpSell: ['20gp标准售价', '20gp售价', '20dc售价', '20std售价', '20尺普柜', '20尺柜', '20gp sell', '20 sell', '20gp', '20dc', '20std', "20'", '20', '20gp of'],
+  price40GpCost: ['40gp采购成本', '40gp成本', '40dc成本', '40尺普柜采购成本', '40尺柜采购成本', '40gp buy', '40 cost'],
+  price40GpSell: ['40gp标准售价', '40gp售价', '40dc售价', '40std售价', '40尺普柜', '40尺柜', '40gp sell', '40 sell', '40gp', '40dc', '40std', "40'", '40', '40gp of'],
+  price40HqCost: ['40hq采购成本', '40hq成本', '40hc成本', '40h成本', '40尺高柜采购成本', '40hq buy', '40hc buy'],
+  price40HqSell: ['40hq标准售价', '40hq售价', '40hc售价', '40h售价', '40尺高柜', '40尺高箱', '40hq sell', '40hc sell', '40hq', '40hc', '40h', "40'hq", "40'hc", '40hq of'],
+  price45HqCost: ['45hq采购成本', '45hq成本', '45hc成本', '45hq buy', '45hc buy'],
+  price45HqSell: ['45hq标准售价', '45hq售价', '45hc售价', '45hq sell', '45hc sell', '45hq', '45hc'],
+  vesselVoyage: ['船名航次', '船名/航次', 'vessel/voyage', 'vessel voyage', 'vsl/voy'],
+  sailingPattern: ['开船日', '船期', 'etd pattern', 'sailing pattern', 'schedule'],
+  freeTime: ['free time', '免箱期'],
+  freeTimeDemurrage: ['免堆期', 'demurrage free'],
+  freeTimeDetention: ['免箱期', 'free days', 'd&d', 'detention free'],
+  commodityRestriction: ['品名限制', '货物限制', 'commodity restriction', 'commodity', 'cargo restriction', 'cargo'],
+  surcharge: ['附加费', '杂费', 'surcharge', 'local charge', 'charges'],
+  surchargeBaf: ['baf'],
+  surchargePss: ['pss'],
+  surchargeDoc: ['doc'],
+  surchargeSeal: ['seal'],
 };
 
 export async function analyzeRateImportWorkbook(fileName: string, buffer: Buffer) {
@@ -132,7 +158,7 @@ async function normalizeOpenXmlPrefixes(buffer: Buffer) {
 
 function analyzeSheet(sheet: ExcelJS.Worksheet, index: number) {
   const columnCount = Math.min(Math.max(sheet.actualColumnCount, 1), 100);
-  const scanRows = Math.min(sheet.actualRowCount, 20);
+  const scanRows = Math.min(sheet.rowCount, 20);
   const candidates: RateImportHeaderCandidate[] = [];
 
   for (let row = 1; row <= scanRows; row += 1) {
@@ -150,7 +176,7 @@ function analyzeSheet(sheet: ExcelJS.Worksheet, index: number) {
   return {
     index,
     name: sheet.name,
-    rowCount: sheet.actualRowCount,
+    rowCount: sheet.rowCount,
     columnCount: sheet.actualColumnCount,
     mergedCellRanges: Object.keys((sheet as unknown as { _merges?: Record<string, unknown> })._merges ?? {}).length,
     headerCandidates,
@@ -194,27 +220,29 @@ function buildCandidate(
 function suggestField(sourceLabel: string, used: Set<RateImportTargetField>) {
   const value = normalize(sourceLabel);
   if (!value) return undefined;
-  const matches = RATE_IMPORT_TARGET_FIELDS.flatMap((targetField) => {
+  const exactMatches = RATE_IMPORT_TARGET_FIELDS.flatMap((targetField) => {
     if (used.has(targetField)) return [];
-    const match = aliases[targetField]
+    return aliases[targetField]
       .map(normalize)
-      .map((alias) => ({ alias, exact: alias === value }))
-      .filter(({ alias }) => alias === value || (alias.length >= 3 && value.includes(alias)))
-      .sort((a, b) => Number(b.exact) - Number(a.exact) || b.alias.length - a.alias.length)[0];
-    return match ? [{ targetField, ...match }] : [];
-  }).sort((a, b) => Number(b.exact) - Number(a.exact) || b.alias.length - a.alias.length);
-  const best = matches[0];
-  return best
-    ? {
-        targetField: best.targetField,
-        confidence: best.exact ? ('HIGH' as const) : ('MEDIUM' as const),
-      }
-    : undefined;
+      .filter((alias) => alias === value)
+      .map((alias) => ({ targetField, alias }));
+  }).sort((a, b) => b.alias.length - a.alias.length);
+  if (exactMatches[0]) return { targetField: exactMatches[0].targetField, confidence: 'HIGH' as const };
+
+  const containsMatches = RATE_IMPORT_TARGET_FIELDS.flatMap((targetField) => {
+    if (used.has(targetField)) return [];
+    if (targetField.startsWith('surcharge')) return [];
+    return aliases[targetField]
+      .map(normalize)
+      .filter((alias) => alias.length >= 3 && value.includes(alias))
+      .map((alias) => ({ targetField, alias }));
+  }).sort((a, b) => b.alias.length - a.alias.length);
+  return containsMatches[0] ? { targetField: containsMatches[0].targetField, confidence: 'MEDIUM' as const } : undefined;
 }
 
 function readRows(sheet: ExcelJS.Worksheet, start: number, columnCount: number, limit: number) {
   const rows: Array<{ row: number; values: string[] }> = [];
-  for (let row = start; row <= sheet.actualRowCount && rows.length < limit; row += 1) {
+  for (let row = start; row <= sheet.rowCount && rows.length < limit; row += 1) {
     const values = Array.from({ length: columnCount }, (_, index) =>
       rateImportCellText(sheet.getRow(row).getCell(index + 1).value),
     );
@@ -224,7 +252,7 @@ function readRows(sheet: ExcelJS.Worksheet, start: number, columnCount: number, 
 }
 
 function normalize(value: string) {
-  return value.toLowerCase().replace(/[\s_\-/'"（）()]+/g, '');
+  return value.toLowerCase().normalize('NFKC').replace(/[’‘`]/g, "'").replace(/[\s_\-/'"（）(),.]+/g, '');
 }
 
 export function rateImportCellText(value: ExcelJS.CellValue): string {

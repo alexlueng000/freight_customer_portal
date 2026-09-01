@@ -50,7 +50,7 @@ P0-B：Quote → Booking → SO 真实业务流程
 | 2. Mapping Profile | P0 | 人工修正映射并按租户/供应商保存复用 | 已完成基础能力 |
 | 3. 标准化预览与校验 | P0 | 展示标准化 Rate、Price、Charge 和全部 Error/Warning | 已完成第一版 |
 | 4. 确认与事务导入 | P0 | 用户确认后异步、幂等、整批事务写入 | 已完成第一版，待环境集成验证 |
-| 5. V2 宽表和附加费 | P0 | 推荐宽表、横向箱型、附加费 Sheet、旧模板兼容 | 待开发 |
+| 5. V2 宽表和附加费 | P0 | 推荐宽表、横向箱型、附加费 Sheet、旧模板兼容 | V2 下载模板已完成；附加费解析待开发 |
 | 6. Booking 客户侧减负 | P0 | Quote 自动继承、联系人/Shipper 复用、最小表单 | 待开发 |
 | 7. Booking 作业状态 | P0 | 待审核、待订舱、待 SO、已订舱语义统一 | 待开发 |
 | 8. SO 登记与发布 | P0 | 结构化 SO、内部保存、核对后发布、版本追溯 | 待开发 |
@@ -193,6 +193,8 @@ P0-B：Quote → Booking → SO 真实业务流程
 - 写入 Rate、RatePrice、AuditLog 和 Import Job 状态使用同一数据库事务。
 - Excel 未提供 `rateNo` 时，通过 `BusinessNumberCounter` 生成并发安全的 `RATEyyyyMM######` 编号。
 - 前端 Error 未清零时禁用确认；Warning 必须勾选确认后才能提交。
+- 2026-09-01 补充修复：预览 API 仅向前端返回前 100 条标准化 Rate 供展示，但 Redis 保存完整标准化结果，避免超过 100 条的真实工作簿确认导入时只入队前 100 条。
+- 2026-09-01 补充：默认下载模板已改为 V2 宽表，`运价导入` Sheet 一行一条 Rate，20GP / 40GP / 40HQ 横向展开；同时预留 `附加费导入` 和 `填写说明` Sheet。当前附加费 Sheet 仍只作为推荐结构，正式解析/持久化待后续接入。
 
 已补充标准化 Worker 事务集成测试用例，但当前本地 PostgreSQL/Redis 未启动，尚未实际执行数据库集成验证。
 
@@ -386,6 +388,8 @@ P0 完成后处理：
 | 针对性测试 | API 4 个 Suite、17 个 Test；Worker 1 个 Suite、2 个 Test 通过 |
 | 真实 Excel 回放 | 7 个 Sheet 全部读取成功 |
 | `git diff --check` | 通过 |
+| 2026-09-01 Rate Import 针对性测试 | `pnpm --filter @freight/api test -- rate-import` 通过：3 个 Suite、14 个 Test |
+| 2026-09-01 TypeScript 检查 | `pnpm --filter @freight/api typecheck`、`pnpm --filter @freight/web typecheck` 通过 |
 
 ### 尚未执行
 
@@ -394,6 +398,7 @@ P0 完成后处理：
 - 完整 `pnpm test` 尚未执行。
 - 当前 P0 前端交互尚未运行 Playwright。
 - 标准化预览和自定义 Mapping 的正式导入尚未完成。
+- 2026-09-01 本机未找到 `docker` 命令，真实 Redis / BullMQ / PostgreSQL 队列回放无法在当前环境执行。
 
 ## 9. 当前风险与设计约束
 

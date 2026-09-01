@@ -137,6 +137,75 @@ describe('rate import processor', () => {
     expect(generated.rateNo).toMatch(/^RATE\d{12}$/);
     expect(generated.prices[0]?.sellAmount?.toString()).toBe('1400');
   });
+
+  it('imports a normalized standard English FCL preview with all wide container prices', async () => {
+    const importJob = await prisma.rateImportJob.create({ data: { tenantId, originalFileName: '01_standard_english_FCL.xlsx', createdById: actorUserId } });
+    await processRateImport(prisma, {
+      importJobId: importJob.id,
+      tenantId,
+      actorUserId,
+      originalFileName: '01_standard_english_FCL.xlsx',
+      totalRows: 5,
+      normalizedRates: [
+        standardFclRate(2, 'CNSZX', 'Shenzhen', 'SGSIN', 'Singapore', 'PIL', ['420', '720', '720']),
+        standardFclRate(3, 'CNSZX', 'Shenzhen', 'MYPKG', 'Port Klang', 'PIL', ['450', '750', '750']),
+        standardFclRate(4, 'CNNGB', 'Ningbo', 'THBKK', 'Bangkok', 'SITC', ['530', '850', '850']),
+        standardFclRate(5, 'CNSHA', 'Shanghai', 'VNSGN', 'Ho Chi Minh City', 'RCL', ['390', '640', '640']),
+        standardFclRate(6, 'CNXMN', 'Xiamen', 'IDJKT', 'Jakarta', 'CNC', ['610', '990', '990']),
+      ],
+    });
+
+    const completed = await prisma.rateImportJob.findUniqueOrThrow({ where: { id: importJob.id } });
+    expect(completed).toMatchObject({ status: RateImportStatus.COMPLETED, totalRows: 5, successRows: 5, failedRows: 0 });
+    const rates = await prisma.rate.findMany({
+      where: { tenantId, polCode: { in: ['CNSZX', 'CNNGB', 'CNSHA', 'CNXMN'] }, podCode: { in: ['SGSIN', 'MYPKG', 'THBKK', 'VNSGN', 'IDJKT'] } },
+      include: { prices: true },
+    });
+    expect(rates).toHaveLength(5);
+    expect(rates.flatMap((rate) => rate.prices)).toHaveLength(15);
+  });
+
+  it('persists parsed normalized surcharges with a confirmed preview import', async () => {
+    const importJob = await prisma.rateImportJob.create({ data: { tenantId, originalFileName: '07_surcharge_columns_agent_rate.xlsx', createdById: actorUserId } });
+    await processRateImport(prisma, {
+      importJobId: importJob.id,
+      tenantId,
+      actorUserId,
+      originalFileName: '07_surcharge_columns_agent_rate.xlsx',
+      totalRows: 1,
+      normalizedRates: [{
+        source: { sheet: 'Rate', row: 4 },
+        sourceRows: [4],
+        rateNo: `IMPORT-CHARGE-${runId}`,
+        polCode: 'CNSZX',
+        polName: 'Shenzhen',
+        podCode: 'SGSIN',
+        podName: 'Singapore',
+        carrierCode: 'PIL',
+        effectiveDate: '2026-09-01',
+        expiryDate: '2026-09-30',
+        currency: 'USD',
+        status: 'ACTIVE',
+        prices: [{ containerType: '20GP', costAmount: '400', currency: 'USD', sourceColumns: [8] }],
+        charges: [
+          { chargeCode: 'BAF', chargeName: 'BAF', chargeBasis: 'PER_CONTAINER', amount: '50', currency: 'USD', isIncluded: false, sourceColumn: 11 },
+          { chargeCode: 'DOC', chargeName: 'Documentation Fee', chargeBasis: 'PER_BL', amount: '50', currency: 'USD', isIncluded: false, sourceColumn: 13 },
+          { chargeCode: 'SEAL', chargeName: 'Seal Fee', chargeBasis: 'PER_CONTAINER', amount: '10', currency: 'USD', isIncluded: false, sourceColumn: 14 },
+        ],
+      }],
+    });
+
+    const rate = await prisma.rate.findFirstOrThrow({
+      where: { tenantId, rateNo: `IMPORT-CHARGE-${runId}` },
+      include: { charges: { orderBy: { chargeCode: 'asc' } } },
+    });
+    expect(rate.charges).toHaveLength(3);
+    expect(rate.charges.map((charge) => [charge.chargeCode, charge.chargeBasis, charge.amount.toString()])).toEqual([
+      ['BAF', 'PER_CONTAINER', '50'],
+      ['DOC', 'PER_BL', '50'],
+      ['SEAL', 'PER_CONTAINER', '10'],
+    ]);
+  });
 });
 
 const headers = [
@@ -226,5 +295,27 @@ async function jobData(
     actorUserId,
     originalFileName,
     workbookBase64: buffer.toString('base64'),
+  };
+}
+
+function standardFclRate(row: number, polCode: string, polName: string, podCode: string, podName: string, carrierCode: string, amounts: [string, string, string]) {
+  return {
+    source: { sheet: 'FCL Rates', row },
+    sourceRows: [row],
+    polCode,
+    polName,
+    podCode,
+    podName,
+    carrierCode,
+    serviceName: 'SEA',
+    effectiveDate: '2026-09-01',
+    expiryDate: '2026-09-30',
+    currency: 'USD',
+    status: 'DRAFT',
+    prices: [
+      { containerType: '20GP', costAmount: amounts[0], currency: 'USD', sourceColumns: [11] },
+      { containerType: '40GP', costAmount: amounts[1], currency: 'USD', sourceColumns: [12] },
+      { containerType: '40HQ', costAmount: amounts[2], currency: 'USD', sourceColumns: [13] },
+    ],
   };
 }

@@ -12,6 +12,26 @@ describe('confirmed normalized rate import payload', () => {
     expect(result.rows[0]).toMatchObject({ rateNo: 'RATE-001', containerType: '20GP', costAmount: '850', priceCurrency: 'USD' });
   });
 
+  it('keeps parsed surcharge rows on the first generated worker row for a rate', () => {
+    const result = normalizedPreviewRows([{
+      source: { sheet: 'Rates', row: 4 }, sourceRows: [4], rateNo: 'RATE-CHARGE',
+      polCode: 'CNSZX', polName: 'Shenzhen', podCode: 'SGSIN', podName: 'Singapore', carrierCode: 'PIL',
+      effectiveDate: '2026-09-01', expiryDate: '2026-09-30', currency: 'USD', status: 'ACTIVE',
+      prices: [
+        { containerType: '20GP', costAmount: '400', currency: 'USD', sourceColumns: [8] },
+        { containerType: '40GP', costAmount: '680', currency: 'USD', sourceColumns: [9] },
+      ],
+      charges: [
+        { chargeCode: 'BAF', chargeName: 'BAF', chargeBasis: 'PER_CONTAINER', amount: '50', currency: 'USD', isIncluded: false, sourceColumn: 11 },
+        { chargeCode: 'DOC', chargeName: 'Documentation Fee', chargeBasis: 'PER_BL', amount: '50', currency: 'USD', isIncluded: false, sourceColumn: 13 },
+      ],
+    }], 1);
+
+    expect(result.errors).toEqual([]);
+    expect(result.rows[0]?.charges).toHaveLength(2);
+    expect(result.rows[1]?.charges).toEqual([]);
+  });
+
   it('rejects missing required normalized fields defensively', () => {
     const result = normalizedPreviewRows([{
       source: { sheet: 'Rates', row: 7 }, sourceRows: [7], status: 'ACTIVE',

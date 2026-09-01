@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "NEXT_DIST_DIR=.next-build next build",
+    "build": "node -e \"process.env.NEXT_DIST_DIR='.next-build'; require('node:child_process').execSync('next build',{stdio:'inherit',env:process.env})\"",
     "dev": "next dev -p 3000",
     "lint": "node ../../node_modules/eslint/bin/eslint.js app components lib --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",

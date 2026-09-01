@@ -97,7 +97,7 @@ export class RateImportsService {
       configuration,
       preview,
     });
-    return { ...preview, ...stored };
+    return { ...preview, rates: preview.rates.slice(0, 100), ...stored };
   }
 
   async confirmPreview(dto: ConfirmRateImportDto) {
@@ -200,36 +200,66 @@ export class RateImportsService {
   async template(): Promise<Buffer> {
     this.requireInternal();
     const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Freight Customer Portal';
+    workbook.created = new Date('2026-09-01T00:00:00.000Z');
     const sheet = workbook.addWorksheet('运价导入', { views: [{ state: 'frozen', ySplit: 1 }] });
-    sheet.columns = RATE_IMPORT_COLUMNS.map(({ header, key, width }) => ({ header, key, width }));
-    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF155E75' } };
-    sheet.autoFilter = { from: 'A1', to: 'T1' };
+    sheet.columns = RATE_IMPORT_V2_RATE_COLUMNS.map(({ header, key, width }) => ({ header, key, width }));
+    styleTemplateHeader(sheet, RATE_IMPORT_V2_RATE_COLUMNS.length);
+    sheet.autoFilter = { from: 'A1', to: `${columnLetter(RATE_IMPORT_V2_RATE_COLUMNS.length)}1` };
     sheet.addRows([
       {
-        rateNo: 'RATE-SHA-LAX-001', polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX',
-        podName: 'Los Angeles', carrierCode: 'COSCO', serviceName: 'Pacific Express',
-        effectiveDate: '2026-09-01', expiryDate: '2026-09-30', etd: '2026-09-05T08:00:00Z',
+        importRef: 'R001', rateNo: 'RATE-SHA-LAX-001', polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX',
+        podName: 'Los Angeles', carrierCode: 'COSCO', serviceName: 'Pacific Express', transportMode: 'DIRECT',
+        effectiveDate: '2026-09-01', expiryDate: '2026-09-30', etd: '2026-09-05 08:00',
         transitDays: 18, supplierName: 'Example Supplier', contractNo: 'SC-2026-A', currency: 'USD',
-        status: 'ACTIVE', containerType: '20GP', costAmount: 850, sellAmount: 980,
-        priceCurrency: 'USD', remark: '同一运价编号的多行会合并为一条运价',
+        priceType: 'BASE', status: 'ACTIVE', price20GpCost: 850, price20GpSell: 980,
+        price40GpCost: 1150, price40GpSell: 1300, price40HqCost: 1250, price40HqSell: 1400,
+        remark: 'V2 推荐模板：一行一条运价，箱型横向展开',
       },
       {
-        rateNo: 'RATE-SHA-LAX-001', polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX',
-        podName: 'Los Angeles', carrierCode: 'COSCO', serviceName: 'Pacific Express',
-        effectiveDate: '2026-09-01', expiryDate: '2026-09-30', etd: '2026-09-05T08:00:00Z',
-        transitDays: 18, supplierName: 'Example Supplier', contractNo: 'SC-2026-A', currency: 'USD',
-        status: 'ACTIVE', containerType: '40HQ', costAmount: 1250, sellAmount: 1400,
-        priceCurrency: 'USD', remark: '一行代表一个箱型价格',
-      },
-      {
-        rateNo: 'RATE-NGB-HAM-001', polCode: 'CNNGB', polName: 'Ningbo', podCode: 'DEHAM',
-        podName: 'Hamburg', carrierCode: 'MAEU', serviceName: 'Europe Weekly',
-        effectiveDate: '2026-09-10', expiryDate: '2026-10-10', etd: '2026-09-14T10:00:00Z',
+        importRef: 'R002', polCode: 'CNNGB', polName: 'Ningbo', podCode: 'DEHAM',
+        podName: 'Hamburg', carrierCode: 'MAEU', serviceName: 'Europe Weekly', transportMode: 'DIRECT',
+        effectiveDate: '2026-09-10', expiryDate: '2026-10-10', etd: '2026-09-14 10:00',
         transitDays: 32, supplierName: 'Example Supplier', contractNo: 'SC-2026-B', currency: 'USD',
-        status: 'ACTIVE', containerType: '40GP', costAmount: 1750, sellAmount: 1980,
-        priceCurrency: 'USD', remark: '示例第二条运价',
+        priceType: 'BASE', status: 'DRAFT', price40HqCost: 1750, price40HqSell: 1980,
+        remark: '运价编号为空时，确认导入后由系统生成',
       },
+    ]);
+    applyListValidation(sheet, 'I', ['DIRECT', 'TRANSSHIP']);
+    applyListValidation(sheet, 'R', ['USD', 'CNY', 'EUR', 'HKD', 'JPY']);
+    applyListValidation(sheet, 'S', ['BASE', 'ALL_IN']);
+    applyListValidation(sheet, 'T', ['DRAFT', 'ACTIVE', 'INACTIVE']);
+    ['L', 'M'].forEach((column) => sheet.getColumn(column).numFmt = 'yyyy-mm-dd');
+    ['U', 'V', 'W', 'X', 'Y', 'Z'].forEach((column) => sheet.getColumn(column).numFmt = '0.0000');
+
+    const surchargeSheet = workbook.addWorksheet('附加费导入', { views: [{ state: 'frozen', ySplit: 1 }] });
+    surchargeSheet.columns = RATE_IMPORT_V2_CHARGE_COLUMNS.map(({ header, key, width }) => ({ header, key, width }));
+    styleTemplateHeader(surchargeSheet, RATE_IMPORT_V2_CHARGE_COLUMNS.length);
+    surchargeSheet.autoFilter = { from: 'A1', to: `${columnLetter(RATE_IMPORT_V2_CHARGE_COLUMNS.length)}1` };
+    surchargeSheet.addRows([
+      {
+        importRef: 'R001', chargeCode: 'AMS', chargeName: 'AMS Fee', costAmount: 25, sellAmount: 35,
+        currency: 'USD', chargeBasis: 'PER_BL', containerType: 'ALL', remark: '附加费 Sheet 已预留，解析将在下一步接入',
+      },
+      {
+        importRef: 'R001', chargeCode: 'THC', chargeName: 'Origin THC', costAmount: 650, sellAmount: 720,
+        currency: 'CNY', chargeBasis: 'PER_CONTAINER', containerType: '40HQ', remark: '不同币种附加费不得静默合计',
+      },
+    ]);
+    applyListValidation(surchargeSheet, 'F', ['USD', 'CNY', 'EUR', 'HKD', 'JPY']);
+    applyListValidation(surchargeSheet, 'G', ['PER_CONTAINER', 'PER_SHIPMENT', 'PER_BL']);
+    applyListValidation(surchargeSheet, 'H', ['ALL', '20GP', '40GP', '40HQ', '45HQ']);
+    ['D', 'E'].forEach((column) => surchargeSheet.getColumn(column).numFmt = '0.0000');
+
+    const instructionSheet = workbook.addWorksheet('填写说明');
+    instructionSheet.columns = [{ header: '项目', key: 'item', width: 24 }, { header: '说明', key: 'description', width: 96 }];
+    styleTemplateHeader(instructionSheet, 2);
+    instructionSheet.addRows([
+      { item: '模板版本', description: 'V2 推荐模板。一行代表一条运价，20GP/40GP/40HQ 价格横向填写。旧版长表模板仍兼容导入。' },
+      { item: '导入编号', description: '仅用于当前工作簿内关联附加费，不是系统正式运价编号。附加费正式解析将在后续版本接入。' },
+      { item: '运价编号', description: '可为空。为空时，确认导入后系统会生成租户内唯一编号。' },
+      { item: '日期', description: '生效日期、失效日期使用 yyyy-mm-dd；ETD 可填写 yyyy-mm-dd 或 yyyy-mm-dd HH:mm。' },
+      { item: '确认导入', description: '请先上传并分析工作簿，确认 Sheet、表头和字段 Mapping，预览无 Error 后再确认导入。' },
     ]);
     const buffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(buffer);
@@ -276,15 +306,58 @@ export class RateImportsService {
   }
 }
 
-export const RATE_IMPORT_COLUMNS = [
-  { header: '运价编号', key: 'rateNo', width: 22 }, { header: '起运港代码', key: 'polCode', width: 14 },
+export const RATE_IMPORT_V2_RATE_COLUMNS = [
+  { header: '导入编号', key: 'importRef', width: 12 }, { header: '运价编号', key: 'rateNo', width: 22 },
+  { header: '起运港代码', key: 'polCode', width: 14 },
   { header: '起运港名称', key: 'polName', width: 20 }, { header: '目的港代码', key: 'podCode', width: 14 },
   { header: '目的港名称', key: 'podName', width: 20 }, { header: '船司代码', key: 'carrierCode', width: 14 },
-  { header: '航线服务', key: 'serviceName', width: 20 }, { header: '生效日期', key: 'effectiveDate', width: 16 },
-  { header: '失效日期', key: 'expiryDate', width: 16 }, { header: '预计开船时间', key: 'etd', width: 24 },
+  { header: '航线服务', key: 'serviceName', width: 20 }, { header: '运输方式', key: 'transportMode', width: 14 },
+  { header: '中转港代码', key: 'transitPortCode', width: 14 }, { header: '中转港名称', key: 'transitPortName', width: 20 },
+  { header: '生效日期', key: 'effectiveDate', width: 16 }, { header: '失效日期', key: 'expiryDate', width: 16 }, { header: 'ETD', key: 'etd', width: 20 },
   { header: '航程天数', key: 'transitDays', width: 14 }, { header: '供应商名称', key: 'supplierName', width: 22 },
   { header: '合约号', key: 'contractNo', width: 18 }, { header: '运价币种', key: 'currency', width: 12 },
-  { header: '状态', key: 'status', width: 12 }, { header: '箱型', key: 'containerType', width: 14 },
-  { header: '采购成本', key: 'costAmount', width: 16 }, { header: '标准售价', key: 'sellAmount', width: 16 },
-  { header: '价格币种', key: 'priceCurrency', width: 12 }, { header: '备注', key: 'remark', width: 34 },
+  { header: '价格类型', key: 'priceType', width: 12 }, { header: '状态', key: 'status', width: 12 },
+  { header: '20GP采购成本', key: 'price20GpCost', width: 16 }, { header: '20GP标准售价', key: 'price20GpSell', width: 16 },
+  { header: '40GP采购成本', key: 'price40GpCost', width: 16 }, { header: '40GP标准售价', key: 'price40GpSell', width: 16 },
+  { header: '40HQ采购成本', key: 'price40HqCost', width: 16 }, { header: '40HQ标准售价', key: 'price40HqSell', width: 16 },
+  { header: '备注', key: 'remark', width: 34 },
 ] as const;
+
+export const RATE_IMPORT_V2_CHARGE_COLUMNS = [
+  { header: '导入编号', key: 'importRef', width: 12 }, { header: '费用代码', key: 'chargeCode', width: 14 },
+  { header: '费用名称', key: 'chargeName', width: 22 }, { header: '采购成本', key: 'costAmount', width: 14 },
+  { header: '标准售价', key: 'sellAmount', width: 14 }, { header: '币种', key: 'currency', width: 10 },
+  { header: '计费单位', key: 'chargeBasis', width: 18 }, { header: '适用箱型', key: 'containerType', width: 14 },
+  { header: '备注', key: 'remark', width: 36 },
+] as const;
+
+function styleTemplateHeader(sheet: ExcelJS.Worksheet, columnCount: number) {
+  sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF155E75' } };
+  sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+  sheet.getRow(1).height = 22;
+  for (let column = 1; column <= columnCount; column += 1) {
+    sheet.getRow(1).getCell(column).border = { bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } } };
+  }
+}
+
+function applyListValidation(sheet: ExcelJS.Worksheet, column: string, values: string[]) {
+  for (let row = 2; row <= 500; row += 1) {
+    sheet.getCell(`${column}${row}`).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [`"${values.join(',')}"`],
+    };
+  }
+}
+
+function columnLetter(index: number) {
+  let remaining = index;
+  let result = '';
+  while (remaining > 0) {
+    const modulo = (remaining - 1) % 26;
+    result = String.fromCharCode(65 + modulo) + result;
+    remaining = Math.floor((remaining - modulo) / 26);
+  }
+  return result;
+}

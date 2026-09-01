@@ -1,4 +1,4 @@
-import { Prisma, RateImportStatus, RateStatus } from '@prisma/client';
+import { ChargeBasis, Prisma, RateImportStatus, RateStatus } from '@prisma/client';
 import type { PrismaClient } from '@prisma/client';
 import ExcelJS from 'exceljs';
 
@@ -20,6 +20,7 @@ export interface NormalizedRateImportJobRate {
   carrierCode?: string; serviceName?: string; effectiveDate?: string; expiryDate?: string; etd?: string;
   transitDays?: number; supplierName?: string; contractNo?: string; currency?: string; status: string; remark?: string;
   prices: Array<{ containerType: string; costAmount?: string; sellAmount?: string; currency: string; sourceColumns: number[] }>;
+  charges?: Array<{ chargeCode: string; chargeName: string; chargeBasis: 'PER_CONTAINER' | 'PER_BL' | 'PER_SHIPMENT'; containerType?: string; amount: string; currency: string; isIncluded: boolean; sourceColumn: number }>;
 }
 interface RowError {
   row: number;
@@ -49,6 +50,7 @@ interface ParsedRow {
   priceCurrency: string;
   remark?: string;
   generateRateNo?: boolean;
+  charges?: Array<{ chargeCode: string; chargeName: string; chargeBasis: ChargeBasis; containerType?: string; amount: string; currency: string; isIncluded: boolean }>;
 }
 
 const headers = [
@@ -183,6 +185,18 @@ export async function processRateImport(prisma: PrismaClient, data: RateImportJo
                   currency: row.priceCurrency,
                   remark: row.remark,
                 })),
+              },
+              charges: {
+                create: first.charges?.map((charge) => ({
+                  tenantId: data.tenantId,
+                  chargeCode: charge.chargeCode,
+                  chargeName: charge.chargeName,
+                  chargeBasis: charge.chargeBasis,
+                  containerType: charge.containerType,
+                  amount: new Prisma.Decimal(charge.amount),
+                  currency: charge.currency,
+                  isIncluded: charge.isIncluded,
+                })) ?? [],
               },
             },
           });
@@ -381,12 +395,31 @@ export function normalizedPreviewRows(rates: NormalizedRateImportJobRate[], requ
     const effectiveDate = rate.effectiveDate ? dateValue(rate.effectiveDate) : undefined;
     const expiryDate = rate.expiryDate ? dateValue(rate.expiryDate) : undefined;
     if (!effectiveDate || !expiryDate || !Object.values(RateStatus).includes(rate.status as RateStatus)) { errors.push({ row, field: 'normalizedRate', message: 'Confirmed preview contains invalid date or status data' }); return; }
+    const charges = normalizedCharges(rate, errors, row);
     rate.prices.forEach((price) => {
       if (!price.containerType || !price.costAmount || !decimal(price.costAmount) || !/^[A-Z]{3}$/.test(price.currency)) { errors.push({ row, field: 'prices', message: 'Confirmed preview contains an invalid price' }); return; }
-      rows.push({ row, rateNo: rate.rateNo ?? `GENERATED-${rateIndex + 1}`, generateRateNo: !rate.rateNo, polCode: rate.polCode!, polName: rate.polName!, podCode: rate.podCode!, podName: rate.podName!, carrierCode: rate.carrierCode!, serviceName: rate.serviceName, effectiveDate, expiryDate, etd: rate.etd ? dateTimeValue(rate.etd) : undefined, transitDays: rate.transitDays, supplierName: rate.supplierName, contractNo: rate.contractNo, currency: rate.currency!, status: rate.status as RateStatus, containerType: price.containerType, costAmount: price.costAmount, sellAmount: price.sellAmount, priceCurrency: price.currency, remark: rate.remark });
+      rows.push({ row, rateNo: rate.rateNo ?? `GENERATED-${rateIndex + 1}`, generateRateNo: !rate.rateNo, polCode: rate.polCode!, polName: rate.polName!, podCode: rate.podCode!, podName: rate.podName!, carrierCode: rate.carrierCode!, serviceName: rate.serviceName, effectiveDate, expiryDate, etd: rate.etd ? dateTimeValue(rate.etd) : undefined, transitDays: rate.transitDays, supplierName: rate.supplierName, contractNo: rate.contractNo, currency: rate.currency!, status: rate.status as RateStatus, containerType: price.containerType, costAmount: price.costAmount, sellAmount: price.sellAmount, priceCurrency: price.currency, remark: rate.remark, charges: rows.some((existing) => existing.rateNo === (rate.rateNo ?? `GENERATED-${rateIndex + 1}`)) ? [] : charges });
     });
   });
   return { rows, errors, totalRows: requestedTotalRows ?? rates.reduce((sum, rate) => sum + rate.sourceRows.length, 0) };
+}
+
+function normalizedCharges(rate: NormalizedRateImportJobRate, errors: RowError[], row: number) {
+  return (rate.charges ?? []).flatMap((charge) => {
+    if (!charge.chargeCode || !charge.chargeName || !Object.values(ChargeBasis).includes(charge.chargeBasis) || !decimal(charge.amount) || !/^[A-Z]{3}$/.test(charge.currency)) {
+      errors.push({ row, field: 'charges', message: 'Confirmed preview contains an invalid charge' });
+      return [];
+    }
+    return [{
+      chargeCode: charge.chargeCode,
+      chargeName: charge.chargeName,
+      chargeBasis: charge.chargeBasis,
+      containerType: charge.chargeBasis === 'PER_CONTAINER' ? charge.containerType ?? 'ALL' : undefined,
+      amount: charge.amount,
+      currency: charge.currency,
+      isIncluded: Boolean(charge.isIncluded),
+    }];
+  });
 }
 
 async function nextRateNumber(tx: Prisma.TransactionClient, tenantId: string) {

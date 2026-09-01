@@ -31,8 +31,8 @@ export class TokenService {
   constructor(config: ConfigService) {
     this.accessTokenSecret = config.getOrThrow<string>('AUTH_ACCESS_TOKEN_SECRET');
     this.refreshTokenSecret = config.getOrThrow<string>('AUTH_REFRESH_TOKEN_SECRET');
-    this.accessTokenExpiresIn = config.getOrThrow<number>('AUTH_ACCESS_TOKEN_TTL_SECONDS');
-    this.refreshTokenExpiresIn = config.getOrThrow<number>('AUTH_REFRESH_TOKEN_TTL_SECONDS');
+    this.accessTokenExpiresIn = secondsConfig(config, 'AUTH_ACCESS_TOKEN_TTL_SECONDS');
+    this.refreshTokenExpiresIn = secondsConfig(config, 'AUTH_REFRESH_TOKEN_TTL_SECONDS');
   }
 
   issueAccessToken(input: AccessTokenInput): string {
@@ -80,4 +80,12 @@ export class TokenService {
   hashRefreshToken(token: string): string {
     return createHmac('sha256', this.refreshTokenSecret).update(token).digest('hex');
   }
+}
+
+function secondsConfig(config: ConfigService, key: string): number {
+  const value = Number(config.getOrThrow<string | number>(key));
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${key} must be a positive integer number of seconds`);
+  }
+  return value;
 }
