@@ -10,6 +10,7 @@ import { RequestContextService } from '../../shared/request-context/request-cont
 import type { CreateCustomerDto } from './dto/create-customer.dto.js';
 import type { CreateCustomerContactDto } from './dto/create-customer-contact.dto.js';
 import type { ListCustomersDto } from './dto/list-customers.dto.js';
+import type { UpdateCustomerDto } from './dto/update-customer.dto.js';
 
 const customerSelect = {
   id: true,
@@ -161,6 +162,77 @@ export class CustomersService {
     }
   }
 
+  async update(id: string, dto: UpdateCustomerDto) {
+    const context = this.requestContext.requireAuthenticated();
+    const existing = await this.prisma.customerCompany.findFirst({
+      where: { id, tenantId: context.tenantId },
+      select: customerSelect,
+    });
+    if (!existing)
+      throw new NotFoundException({ code: 'CUSTOMER_NOT_FOUND', message: 'Customer not found' });
+    const effectiveMarkupType = dto.defaultMarkupType ?? existing.defaultMarkupType;
+    const effectiveMarkupValue =
+      dto.defaultMarkupType === MarkupType.NONE
+        ? undefined
+        : dto.defaultMarkupValue === undefined
+          ? existing.defaultMarkupValue?.toString()
+          : (dto.defaultMarkupValue ?? undefined);
+    this.validateMarkup({
+      defaultMarkupType: effectiveMarkupType,
+      defaultMarkupValue: effectiveMarkupValue,
+    });
+    await this.validateSalesOwner(dto.salesOwnerId ?? undefined, context.tenantId);
+    const data: Prisma.CustomerCompanyUpdateInput = {
+      ...(dto.name !== undefined ? { name: dto.name } : {}),
+      ...(dto.shortName !== undefined
+        ? { shortName: this.optionalText(dto.shortName) ?? null }
+        : {}),
+      ...(dto.countryCode !== undefined ? { countryCode: dto.countryCode } : {}),
+      ...(dto.taxId !== undefined ? { taxId: this.optionalText(dto.taxId) ?? null } : {}),
+      ...(dto.creditLimit !== undefined
+        ? { creditLimit: dto.creditLimit === null ? null : new Prisma.Decimal(dto.creditLimit) }
+        : {}),
+      ...(dto.paymentTermDays !== undefined ? { paymentTermDays: dto.paymentTermDays } : {}),
+      ...(dto.defaultMarkupType !== undefined ? { defaultMarkupType: dto.defaultMarkupType } : {}),
+      ...(dto.defaultMarkupValue !== undefined
+        ? {
+            defaultMarkupValue:
+              dto.defaultMarkupValue === null ? null : new Prisma.Decimal(dto.defaultMarkupValue),
+          }
+        : {}),
+      ...(dto.defaultMarkupType === MarkupType.NONE ? { defaultMarkupValue: null } : {}),
+      ...(dto.salesOwnerId !== undefined
+        ? {
+            salesOwner:
+              dto.salesOwnerId === null
+                ? { disconnect: true }
+                : { connect: { id: dto.salesOwnerId } },
+          }
+        : {}),
+      ...(dto.status !== undefined ? { status: dto.status } : {}),
+      updatedById: context.userId,
+    };
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.customerCompany.update({
+        where: { id },
+        data,
+        select: customerSelect,
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'CustomerCompany',
+          entityId: id,
+          action: 'CUSTOMER_UPDATED',
+          beforeData: this.auditData(existing),
+          afterData: this.auditData(updated),
+        },
+      });
+      return updated;
+    });
+  }
+
   async listContacts(customerId: string) {
     const context = this.requestContext.requireAuthenticated();
     await this.requireCustomerInScope(customerId, context.tenantId, context.customerCompanyId);
@@ -216,7 +288,9 @@ export class CustomersService {
     });
   }
 
-  private validateMarkup(dto: CreateCustomerDto): void {
+  private validateMarkup(
+    dto: Pick<CreateCustomerDto, 'defaultMarkupType' | 'defaultMarkupValue'>,
+  ): void {
     if (dto.defaultMarkupType === MarkupType.NONE && dto.defaultMarkupValue !== undefined) {
       throw new BadRequestException({
         code: 'INVALID_MARKUP',
@@ -265,7 +339,7 @@ export class CustomersService {
     }
   }
 
-  private optionalText(value: string | undefined): string | undefined {
+  private optionalText(value: string | null | undefined): string | undefined {
     const normalized = value?.trim();
     return normalized || undefined;
   }

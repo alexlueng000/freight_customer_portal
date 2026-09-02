@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiConflictResponse,
@@ -13,6 +13,7 @@ import { CustomersService } from './customers.service.js';
 import { CreateCustomerDto } from './dto/create-customer.dto.js';
 import { CreateCustomerContactDto } from './dto/create-customer-contact.dto.js';
 import { ListCustomersDto } from './dto/list-customers.dto.js';
+import { UpdateCustomerDto } from './dto/update-customer.dto.js';
 
 @ApiTags('customers')
 @ApiBearerAuth()
@@ -44,6 +45,13 @@ export class CustomersController {
   @ApiForbiddenResponse({ description: 'Missing customer.read permission' })
   getById(@Param('id') id: string) {
     return this.customers.getById(id);
+  }
+
+  @Patch(':id')
+  @RequirePermissions('customer.manage')
+  @ApiOkResponse({ description: 'Tenant-scoped customer company updated' })
+  update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
+    return this.customers.update(id, dto);
   }
 
   @Get(':id/contacts')

@@ -3,9 +3,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ChevronLeft, ChevronRight, Pencil, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
+import { hasPermission } from '@/lib/auth';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
@@ -128,6 +130,9 @@ const statusTones = {
 } as const;
 
 export default function UsersPage() {
+  const searchParams = useSearchParams();
+  const scopedCustomerId = searchParams.get('customerCompanyId') ?? '';
+  const openCustomerCreate = searchParams.get('createCustomer') === '1';
   const { apiFetch, user } = useAuth();
   const [items, setItems] = useState<TenantUser[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -145,7 +150,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<UsersApiError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(openCustomerCreate);
   const [editingUser, setEditingUser] = useState<TenantUser | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -164,6 +169,7 @@ export default function UsersPage() {
     if (search) query.set('search', search);
     if (userType) query.set('userType', userType);
     if (status) query.set('status', status);
+    if (scopedCustomerId) query.set('customerCompanyId', scopedCustomerId);
     try {
       const [usersResult, customersResult] = await Promise.all([
         requestJson<UserListResponse>(apiFetch, `/api/v1/users?${query.toString()}`),
@@ -180,13 +186,13 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiFetch, page, search, status, userType]);
+  }, [apiFetch, page, scopedCustomerId, search, status, userType]);
 
   useEffect(() => {
     void load();
   }, [load, reloadKey]);
 
-  const canManage = user?.roles.some((role) => ['SUPER_ADMIN', 'TENANT_ADMIN'].includes(role));
+  const canManage = hasPermission(user, 'user.manage');
   const columns = useMemo<DataTableColumn<TenantUser>[]>(
     () => [
       {
@@ -371,6 +377,7 @@ export default function UsersPage() {
       {createOpen ? (
         <CreateUserDialog
           apiFetch={apiFetch}
+          defaultCustomerCompanyId={scopedCustomerId}
           customers={customers}
           onClose={() => setCreateOpen(false)}
           onCreated={() => {
@@ -530,11 +537,13 @@ function EditUserDialog({
 
 function CreateUserDialog({
   apiFetch,
+  defaultCustomerCompanyId,
   customers,
   onClose,
   onCreated,
 }: {
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  defaultCustomerCompanyId?: string;
   customers: CustomerOption[];
   onClose: () => void;
   onCreated: () => void;
@@ -552,9 +561,9 @@ function CreateUserDialog({
       displayName: '',
       email: '',
       initialPassword: '',
-      userType: 'INTERNAL',
-      roleCode: 'SALES',
-      customerCompanyId: '',
+      userType: defaultCustomerCompanyId ? 'CUSTOMER' : 'INTERNAL',
+      roleCode: defaultCustomerCompanyId ? 'CUSTOMER_USER' : 'SALES',
+      customerCompanyId: defaultCustomerCompanyId ?? '',
       status: 'ACTIVE',
     },
   });
@@ -563,6 +572,15 @@ function CreateUserDialog({
     setValue('roleCode', selectedType === 'INTERNAL' ? 'SALES' : 'CUSTOMER_USER');
     if (selectedType === 'INTERNAL') setValue('customerCompanyId', '');
   }, [selectedType, setValue]);
+  useEffect(() => {
+    if (
+      selectedType === 'CUSTOMER' &&
+      defaultCustomerCompanyId &&
+      customers.some((customer) => customer.id === defaultCustomerCompanyId)
+    ) {
+      setValue('customerCompanyId', defaultCustomerCompanyId, { shouldValidate: true });
+    }
+  }, [customers, defaultCustomerCompanyId, selectedType, setValue]);
 
   const submit = handleSubmit(async (values) => {
     setSubmitError(null);

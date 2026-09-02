@@ -1,8 +1,8 @@
 # Freight Customer Portal 开发进度日志
 
-> 最后更新：2026-09-02
+> 最后更新：2026-09-03
 > 当前阶段：V1.1 基线已封板，进入 P1 试点优化
-> 当前目标：完成 Email/Deep Link、操作型 Dashboard 与试点前安全加固
+> 当前目标：完成第一批 P1 权限、客户维护与表单错误体验优化
 
 ## 1. 项目当前状态
 
@@ -282,7 +282,21 @@
 - 未认证请求和非敏感公共路径不会写入租户安全审计；审计写入失败会记录结构化错误，但不替换原始 API 响应。
 - 单元测试覆盖跨租户风格的 Invoice ID 探测以及未认证请求不写审计。
 
+### 2.24 P1 权限与客户维护优化（已完成当前批次）
+
+- 登录态接口已返回从数据库角色权限关系计算得到的有效权限集合。
+- Booking、Shipment、Rate、Customer、User 等关键页面已按有效权限与业务状态控制敏感操作入口。
+- 已新增租户隔离的 `PATCH /api/v1/customers/:id`，客户编码不可修改，更新操作记录 `CUSTOMER_UPDATED` 审计日志。
+- 客户详情页已增加“开通客户账号”入口；用户管理页支持按客户公司筛选，并可预绑定客户公司创建客户用户。
+- 客户详情页已增加公司编辑抽屉，覆盖基本资料、信用账期、基础加价和状态；可选字段支持清空，切换至“无加价”会清除旧加价值。
+- 统一 API 校验响应已增加 `details.fieldErrors`，客户编辑表单会映射为中文字段级提示。
+- 浏览器回归已覆盖管理员编辑与清空、字段提示、客户账号入口预绑定，以及 Operation 无客户管理按钮；回归中修复了异步加载客户选项后预选丢失的问题。
+- API / Web TypeScript 与 ESLint 已通过；Auth、Customer 数据库集成测试通过，共 2 个测试套件、9 个测试。
+- 字段级错误能力仍需逐步接入其他高频业务表单。
+
 ## 3. 已完成验证
+
+> 2026-09-03 本轮 P1 验证：API / Web TypeScript 与 ESLint 通过；Auth、Customer 数据库集成测试通过，共 2 个测试套件、9 个测试。浏览器回归覆盖管理员客户编辑、中文字段提示、保存与清空、加价切换、客户账号入口预绑定，以及 Operation 权限负向场景，均已通过。
 
 > 2026-08-31 复核说明：当天 `pnpm lint` 与 `pnpm typecheck` 通过。完整 `pnpm test` 因本地 PostgreSQL `localhost:5433` 未运行而在数据库初始化阶段中止；下列 API/Worker/E2E 通过数量是 2026-08-30 及此前已保存的验证基线，不代表 2026-08-31 已重新全量通过。详见 [2026-08-31 代码与测试审阅报告](./TEST_REPORT_2026-08-31_CN.md)。
 
@@ -318,14 +332,16 @@
 - `RateCharge` V1 规则已确认并实现；仍需在 Rate UAT 中用真实费用样本复核。
 - Quote 发送邮件通知按批准路线图属于 M5 Notifications，本阶段不提前建立完整通知域。
 - Notification 已接通 Invoice 发布事件与本地 log transport；真实 SMTP/邮件服务商、通知中心 UI、Quote/Booking/Shipment 事件仍未完成。
-- 历史 V1.0 中 Invoice 附件、越权拒绝安全日志及完整黄金路径 Playwright 已完成；V1.1 主链路仍需重新完成业务 UAT 签署。
+- 历史 V1.0 中 Invoice 附件、越权拒绝安全日志及完整黄金路径 Playwright 已完成；V1.1 正常业务主链已验收并通过提交 `d94460a` 与标签 `v1.1.0-baseline` 封板。
 - 仓库 `build` 脚本已使用 `.next-build` 隔离生产构建；自定义 Next.js 构建命令仍应显式设置独立 `NEXT_DIST_DIR`。
-- Shipment 后端、前端和冒烟 E2E 已按 V1.1 Basic Shipment 口径更新；仍需重跑 Prisma Client 生成、数据库迁移和 Playwright。
+- Shipment 后端、前端和冒烟 E2E 已按 V1.1 Basic Shipment 口径更新；Prisma Client、数据库迁移和 Playwright 基线回归均已完成。
 - Invoice、BL 和复杂 Tracking 已从 V1.1 P0 移出；已有实现需作为历史能力冻结，避免继续扩大试点范围。
 
 ## 5. 下一步开发计划
 
-V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment。当前先完成主链路业务 UAT，再进入 Email/Deep Link、Dashboard 待办、Notifications 与 Branding；Invoice、完整 BL、复杂 Tracking 进入 Backlog。
+V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线已完成业务验收并封板。当前优先完成 P1 权限、客户维护与表单错误体验，再进入 Email/Deep Link、Dashboard 待办、Notifications 与 Branding；Invoice、完整 BL、复杂 Tracking 进入 Backlog。
+
+2026-09-03 收口说明：核心闭环与第一批 P1 优化已完成并提交；2026-09-04 从人工探索性测试、剩余字段错误接入和试点加固继续，不扩大 V1.1 P0 范围。
 
 ### 5.1 Rate 业务 UAT
 
@@ -381,6 +397,17 @@ V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment。当前�
 - [ ] 接入 Quote、Booking 与 Shipment 的批准通知事件。
 - [ ] 完成通知中心前端与未读状态。
 - [ ] 完成租户品牌名、Logo、主色和自定义域名配置。
+
+### 5.8 第一批 P1：权限与客户维护
+
+- [x] 登录态返回数据库有效权限集合。
+- [x] 关键业务操作入口从角色硬编码升级为“权限 + 业务状态”控制。
+- [x] 新增客户公司更新 API、租户隔离校验及审计记录。
+- [x] 增加客户账号开通入口及客户公司预绑定。
+- [x] 完成客户公司编辑 UI。
+- [x] 建立统一字段级 API 错误响应，并接入客户编辑表单中文提示。
+- [ ] 将统一字段级错误提示继续接入其他高频业务表单。
+- [x] 完成上述 P1 改动的浏览器回归。
 
 ## 6. 后续里程碑
 

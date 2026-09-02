@@ -1,6 +1,6 @@
 # Freight Customer Portal 项目开发进度表
 
-> 更新时间：2026-09-02
+> 更新时间：2026-09-03
 >
 > 当前阶段：V1.1 基线已封板，进入 P1 试点优化
 >
@@ -10,32 +10,45 @@
 
 ## 当前结论
 
-根据 2026-09-02 最新 `Freight_Customer_Portal_PRD_V1.1_CN.docx`，V1 MVP 主链路已从 V1.0 的完整闭环收紧为 `Rate → Quote → Booking → SO → Basic Shipment`。当前代码已完成 Rate Import P0-A、Booking/SO/Shipment P0-B 技术 Gate，并已将 Shipment 状态与客户侧展示对齐到 V1.1 Basic Shipment 口径。Invoice、完整 BL/Document、复杂 Tracking 保留为历史实现与 Backlog 能力，不再作为 V1 P0 继续扩展。
+根据 2026-09-02 最新 `Freight_Customer_Portal_PRD_V1.1_CN.docx`，V1 MVP 主链路已从 V1.0 的完整闭环收紧为 `Rate → Quote → Booking → SO → Basic Shipment`。当前代码已完成 Rate Import P0-A、Booking/SO/Shipment P0-B 技术 Gate，并已将 Shipment 状态与客户侧展示对齐到 V1.1 Basic Shipment 口径。V1.1 核心闭环与第一批权限、客户维护 P1 优化均已完成并通过回归；Invoice、完整 BL/Document、复杂 Tracking 保留为历史实现与 Backlog 能力，不再作为 V1 P0 继续扩展。
 
 ## 阶段总览
 
-| 阶段 | 范围 | 状态 | 已完成证据 | 剩余工作 |
-| --- | --- | --- | --- | --- |
-| M0 | Monorepo、Web/API/Worker、Prisma、Docker、CI | 已完成 | 构建、Lint、TypeScript、CI 基线 | 生产部署演练 |
-| M1 | Tenant、User、Customer、Auth、RBAC、审计、租户隔离 | 主体完成 | 服务端权限与敏感域跨租户负向测试 | 密码重置、登录失败审计、安全响应头 |
-| M2 | Rate、Excel 导入、客户查价、Quote、PDF、改价 | P0-A 已通过当前验收 | 真实 Excel 01/02/08 回放、异步导入/PDF、状态机与审计 | 继续用更多真实样本回归 |
-| M3 | Quote 转 Booking、提交、审核、退回、提交 Carrier/Agent、SO | V1.1 基线封板 | 原子转单、V1.1 Booking 状态机、SO 登记/发布解耦、权限负向测试、正常主链人工走通 | 字段级错误提示、客户资料维护细节 |
-| M4 | Basic Shipment | V1.1 基线封板 | SO 后创建 Shipment，状态收敛为 PLANNED/DEPARTED/ARRIVED/CANCELLED，客户侧简化展示，浏览器回归通过 | Email/Deep Link、Dashboard 待办 |
-| M5 | Notification、Branding、Dashboard 待办 | 部分完成 | Notification 持久化与队列基线 | 生产邮件、通知中心 UI、租户 Branding、操作型 Dashboard |
-| M6 | Pilot Hardening | 进行中 | UAT 发现记录与风险登记已建立 | P1 缺口、可观测性、备份恢复、稳定性验证 |
+| 阶段 | 范围                                                       | 状态                | 已完成证据                                                                                        | 剩余工作                                               |
+| ---- | ---------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| M0   | Monorepo、Web/API/Worker、Prisma、Docker、CI               | 已完成              | 构建、Lint、TypeScript、CI 基线                                                                   | 生产部署演练                                           |
+| M1   | Tenant、User、Customer、Auth、RBAC、审计、租户隔离         | 主体完成            | 服务端权限与敏感域跨租户负向测试                                                                  | 密码重置、登录失败审计、安全响应头                     |
+| M2   | Rate、Excel 导入、客户查价、Quote、PDF、改价               | P0-A 已通过当前验收 | 真实 Excel 01/02/08 回放、异步导入/PDF、状态机与审计                                              | 继续用更多真实样本回归                                 |
+| M3   | Quote 转 Booking、提交、审核、退回、提交 Carrier/Agent、SO | V1.1 基线封板       | 原子转单、V1.1 Booking 状态机、SO 登记/发布解耦、权限负向测试、正常主链人工走通                   | 试点反馈与稳定性验证                                   |
+| M4   | Basic Shipment                                             | V1.1 基线封板       | SO 后创建 Shipment，状态收敛为 PLANNED/DEPARTED/ARRIVED/CANCELLED，客户侧简化展示，浏览器回归通过 | Email/Deep Link、Dashboard 待办                        |
+| M5   | Notification、Branding、Dashboard 待办                     | 部分完成            | Notification 持久化与队列基线                                                                     | 生产邮件、通知中心 UI、租户 Branding、操作型 Dashboard |
+| M6   | Pilot Hardening                                            | 进行中              | UAT 发现记录与风险登记已建立                                                                      | P1 缺口、可观测性、备份恢复、稳定性验证                |
 
 ## 第一生产纵切状态
 
-| 业务节点 | 状态 | 说明 |
-| --- | --- | --- |
-| 创建租户、管理员、客户公司与客户用户 | 已完成 | Demo seed 可重复执行，用户与客户范围受租户约束 |
-| 创建/导入 Rate 与客户查价 | 已完成 | 后台成本接口与客户销售价接口分离 |
-| 创建、审核、发送、接受 Quote 与下载 PDF | 已完成 | 价格快照、手工改价、异步 PDF、状态审计已实现 |
-| Quote 转 Booking、提交与内部确认 | 已完成 | 转单事务、幂等和状态机已实现 |
-| 登记/发布 SO 并创建 Basic Shipment | 已完成 | SO 结构化登记与客户发布解耦；Shipment 创建后进入 `PLANNED / 待开船` |
-| 客户查看 SO 与 Basic Shipment | 已完成基础能力 | 客户侧只展示船名航次、ETD/ATD、ETA/ATA、基础状态与简化 Timeline |
-| Invoice、BL、复杂 Tracking | 已实现但移出 V1 P0 | 作为历史能力和 Backlog 保留，试点前不继续扩展 |
-| 完整浏览器黄金路径 | 已按 V1.1 重定并通过 | Rate → Quote → Booking → SO 内部隐藏/发布 → Basic Shipment → 客户查看已通过；Invoice/BL/复杂 Tracking 已移出主链 |
+| 业务节点                                | 状态                 | 说明                                                                                                             |
+| --------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 创建租户、管理员、客户公司与客户用户    | 已完成               | Demo seed 可重复执行，用户与客户范围受租户约束                                                                   |
+| 创建/导入 Rate 与客户查价               | 已完成               | 后台成本接口与客户销售价接口分离                                                                                 |
+| 创建、审核、发送、接受 Quote 与下载 PDF | 已完成               | 价格快照、手工改价、异步 PDF、状态审计已实现                                                                     |
+| Quote 转 Booking、提交与内部确认        | 已完成               | 转单事务、幂等和状态机已实现                                                                                     |
+| 登记/发布 SO 并创建 Basic Shipment      | 已完成               | SO 结构化登记与客户发布解耦；Shipment 创建后进入 `PLANNED / 待开船`                                              |
+| 客户查看 SO 与 Basic Shipment           | 已完成基础能力       | 客户侧只展示船名航次、ETD/ATD、ETA/ATA、基础状态与简化 Timeline                                                  |
+| Invoice、BL、复杂 Tracking              | 已实现但移出 V1 P0   | 作为历史能力和 Backlog 保留，试点前不继续扩展                                                                    |
+| 完整浏览器黄金路径                      | 已按 V1.1 重定并通过 | Rate → Quote → Booking → SO 内部隐藏/发布 → Basic Shipment → 客户查看已通过；Invoice/BL/复杂 Tracking 已移出主链 |
+
+## 2026-09-03 更新摘要
+
+- V1.1 基线已通过提交 `d94460a` 和标签 `v1.1.0-baseline` 封板。
+- 登录态接口已返回由数据库角色权限关系计算得到的有效权限集合，前端不再只依赖角色名判断操作入口。
+- Booking、Shipment、Rate、Customer、User 等关键页面已按有效权限及业务状态控制敏感操作按钮。
+- 客户公司更新接口 `PATCH /api/v1/customers/:id` 已完成，保持租户隔离、客户编码不可变，并记录 `CUSTOMER_UPDATED` 审计日志。
+- 客户详情页已增加“开通客户账号”入口，用户管理页支持按客户公司筛选并预绑定创建客户用户。
+- 客户详情页已完成公司编辑抽屉，支持基础资料、信用账期、加价和状态维护；可选值支持显式清空，加价可安全切回“无加价”。
+- API 校验响应已增加字段级错误映射，客户编辑表单会显示中文字段提示。
+- 浏览器回归已通过：管理员客户编辑、中文字段提示、保存与清空、加价切换、客户账号入口预绑定，以及 Operation 无管理按钮均符合权限预期。
+- 回归中修复了客户公司选项异步加载后未自动预选的问题。
+- 本轮收口结论：V1.1 核心业务闭环已经完成；2026-09-04 继续进行人工探索性测试与试点加固，不在本次提交中扩大功能范围。
 
 ## 2026-09-02 更新摘要
 
@@ -57,12 +70,13 @@
 
 ## 测试状态
 
-2026-09-02 当前验证：
+2026-09-03 当前验证：
 
 - `pnpm --filter @freight/api typecheck`：通过。
 - `pnpm --filter @freight/web typecheck`：通过。
 - `pnpm --filter @freight/api lint`：通过。
 - `pnpm --filter @freight/web lint`：通过。
+- Auth 与 Customer 数据库集成测试：通过，2 suites、9 tests。
 - `pnpm --filter @freight/api test -- shipment-state-machine.spec.ts`：通过，2/2。
 - `pnpm prisma:validate`：通过。
 - `pnpm prisma:generate` 与 `pnpm prisma:validate`：通过。
@@ -73,7 +87,7 @@
 
 ## 当前优先级
 
-1. P1：关闭字段级校验提示、权限化业务按钮、客户公司编辑和客户账号开通入口。
+1. P1：继续将统一字段级 API 错误能力接入其他高频业务表单。
 2. P1：接入 Quote Ready、Booking Needs Update、SO Published、Shipment Departed 等 Email/Deep Link 通知。
 3. P1：实现操作型 Dashboard 待办：待审核 Booking、待 SO、即将 ETD、过期 Rate。
 4. P1：完成租户 Branding、CSP/Security Headers、密码重置、可观测性和数据库备份恢复演练。

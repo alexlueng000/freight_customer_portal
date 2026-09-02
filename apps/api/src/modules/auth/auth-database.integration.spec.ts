@@ -31,6 +31,10 @@ describe('auth database integration', () => {
     const role = await prisma.role.create({
       data: { tenantId, code: RoleCode.TENANT_ADMIN, name: 'Tenant Admin' },
     });
+    const permission = await prisma.permission.create({
+      data: { code: `auth.test.${testRunId}`, description: 'Auth test permission' },
+    });
+    await prisma.rolePermission.create({ data: { roleId: role.id, permissionId: permission.id } });
     const user = await prisma.user.create({
       data: {
         tenantId,
@@ -49,8 +53,10 @@ describe('auth database integration', () => {
       await prisma.refreshSession.deleteMany({ where: { tenantId } });
       await prisma.auditLog.deleteMany({ where: { tenantId } });
       await prisma.userRole.deleteMany({ where: { user: { tenantId } } });
+      await prisma.rolePermission.deleteMany({ where: { role: { tenantId } } });
       await prisma.user.deleteMany({ where: { tenantId } });
       await prisma.role.deleteMany({ where: { tenantId } });
+      await prisma.permission.deleteMany({ where: { code: `auth.test.${testRunId}` } });
       await prisma.tenant.delete({ where: { id: tenantId } });
     }
     await prisma.$disconnect();
@@ -64,6 +70,7 @@ describe('auth database integration', () => {
 
     expect(session.user.tenantId).toBe(tenantId);
     expect(session.user.roles).toEqual([RoleCode.TENANT_ADMIN]);
+    expect(session.user.permissions).toEqual([`auth.test.${testRunId}`]);
     expect(tokens.verifyAccessToken(session.accessToken)).toMatchObject({
       sub: session.user.id,
       tenantId,

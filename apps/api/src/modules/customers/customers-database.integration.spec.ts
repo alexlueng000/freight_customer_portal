@@ -88,6 +88,42 @@ describe('customers database integration', () => {
     ).rejects.toMatchObject({ response: { code: 'CUSTOMER_NOT_FOUND' } });
   });
 
+  it('updates a customer inside the tenant boundary and audits before/after values', async () => {
+    const updated = await runAs(tenantAId, adminAId, undefined, () =>
+      customers.update(customerAId, { name: 'Tenant A Customer Updated', paymentTermDays: 45 }),
+    );
+    expect(updated).toMatchObject({
+      code: 'SHARED',
+      name: 'Tenant A Customer Updated',
+      paymentTermDays: 45,
+    });
+    await runAs(tenantAId, adminAId, undefined, () =>
+      customers.update(customerAId, { defaultMarkupType: 'FIXED', defaultMarkupValue: '25.00' }),
+    );
+    const cleared = await runAs(tenantAId, adminAId, undefined, () =>
+      customers.update(customerAId, {
+        defaultMarkupType: 'NONE',
+        defaultMarkupValue: null,
+        creditLimit: null,
+      }),
+    );
+    expect(cleared).toMatchObject({
+      defaultMarkupType: 'NONE',
+      defaultMarkupValue: null,
+      creditLimit: null,
+    });
+    await expect(
+      runAs(tenantAId, adminAId, undefined, () =>
+        customers.update(customerBId, { name: 'Forbidden' }),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'CUSTOMER_NOT_FOUND' } });
+    await expect(
+      prisma.auditLog.count({
+        where: { tenantId: tenantAId, entityId: customerAId, action: 'CUSTOMER_UPDATED' },
+      }),
+    ).resolves.toBe(3);
+  });
+
   it('limits a customer user to its bound company inside the tenant', async () => {
     const customerUser = await createUser(
       tenantAId,

@@ -1,10 +1,11 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiExceptionFilter } from './api-exception.filter.js';
 import { RequestContextService } from '../request-context/request-context.service.js';
 
 describe('ApiExceptionFilter security audit', () => {
   const context = new RequestContextService();
-  const create = jest.fn<Promise<{ id: string }>, [{ data: Record<string, unknown> }]>()
+  const create = jest
+    .fn<Promise<{ id: string }>, [{ data: Record<string, unknown> }]>()
     .mockResolvedValue({ id: 'audit-1' });
   const filter = new ApiExceptionFilter(context, { auditLog: { create } } as never);
 
@@ -63,5 +64,45 @@ describe('ApiExceptionFilter security audit', () => {
       filter.catch(new NotFoundException(), host as never),
     );
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('groups validation messages by field for form clients', async () => {
+    const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    const host = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          method: 'PATCH',
+          originalUrl: '/api/v1/customers/id',
+          path: '/api/v1/customers/id',
+          params: {},
+          header: () => undefined,
+        }),
+        getResponse: () => response,
+      }),
+    };
+    await context.run({ requestId: 'req-validation', roles: [] }, () =>
+      filter.catch(
+        new BadRequestException({
+          message: [
+            'name must be longer than or equal to 1 characters',
+            'countryCode must match /^[A-Z]{2}$/ regular expression',
+          ],
+        }),
+        host as never,
+      ),
+    );
+    expect(response.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'VALIDATION_ERROR',
+        // Jest asymmetric matchers are intentionally dynamic values.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        details: expect.objectContaining({
+          fieldErrors: {
+            name: ['name must be longer than or equal to 1 characters'],
+            countryCode: ['countryCode must match /^[A-Z]{2}$/ regular expression'],
+          },
+        }),
+      }),
+    );
   });
 });

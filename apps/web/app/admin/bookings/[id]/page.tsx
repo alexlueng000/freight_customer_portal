@@ -8,6 +8,7 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { bookingStatusLabel, bookingStatusTone } from '@/lib/booking-status';
+import { hasPermission } from '@/lib/auth';
 interface Booking {
   id: string;
   bookingNo: string;
@@ -237,9 +238,7 @@ export default function AdminBookingDetail() {
   };
   if (loading) return <LoadingState rows={8} />;
   if (!b) return <ErrorState description={error || '订舱不存在'} onRetry={() => void load()} />;
-  const canManage = Boolean(
-    user?.roles.some((role) => ['SUPER_ADMIN', 'TENANT_ADMIN', 'OPERATION'].includes(role)),
-  );
+  const canManage = hasPermission(user, 'booking.manage');
   const reviewIssues = b.reviewIssues ?? [];
   const blockingIssues = reviewIssues.filter((issue) => issue.blocking);
   const route = routeDisplay(b);

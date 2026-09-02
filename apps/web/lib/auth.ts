@@ -10,7 +10,11 @@ export interface AuthenticatedUser {
   displayName: string;
   userType: UserType;
   roles: string[];
+  permissions: string[];
 }
+
+export const hasPermission = (user: AuthenticatedUser | null | undefined, code: string) =>
+  Boolean(user?.permissions.includes(code));
 
 export interface AuthResponse {
   accessToken: string;

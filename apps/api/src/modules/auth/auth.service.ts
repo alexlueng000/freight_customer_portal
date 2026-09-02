@@ -13,7 +13,7 @@ import type {
 
 const loginUserInclude = {
   tenant: true,
-  userRoles: { include: { role: true } },
+  userRoles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
 } as const;
 
 @Injectable()
@@ -205,7 +205,7 @@ export class AuthService {
     displayName: string;
     userType: AuthenticatedUser['userType'];
     tenant: { code: string; name: string };
-    userRoles: Array<{ role: { code: RoleCode } }>;
+    userRoles: Array<{ role: { code: RoleCode; permissions: Array<{ permission: { code: string } }> } }>;
   }): AuthenticatedUser {
     return {
       id: user.id,
@@ -217,6 +217,7 @@ export class AuthService {
       displayName: user.displayName,
       userType: user.userType,
       roles: user.userRoles.map(({ role }) => role.code),
+      permissions: [...new Set(user.userRoles.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.code)))].sort(),
     };
   }
 

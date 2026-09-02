@@ -15,6 +15,7 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { useAuth } from '@/components/auth-provider';
+import { hasPermission } from '@/lib/auth';
 
 type CustomerStatus = 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
 type MarkupType = 'NONE' | 'FIXED' | 'PERCENT';
@@ -179,9 +180,7 @@ export default function CustomersPage() {
     void loadCustomers();
   }, [loadCustomers, reloadKey]);
 
-  const canCreate = user?.roles.some((role) =>
-    ['SUPER_ADMIN', 'TENANT_ADMIN', 'SALES'].includes(role),
-  );
+  const canCreate = hasPermission(user, 'customer.manage');
 
   const columns = useMemo<DataTableColumn<Customer>[]>(
     () => [

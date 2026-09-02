@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
+import { hasPermission } from '@/lib/auth';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
@@ -115,7 +116,7 @@ export default function RatesPage() {
     catch (caught) { setError(toRateError(caught)); } finally { setLoading(false); }
   }, [apiFetch, carrierCode, containerType, page, podCode, polCode, search, status, validOn]);
   useEffect(() => { void load(); }, [load, reloadKey]);
-  const canManage = user?.roles.some((role) => ['SUPER_ADMIN', 'TENANT_ADMIN'].includes(role));
+  const canManage = hasPermission(user, 'rate.manage');
   const columns = useMemo<DataTableColumn<Rate>[]>(() => [
     { key: 'rateNo', header: 'Rate', render: (rate) => <div><div className="font-medium">{rate.rateNo}</div><div className="mt-0.5 text-xs text-muted">{rate.serviceName ?? '未设置服务'}</div></div> },
     { key: 'route', header: '航线', render: (rate) => <div><div>{rate.polCode} → {rate.podCode}</div><div className="mt-0.5 text-xs text-muted">{rate.polName} → {rate.podName}</div></div> },

@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ArrowLeft, Mail, Phone, Plus, UserRound, X } from 'lucide-react';
+import { ArrowLeft, Mail, Pencil, Phone, Plus, UserRound, X } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,6 +13,7 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { hasPermission } from '@/lib/auth';
 
 type CustomerStatus = 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
 type MarkupType = 'NONE' | 'FIXED' | 'PERCENT';
@@ -52,13 +53,14 @@ interface CustomerContact {
 interface ApiErrorPayload {
   code?: string;
   message?: string;
-  details?: { errors?: string[] };
+  details?: { errors?: string[]; fieldErrors?: Record<string, string[]> };
 }
 
 class CustomerDetailApiError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly details?: ApiErrorPayload['details'],
   ) {
     super(message);
   }
@@ -78,6 +80,44 @@ const contactSchema = z.object({
 });
 
 type ContactFormValues = z.infer<typeof contactSchema>;
+
+const optionalDecimal = z
+  .string()
+  .trim()
+  .refine(
+    (value) => !value || /^\d{1,14}(?:\.\d{1,4})?$/.test(value),
+    '请输入有效数字，最多 4 位小数',
+  );
+const customerEditSchema = z
+  .object({
+    name: z.string().trim().min(1, '公司名称为必填项').max(200, '公司名称不能超过 200 个字符'),
+    shortName: z.string().trim().max(100, '简称不能超过 100 个字符'),
+    countryCode: z
+      .string()
+      .trim()
+      .refine((value) => !value || /^[A-Za-z]{2}$/.test(value), '请输入两位国家/地区代码'),
+    taxId: z.string().trim().max(100, '税号不能超过 100 个字符'),
+    creditLimit: optionalDecimal,
+    paymentTermDays: z
+      .string()
+      .trim()
+      .refine(
+        (value) => !value || (/^\d+$/.test(value) && Number(value) <= 3650),
+        '账期必须是 0–3650 的整数',
+      ),
+    defaultMarkupType: z.enum(['NONE', 'FIXED', 'PERCENT']),
+    defaultMarkupValue: optionalDecimal,
+    status: z.enum(['ACTIVE', 'INACTIVE', 'BLOCKED']),
+  })
+  .superRefine((value, context) => {
+    if (value.defaultMarkupType !== 'NONE' && !value.defaultMarkupValue)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['defaultMarkupValue'],
+        message: '固定或百分比加价必须填写数值',
+      });
+  });
+type CustomerEditValues = z.infer<typeof customerEditSchema>;
 
 const statusLabels: Record<CustomerStatus, string> = {
   ACTIVE: '启用',
@@ -101,6 +141,7 @@ export default function CustomerDetailPage() {
   const [error, setError] = useState<CustomerDetailApiError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -124,9 +165,7 @@ export default function CustomerDetailPage() {
     void load();
   }, [load, reloadKey]);
 
-  const canCreate = user?.roles.some((role) =>
-    ['SUPER_ADMIN', 'TENANT_ADMIN', 'SALES'].includes(role),
-  );
+  const canCreate = hasPermission(user, 'customer.manage');
 
   const handleCreated = (contact: CustomerContact) => {
     setContacts((current) => sortContacts([...current, contact]));
@@ -137,6 +176,12 @@ export default function CustomerDetailPage() {
     );
     setCreateOpen(false);
     setNotice('联系人创建成功。');
+  };
+
+  const handleUpdated = (updated: CustomerDetail) => {
+    setCustomer(updated);
+    setEditOpen(false);
+    setNotice('客户公司信息已更新。');
   };
 
   if (loading) {
@@ -170,14 +215,32 @@ export default function CustomerDetailPage() {
       <PageHeader
         actions={
           canCreate ? (
-            <button
-              className="inline-flex h-9 items-center gap-2 rounded bg-primary px-4 text-sm font-semibold text-surface hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/25"
-              onClick={() => setCreateOpen(true)}
-              type="button"
-            >
-              <Plus aria-hidden className="size-4" />
-              新建联系人
-            </button>
+            <div className="flex gap-2">
+              {hasPermission(user, 'user.manage') ? (
+                <Link
+                  className="inline-flex h-9 items-center rounded border border-border px-4 text-sm font-semibold"
+                  href={`/admin/users?customerCompanyId=${customerId}&createCustomer=1`}
+                >
+                  开通客户账号
+                </Link>
+              ) : null}
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded border border-border px-4 text-sm font-semibold"
+                onClick={() => setEditOpen(true)}
+                type="button"
+              >
+                <Pencil aria-hidden className="size-4" />
+                编辑公司
+              </button>
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded bg-primary px-4 text-sm font-semibold text-surface"
+                onClick={() => setCreateOpen(true)}
+                type="button"
+              >
+                <Plus aria-hidden className="size-4" />
+                新建联系人
+              </button>
+            </div>
           ) : undefined
         }
         description={`${customer.code}${customer.shortName ? ` · ${customer.shortName}` : ''}`}
@@ -248,6 +311,197 @@ export default function CustomerDetailPage() {
           onCreated={handleCreated}
         />
       ) : null}
+      {editOpen ? (
+        <EditCustomerDialog
+          apiFetch={apiFetch}
+          customer={customer}
+          onClose={() => setEditOpen(false)}
+          onUpdated={handleUpdated}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function EditCustomerDialog({
+  apiFetch,
+  customer,
+  onClose,
+  onUpdated,
+}: {
+  apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  customer: CustomerDetail;
+  onClose: () => void;
+  onUpdated: (customer: CustomerDetail) => void;
+}) {
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<CustomerEditValues>({
+    resolver: zodResolver(customerEditSchema),
+    defaultValues: {
+      name: customer.name,
+      shortName: customer.shortName ?? '',
+      countryCode: customer.countryCode ?? '',
+      taxId: customer.taxId ?? '',
+      creditLimit: customer.creditLimit ?? '',
+      paymentTermDays: customer.paymentTermDays?.toString() ?? '',
+      defaultMarkupType: customer.defaultMarkupType,
+      defaultMarkupValue: customer.defaultMarkupValue ?? '',
+      status: customer.status,
+    },
+  });
+  const markupType = watch('defaultMarkupType');
+  const submit = handleSubmit(async (values) => {
+    setSubmitError(null);
+    try {
+      const updated = await requestJson<CustomerDetail>(
+        apiFetch,
+        `/api/v1/customers/${customer.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: values.name.trim(),
+            shortName: values.shortName.trim() || null,
+            countryCode: values.countryCode.trim().toUpperCase() || null,
+            taxId: values.taxId.trim() || null,
+            creditLimit: values.creditLimit || null,
+            paymentTermDays: values.paymentTermDays ? Number(values.paymentTermDays) : null,
+            defaultMarkupType: values.defaultMarkupType,
+            defaultMarkupValue:
+              values.defaultMarkupType === 'NONE' ? null : values.defaultMarkupValue,
+            status: values.status,
+          }),
+        },
+      );
+      onUpdated(updated);
+    } catch (caught) {
+      const error = toDetailError(caught);
+      applyServerFieldErrors(error.details?.fieldErrors, setError);
+      setSubmitError(localizeCustomerError(error));
+    }
+  });
+  return (
+    <div
+      aria-labelledby="edit-customer-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-start justify-end bg-foreground/30"
+      role="dialog"
+    >
+      <button
+        aria-label="关闭编辑客户表单"
+        className="absolute inset-0"
+        onClick={onClose}
+        type="button"
+      />
+      <div className="relative h-full w-full max-w-2xl overflow-y-auto border-l border-border bg-surface shadow-xl">
+        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold" id="edit-customer-title">
+              编辑客户公司
+            </h2>
+            <p className="mt-1 text-sm text-muted">客户代码 {customer.code} 创建后不可修改。</p>
+          </div>
+          <button
+            aria-label="关闭"
+            className="grid size-9 place-items-center rounded border border-border"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <form className="space-y-5 p-5" onSubmit={(event) => void submit(event)}>
+          {submitError ? (
+            <div className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {submitError}
+            </div>
+          ) : null}
+          <fieldset className="grid gap-4 sm:grid-cols-2">
+            <legend className="col-span-full text-sm font-semibold">基本信息</legend>
+            <FormField error={errors.name?.message} label="公司名称 *">
+              <input {...register('name')} className={inputClass} />
+            </FormField>
+            <FormField error={errors.shortName?.message} label="简称">
+              <input {...register('shortName')} className={inputClass} />
+            </FormField>
+            <FormField error={errors.countryCode?.message} label="国家/地区代码">
+              <input
+                {...register('countryCode')}
+                className={inputClass}
+                maxLength={2}
+                placeholder="CN"
+              />
+            </FormField>
+            <FormField error={errors.taxId?.message} label="税号">
+              <input {...register('taxId')} className={inputClass} />
+            </FormField>
+            <FormField error={errors.status?.message} label="状态 *">
+              <select {...register('status')} className={inputClass}>
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </fieldset>
+          <fieldset className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
+            <legend className="col-span-full text-sm font-semibold">信用与账期</legend>
+            <FormField error={errors.creditLimit?.message} label="信用额度">
+              <input
+                {...register('creditLimit')}
+                className={inputClass}
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+            </FormField>
+            <FormField error={errors.paymentTermDays?.message} label="账期（天）">
+              <input {...register('paymentTermDays')} className={inputClass} inputMode="numeric" />
+            </FormField>
+          </fieldset>
+          <fieldset className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
+            <legend className="col-span-full text-sm font-semibold">基础加价规则</legend>
+            <FormField error={errors.defaultMarkupType?.message} label="加价类型">
+              <select {...register('defaultMarkupType')} className={inputClass}>
+                <option value="NONE">无加价</option>
+                <option value="FIXED">固定金额</option>
+                <option value="PERCENT">百分比</option>
+              </select>
+            </FormField>
+            <FormField error={errors.defaultMarkupValue?.message} label="加价值">
+              <input
+                {...register('defaultMarkupValue')}
+                className={inputClass}
+                disabled={markupType === 'NONE'}
+                inputMode="decimal"
+              />
+            </FormField>
+          </fieldset>
+          <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border bg-surface py-4">
+            <button
+              className="h-9 rounded border border-border px-4 text-sm font-semibold"
+              disabled={isSubmitting}
+              onClick={onClose}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-50"
+              disabled={isSubmitting}
+              type="submit"
+            >
+              {isSubmitting ? '保存中…' : '保存修改'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -507,9 +761,42 @@ async function requestJson<T>(
     throw new CustomerDetailApiError(
       error?.message ?? '客户服务暂时不可用，请稍后重试。',
       error?.code,
+      error?.details,
     );
   }
   return payload as T;
+}
+
+function applyServerFieldErrors(
+  fieldErrors: Record<string, string[]> | undefined,
+  setError: ReturnType<typeof useForm<CustomerEditValues>>['setError'],
+) {
+  if (!fieldErrors) return;
+  const labels: Record<string, string> = {
+    name: '公司名称格式不正确',
+    shortName: '简称格式不正确',
+    countryCode: '请输入两位国家/地区代码',
+    taxId: '税号格式不正确',
+    creditLimit: '请输入有效信用额度',
+    paymentTermDays: '账期必须是 0–3650 的整数',
+    defaultMarkupType: '请选择有效加价类型',
+    defaultMarkupValue: '请输入有效加价值',
+    status: '请选择有效状态',
+  };
+  for (const field of Object.keys(fieldErrors))
+    if (field in labels)
+      setError(field as keyof CustomerEditValues, { type: 'server', message: labels[field] });
+}
+
+function localizeCustomerError(error: CustomerDetailApiError): string {
+  const messages: Record<string, string> = {
+    VALIDATION_ERROR: '请检查标红字段后重新提交。',
+    INVALID_MARKUP: '请检查加价类型和加价值是否匹配。',
+    INVALID_SALES_OWNER: '销售负责人必须是当前租户的内部用户。',
+    CUSTOMER_NOT_FOUND: '客户不存在或已无法访问。',
+    PERMISSION_DENIED: '你没有编辑客户公司的权限。',
+  };
+  return (error.code && messages[error.code]) || error.message || '保存失败，请稍后重试。';
 }
 
 function toDetailError(error: unknown): CustomerDetailApiError {

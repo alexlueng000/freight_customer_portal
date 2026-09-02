@@ -31,9 +31,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const response = http.getResponse<Response>();
     const requestId = this.requestContext.getRequestId() ?? 'unknown';
     const status =
-      exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+      exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const payload = this.getPayload(exception);
 
     await this.auditDeniedSensitiveAccess(request, status, payload.code).catch((error: unknown) =>
@@ -89,8 +87,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
       typeof routeId === 'string'
         ? routeId
         : Array.isArray(routeId)
-          ? routeId[0] ?? 'collection'
-          : match[2] ?? 'collection';
+          ? (routeId[0] ?? 'collection')
+          : (match[2] ?? 'collection');
     const entityId = candidateId.slice(0, 100);
     await this.prisma.auditLog.create({
       data: {
@@ -137,7 +135,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
 
     const payload = response as ExceptionPayload;
-    const validationMessages = Array.isArray(payload.message) ? payload.message : undefined;
+    const validationMessages = Array.isArray(payload.message)
+      ? payload.message.filter((message): message is string => typeof message === 'string')
+      : undefined;
 
     return {
       code:
@@ -152,8 +152,22 @@ export class ApiExceptionFilter implements ExceptionFilter {
           : validationMessages
             ? 'Request validation failed'
             : exception.message,
-      details: validationMessages ? { errors: validationMessages } : payload.details,
+      details: validationMessages
+        ? {
+            errors: validationMessages,
+            fieldErrors: this.validationFieldErrors(validationMessages),
+          }
+        : payload.details,
     };
+  }
+
+  private validationFieldErrors(messages: string[]): Record<string, string[]> {
+    return messages.reduce<Record<string, string[]>>((result, message) => {
+      const field = message.match(/^([A-Za-z0-9_.[\]]+)\s/)?.[1];
+      if (!field) return result;
+      (result[field] ??= []).push(message);
+      return result;
+    }, {});
   }
 
   private defaultCode(status: number): string {

@@ -11,10 +11,11 @@ import type { Shipment } from '@/components/shipment-types';
 import { StatusBadge } from '@/components/status-badge';
 import type { StatusTone } from '@/lib/mock-data';
 import { formatDateTime } from '@/lib/date-time';
+import { hasPermission } from '@/lib/auth';
 
 export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const { id } = useParams<{ id: string }>();
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
   const [shipment, setShipment] = useState<Shipment | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -123,6 +124,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
     .map((item) => `${item.quantity} × ${item.containerType}`)
     .join('，');
   const routeNames = shipment.booking.quote?.sourceRate;
+  const canManage = mode === 'admin' && hasPermission(user, 'shipment.manage');
 
   return (
     <div className="space-y-5">
@@ -158,7 +160,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       <section className="rounded border border-border bg-surface p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">运输进度</h2>
-          {mode === 'admin' && nextAction ? (
+          {canManage && nextAction ? (
             <button className={primary} disabled={busy} onClick={() => beginAction(nextAction.key)}>{nextAction.label}</button>
           ) : null}
         </div>
@@ -176,7 +178,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       <section className="rounded border border-border bg-surface p-5">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold">航程计划</h2>
-          {mode === 'admin' && !editing ? <button className={secondary} onClick={() => { setNotice(''); setEditing(true); }}>编辑航程计划</button> : null}
+          {canManage && !editing ? <button className={secondary} onClick={() => { setNotice(''); setEditing(true); }}>编辑航程计划</button> : null}
         </div>
         {editing ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">

@@ -10,6 +10,7 @@ export interface AuthenticatedUser {
   displayName: string;
   userType: UserType;
   roles: RoleCode[];
+  permissions: string[];
 }
 
 export interface AuthResponse {
