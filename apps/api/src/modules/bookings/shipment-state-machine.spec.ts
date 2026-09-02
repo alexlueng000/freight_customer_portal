@@ -5,7 +5,13 @@ describe('ShipmentStateMachine', () => {
   const machine = new ShipmentStateMachine();
   it('allows the approved lifecycle', () => {
     expect(() =>
-      machine.assertTransition(ShipmentStatus.PLANNED, ShipmentStatus.IN_PROGRESS),
+      machine.assertTransition(ShipmentStatus.CREATED, ShipmentStatus.BOOKED),
+    ).not.toThrow();
+    expect(() =>
+      machine.assertTransition(ShipmentStatus.BOOKED, ShipmentStatus.DEPARTED),
+    ).not.toThrow();
+    expect(() =>
+      machine.assertTransition(ShipmentStatus.DEPARTED, ShipmentStatus.IN_TRANSIT),
     ).not.toThrow();
     expect(() =>
       machine.assertTransition(ShipmentStatus.DEPARTED, ShipmentStatus.ARRIVED),
@@ -13,10 +19,10 @@ describe('ShipmentStateMachine', () => {
   });
   it('rejects skipped and terminal transitions', () => {
     expect(() =>
-      machine.assertTransition(ShipmentStatus.PLANNED, ShipmentStatus.ARRIVED),
+      machine.assertTransition(ShipmentStatus.CREATED, ShipmentStatus.ARRIVED),
     ).toThrow();
     expect(() =>
-      machine.assertTransition(ShipmentStatus.COMPLETED, ShipmentStatus.IN_PROGRESS),
+      machine.assertTransition(ShipmentStatus.COMPLETED, ShipmentStatus.BOOKED),
     ).toThrow();
   });
 });

@@ -502,15 +502,21 @@ async function seedDemoBookingFlow({
     },
   });
   const demoShipment = await prisma.shipment.upsert({
-    where: { tenantId_shipmentNo: { tenantId, shipmentNo: 'SHP-DEMO-PLANNED' } },
-    update: { bookingId: shipmentBooking.id, etd, createdById: adminUserId },
+    where: { id: 'demo_shipment_planned_v1' },
+    update: {
+      shipmentNo: 'SHP-DEMO-BOOKED',
+      bookingId: shipmentBooking.id,
+      status: 'BOOKED',
+      etd,
+      createdById: adminUserId,
+    },
     create: {
       id: 'demo_shipment_planned_v1',
       tenantId,
-      shipmentNo: 'SHP-DEMO-PLANNED',
+      shipmentNo: 'SHP-DEMO-BOOKED',
       bookingId: shipmentBooking.id,
       customerCompanyId,
-      status: 'PLANNED',
+      status: 'BOOKED',
       carrierCode: 'OOCL',
       vessel: 'EVER DEMO',
       voyage: 'EV2608',

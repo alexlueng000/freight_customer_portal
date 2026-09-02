@@ -230,13 +230,21 @@ describe('booking database integration', () => {
         packageType: 'CARTON',
         packages: 100,
         grossWeight: '12000',
-        volumeCbm: '58.5',
         cargoReadyDate: '2026-09-02',
+        isDangerousGoods: true,
         shipperName: 'Example Shipper',
         shipperAddress: 'Shanghai, China',
         bookingContactName: 'Alex',
         bookingContactEmail: 'alex@example.test',
       }),
+    );
+    await expect(
+      runCustomer(tenantA, userA, customerA, () => service.submit(bookingA)),
+    ).rejects.toMatchObject({
+      response: { code: 'BOOKING_INCOMPLETE', details: { missing: ['dangerousGoodsInfo'] } },
+    });
+    await runCustomer(tenantA, userA, customerA, () =>
+      service.update(bookingA, { isDangerousGoods: false }),
     );
     await runCustomer(tenantA, userA, customerA, () => service.submit(bookingA));
     const revision = await runInternal(() =>
@@ -284,6 +292,86 @@ describe('booking database integration', () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it('blocks approval when cargo ready date is later than ETD', async () => {
+    const quoteId = await createAcceptedQuote('LATE-CARGO', {
+      etd: new Date('2026-09-09T00:00:00.000Z'),
+      quantity: 2,
+    });
+    const booking = await runCustomer(tenantA, userA, customerA, () =>
+      service.create({ quoteId }),
+    );
+    await runCustomer(tenantA, userA, customerA, () =>
+      service.update(booking.id, {
+        commodity: 'Consumer goods',
+        packageType: 'CARTON',
+        packages: 10,
+        grossWeight: '1000',
+        cargoReadyDate: '2026-09-10',
+        isDangerousGoods: false,
+        shipperName: 'Example Shipper',
+        shipperAddress: 'Shanghai, China',
+        bookingContactName: 'Alex',
+        bookingContactEmail: 'alex@example.test',
+      }),
+    );
+    await runCustomer(tenantA, userA, customerA, () => service.submit(booking.id));
+
+    await expect(runInternal(() => service.approve(booking.id, { remark: 'Checked' }))).rejects.toMatchObject({
+      response: {
+        code: 'BOOKING_REVIEW_BLOCKED',
+        details: {
+          reviewIssues: [expect.objectContaining({ code: 'CARGO_READY_AFTER_ETD', blocking: true })],
+        },
+      },
+    });
+    const detail = (await runInternal(() => service.getInternal(booking.id))) as Awaited<
+      ReturnType<BookingsService['getInternal']>
+    > & { reviewIssues: Array<{ code: string; blocking: boolean }> };
+    expect(detail.reviewIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'CARGO_READY_AFTER_ETD', blocking: true }),
+      ]),
+    );
+  });
+
+  it('blocks approval when booking container requirements no longer match the source quote', async () => {
+    const quoteId = await createAcceptedQuote('MISMATCH', {
+      etd: new Date('2026-09-12T00:00:00.000Z'),
+      quantity: 2,
+    });
+    const booking = await runCustomer(tenantA, userA, customerA, () =>
+      service.create({ quoteId }),
+    );
+    await prisma.bookingContainerRequest.updateMany({
+      where: { tenantId: tenantA, bookingId: booking.id, containerType: '40HQ' },
+      data: { quantity: 1 },
+    });
+    await runCustomer(tenantA, userA, customerA, () =>
+      service.update(booking.id, {
+        commodity: 'Consumer goods',
+        packageType: 'CARTON',
+        packages: 10,
+        grossWeight: '1000',
+        cargoReadyDate: '2026-09-10',
+        isDangerousGoods: false,
+        shipperName: 'Example Shipper',
+        shipperAddress: 'Shanghai, China',
+        bookingContactName: 'Alex',
+        bookingContactEmail: 'alex@example.test',
+      }),
+    );
+    await runCustomer(tenantA, userA, customerA, () => service.submit(booking.id));
+
+    await expect(runInternal(() => service.approve(booking.id, { remark: 'Checked' }))).rejects.toMatchObject({
+      response: {
+        code: 'BOOKING_REVIEW_BLOCKED',
+        details: {
+          reviewIssues: [expect.objectContaining({ code: 'BOOKING_QUOTE_MISMATCH', blocking: true })],
+        },
+      },
+    });
+  });
+
   it('keeps SO internal until publish and safely replaces the published version', async () => {
     const draft = await runInternal(() =>
       bookingSo.create(
@@ -302,6 +390,9 @@ describe('booking database integration', () => {
     );
     expect(draft).toMatchObject({ status: 'INTERNAL_DRAFT', version: 1 });
     expect(draft.document.customerVisible).toBe(false);
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: bookingA } })).status).toBe(
+      BookingStatus.BOOKED,
+    );
     expect(
       await runCustomer(tenantA, userA, customerA, () => bookingSo.listCustomer(bookingA)),
     ).toEqual([]);
@@ -454,6 +545,43 @@ function soFile(originalname: string) {
     mimetype: 'application/pdf',
     size: 12,
   } as Express.Multer.File;
+}
+
+async function createAcceptedQuote(
+  suffix: string,
+  options: { etd: Date; quantity: number },
+) {
+  return (
+    await prisma.quote.create({
+      data: {
+        tenantId: tenantA,
+        quoteNo: `QT-${suffix}-${runId}`,
+        customerCompanyId: customerA,
+        status: QuoteStatus.ACCEPTED,
+        polCode: 'CNSHA',
+        podCode: 'USLAX',
+        carrierCode: 'COSCO',
+        etd: options.etd,
+        validUntil: day(7),
+        currency: 'USD',
+        subtotal: new Prisma.Decimal(600).mul(options.quantity),
+        totalAmount: new Prisma.Decimal(600).mul(options.quantity),
+        items: {
+          create: {
+            tenantId: tenantA,
+            chargeCode: 'OCEAN_FREIGHT',
+            chargeName: 'Ocean freight',
+            containerType: '40HQ',
+            quantity: new Prisma.Decimal(options.quantity),
+            unitPrice: new Prisma.Decimal(600),
+            amount: new Prisma.Decimal(600).mul(options.quantity),
+            currency: 'USD',
+          },
+        },
+      },
+      select: { id: true },
+    })
+  ).id;
 }
 
 function day(offset: number) {

@@ -7,7 +7,7 @@ import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
-import { quoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
+import { customerQuoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Item {
   id: string;
@@ -180,7 +180,7 @@ export default function QuoteDetailPage() {
       ) : null}
       {quote.status === 'DRAFT' ? (
         <div className="rounded border border-warning/25 bg-warning/10 px-4 py-3 text-sm text-foreground">
-          报价申请已提交，正在等待销售确认。销售正式发送后，你可以下载 PDF、接受或拒绝报价。
+          报价申请已提交，正在等待销售确认。确认后，你可以下载 PDF、接受或拒绝报价。
         </div>
       ) : null}
       {quote.status === 'EXPIRED' ? (
@@ -191,7 +191,7 @@ export default function QuoteDetailPage() {
       <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="状态">
           <StatusBadge tone={quoteStatusTone(quote.status)}>
-            {quoteStatusLabel(quote.status)}
+            {customerQuoteStatusLabel(quote.status)}
           </StatusBadge>
         </Fact>
         <Fact label="船司" value={quote.carrierCode ?? '—'} />

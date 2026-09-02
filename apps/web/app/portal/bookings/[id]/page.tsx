@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { bookingStatusTone, customerBookingStatusLabel } from '@/lib/booking-status';
 
 interface Container {
   id?: string;
@@ -47,6 +48,9 @@ interface CustomerShipper {
   id: string;
   name: string;
   address: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
   isDefault: boolean;
   status: 'ACTIVE' | 'INACTIVE';
 }
@@ -68,7 +72,9 @@ interface DocumentRecord {
   originalFilename: string;
   version: number;
 }
-type FieldErrors = Partial<Record<keyof Booking | 'bookingContact' | 'containerRequests', string>>;
+type FieldErrors = Partial<
+  Record<keyof Booking | 'bookingContact' | 'containerRequests' | 'dangerousGoodsInfo', string>
+>;
 interface ApiErrorPayload {
   code?: string;
   message?: string;
@@ -87,6 +93,7 @@ export default function BookingDetailPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [shippers, setShippers] = useState<CustomerShipper[]>([]);
   const [soRecords, setSoRecords] = useState<SoRecord[]>([]);
+  const [saveShipperToAddressBook, setSaveShipperToAddressBook] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -126,24 +133,49 @@ export default function BookingDetailPage() {
   const change = (key: keyof Booking, value: unknown) =>
     setForm((v) => (v ? { ...v, [key]: value } : v));
   const saveDraft = async (currentForm: Booking) => {
+    let sourceShipperId = currentForm.sourceShipperId || undefined;
+    if (saveShipperToAddressBook && !sourceShipperId) {
+      if (!currentForm.shipperName?.trim() || !currentForm.shipperAddress?.trim()) {
+        throw new Error('请先填写发货人名称和地址。');
+      }
+      const shipperResponse = await apiFetch('/api/v1/bookings/shippers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: currentForm.shipperName,
+          address: currentForm.shipperAddress,
+          isDefault: shippers.length === 0,
+        }),
+      });
+      const shipperPayload = (await shipperResponse.json()) as CustomerShipper & ApiErrorPayload;
+      if (!shipperResponse.ok)
+        throw new Error(formatApiError(shipperPayload, '保存常用发货人失败。'));
+      sourceShipperId = shipperPayload.id;
+      setShippers((current) => [
+        shipperPayload,
+        ...current.filter((item) => item.id !== shipperPayload.id),
+      ]);
+      setForm((current) => (current ? { ...current, sourceShipperId: shipperPayload.id } : current));
+      setSaveShipperToAddressBook(false);
+    }
     const r = await apiFetch(`/api/v1/bookings/${id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        commodity: currentForm.commodity,
-        packageType: currentForm.packageType,
-        packages: Number(currentForm.packages),
-        grossWeight: currentForm.grossWeight,
-        volumeCbm: currentForm.volumeCbm,
+        commodity: optionalText(currentForm.commodity),
+        packageType: optionalText(currentForm.packageType),
+        packages: currentForm.packages ? Number(currentForm.packages) : undefined,
+        grossWeight: optionalText(currentForm.grossWeight),
+        volumeCbm: optionalText(currentForm.volumeCbm),
         cargoReadyDate: currentForm.cargoReadyDate?.slice(0, 10),
         isDangerousGoods: currentForm.isDangerousGoods,
-        specialInstructions: currentForm.specialInstructions,
-        sourceShipperId: currentForm.sourceShipperId || undefined,
-        shipperName: currentForm.shipperName,
-        shipperAddress: currentForm.shipperAddress,
-        bookingContactName: currentForm.bookingContactName,
-        bookingContactEmail: currentForm.bookingContactEmail || undefined,
-        bookingContactPhone: currentForm.bookingContactPhone || undefined,
+        specialInstructions: optionalText(currentForm.specialInstructions),
+        sourceShipperId,
+        shipperName: optionalText(currentForm.shipperName),
+        shipperAddress: optionalText(currentForm.shipperAddress),
+        bookingContactName: optionalText(currentForm.bookingContactName),
+        bookingContactEmail: optionalText(currentForm.bookingContactEmail),
+        bookingContactPhone: optionalText(currentForm.bookingContactPhone),
       }),
     });
     const payload = (await r.json()) as ApiErrorPayload;
@@ -175,32 +207,7 @@ export default function BookingDetailPage() {
           }
         : current,
     );
-  };
-  const saveCurrentShipper = async () => {
-    if (!form?.shipperName?.trim() || !form.shipperAddress?.trim()) {
-      setFieldErrors((current) => ({ ...current, shipperName: '请先填写发货人名称和地址。' }));
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await apiFetch('/api/v1/bookings/shippers', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: form.shipperName,
-          address: form.shipperAddress,
-          isDefault: shippers.length === 0,
-        }),
-      });
-      const payload = (await response.json()) as CustomerShipper & ApiErrorPayload;
-      if (!response.ok) throw new Error(formatApiError(payload, '保存常用发货人失败。'));
-      setShippers((current) => [payload, ...current.filter((item) => item.id !== payload.id)]);
-      change('sourceShipperId', payload.id);
-    } catch (caught) {
-      setError((caught as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    setSaveShipperToAddressBook(false);
   };
   const updateSelectedShipper = async (changes: Record<string, unknown>) => {
     if (!form?.sourceShipperId) return;
@@ -340,7 +347,9 @@ export default function BookingDetailPage() {
       ) : null}
       <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-4">
         <Fact label="状态">
-          <StatusBadge>{booking.status}</StatusBadge>
+          <StatusBadge tone={bookingStatusTone(booking.status)}>
+            {customerBookingStatusLabel(booking.status)}
+          </StatusBadge>
         </Fact>
         <Fact label="船司" value={booking.carrierCode ?? '—'} />
         <Fact label="ETD" value={booking.etd?.slice(0, 10) ?? '待确认'} />
@@ -351,7 +360,8 @@ export default function BookingDetailPage() {
           <div>
             <h2 className="font-semibold">来源报价</h2>
             <p className="mt-1 text-sm text-muted">
-              以下运输方案来自已接受报价，订舱阶段不可修改。
+              本次订舱基于已接受报价 {booking.quote?.quoteNo ?? booking.quoteId ?? '—'}
+              ，以下商务条件不可修改。
             </p>
           </div>
           {booking.quoteId ? (
@@ -379,190 +389,223 @@ export default function BookingDetailPage() {
           </p>
         ) : null}
       </section>
-      <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-2">
-        <div className="sm:col-span-2 rounded bg-sidebar px-3 py-2 text-sm text-muted">
-          标有 <span className="font-bold text-danger">*</span>{' '}
-          的项目为必填项；联系人邮箱和电话至少填写一项。
+      <section className="space-y-5 rounded border border-border bg-surface p-5">
+        <div className="rounded bg-sidebar px-3 py-2 text-sm text-muted">
+          请补充本次订舱所需的货物及联系人信息。标有{' '}
+          <span className="font-bold text-danger">*</span>{' '}
+          的项目为必填项，联系人邮箱和电话至少填写一项。
         </div>
-        <Field label="品名" required error={fieldErrors.commodity}>
-          <input
-            className={inputClass(fieldErrors.commodity)}
-            disabled={!editable}
-            value={form.commodity ?? ''}
-            onChange={(e) => change('commodity', e.target.value)}
-          />
-        </Field>
-        <Field label="包装类型" required error={fieldErrors.packageType}>
-          <select
-            className={inputClass(fieldErrors.packageType)}
-            disabled={!editable}
-            value={form.packageType ?? ''}
-            onChange={(e) => change('packageType', e.target.value)}
-          >
-            <option value="">请选择</option>
-            {['CARTON', 'PALLET', 'CASE', 'BAG', 'DRUM', 'PACKAGE', 'OTHER'].map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="包装数量" required error={fieldErrors.packages}>
-          <input
-            className={inputClass(fieldErrors.packages)}
-            disabled={!editable}
-            type="number"
-            min="1"
-            value={form.packages ?? ''}
-            onChange={(e) => change('packages', e.target.value)}
-          />
-        </Field>
-        <Field label="备货日期" required error={fieldErrors.cargoReadyDate}>
-          <input
-            className={inputClass(fieldErrors.cargoReadyDate)}
-            disabled={!editable}
-            type="date"
-            value={form.cargoReadyDate?.slice(0, 10) ?? ''}
-            onChange={(e) => change('cargoReadyDate', e.target.value)}
-          />
-        </Field>
-        <Field label="选择常用发货人">
-          <select
-            className={input}
-            disabled={!editable}
-            value={form.sourceShipperId ?? ''}
-            onChange={(e) => selectShipper(e.target.value)}
-          >
-            <option value="">手工填写</option>
-            {shippers.map((shipper) => (
-              <option key={shipper.id} value={shipper.id}>
-                {shipper.name}
-                {shipper.isDefault ? '（默认）' : ''}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="毛重 KG" required error={fieldErrors.grossWeight}>
-          <input
-            className={inputClass(fieldErrors.grossWeight)}
-            disabled={!editable}
-            inputMode="decimal"
-            value={form.grossWeight ?? ''}
-            onChange={(e) => change('grossWeight', e.target.value)}
-          />
-        </Field>
-        <Field label="体积 CBM" required error={fieldErrors.volumeCbm}>
-          <input
-            className={inputClass(fieldErrors.volumeCbm)}
-            disabled={!editable}
-            inputMode="decimal"
-            value={form.volumeCbm ?? ''}
-            onChange={(e) => change('volumeCbm', e.target.value)}
-          />
-        </Field>
-        <Field label="发货人名称" required error={fieldErrors.shipperName}>
-          <input
-            className={inputClass(fieldErrors.shipperName)}
-            disabled={!editable}
-            value={form.shipperName ?? ''}
-            onChange={(e) => change('shipperName', e.target.value)}
-          />
-        </Field>
-        <Field label="订舱联系人" required error={fieldErrors.bookingContactName}>
-          <input
-            className={inputClass(fieldErrors.bookingContactName)}
-            disabled={!editable}
-            value={form.bookingContactName ?? ''}
-            onChange={(e) => change('bookingContactName', e.target.value)}
-          />
-        </Field>
-        <Field label="联系人邮箱" error={fieldErrors.bookingContact}>
-          <input
-            className={inputClass(fieldErrors.bookingContact)}
-            disabled={!editable}
-            type="email"
-            value={form.bookingContactEmail ?? ''}
-            onChange={(e) => change('bookingContactEmail', e.target.value)}
-          />
-        </Field>
-        <Field label="联系人电话" error={fieldErrors.bookingContact}>
-          <input
-            className={inputClass(fieldErrors.bookingContact)}
-            disabled={!editable}
-            value={form.bookingContactPhone ?? ''}
-            onChange={(e) => change('bookingContactPhone', e.target.value)}
-          />
-        </Field>
-        <Field label="发货人地址" required error={fieldErrors.shipperAddress} wide>
-          <textarea
-            className={`${inputClass(fieldErrors.shipperAddress)} min-h-24 py-2`}
-            disabled={!editable}
-            value={form.shipperAddress ?? ''}
-            onChange={(e) => change('shipperAddress', e.target.value)}
-          />
-        </Field>
-        {editable ? (
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            {form.sourceShipperId ? (
-              <>
-                <button
-                  className={secondary}
-                  disabled={busy}
-                  onClick={() =>
-                    void updateSelectedShipper({
-                      name: form.shipperName,
-                      address: form.shipperAddress,
-                    })
-                  }
-                  type="button"
-                >
-                  更新所选发货人
-                </button>
-                <button
-                  className={secondary}
-                  disabled={
-                    busy || shippers.find((item) => item.id === form.sourceShipperId)?.isDefault
-                  }
-                  onClick={() => void updateSelectedShipper({ isDefault: true })}
-                  type="button"
-                >
-                  设为默认
-                </button>
-                <button
-                  className="h-9 rounded border border-danger/30 px-4 text-sm font-semibold text-danger disabled:opacity-40"
-                  disabled={busy}
-                  onClick={() => void updateSelectedShipper({ status: 'INACTIVE' })}
-                  type="button"
-                >
-                  停用
-                </button>
-              </>
-            ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <h2 className="text-sm font-semibold sm:col-span-2">货物信息</h2>
+          <Field label="货物品名" required error={fieldErrors.commodity}>
+            <input
+              className={inputClass(fieldErrors.commodity)}
+              disabled={!editable}
+              value={form.commodity ?? ''}
+              onChange={(e) => change('commodity', e.target.value)}
+            />
+          </Field>
+          <Field label="包装类型" required error={fieldErrors.packageType}>
+            <select
+              className={inputClass(fieldErrors.packageType)}
+              disabled={!editable}
+              value={form.packageType ?? ''}
+              onChange={(e) => change('packageType', e.target.value)}
+            >
+              <option value="">请选择</option>
+              {['CARTON', 'PALLET', 'CASE', 'BAG', 'DRUM', 'PACKAGE', 'OTHER'].map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="包装数量" required error={fieldErrors.packages}>
+            <input
+              className={inputClass(fieldErrors.packages)}
+              disabled={!editable}
+              min="1"
+              type="number"
+              value={form.packages ?? ''}
+              onChange={(e) => change('packages', e.target.value)}
+            />
+          </Field>
+          <Field label="预计货好日期" required error={fieldErrors.cargoReadyDate}>
+            <input
+              className={inputClass(fieldErrors.cargoReadyDate)}
+              disabled={!editable}
+              type="date"
+              value={form.cargoReadyDate?.slice(0, 10) ?? ''}
+              onChange={(e) => change('cargoReadyDate', e.target.value)}
+            />
+          </Field>
+          <Field label="毛重 KG" required error={fieldErrors.grossWeight}>
+            <input
+              className={inputClass(fieldErrors.grossWeight)}
+              disabled={!editable}
+              inputMode="decimal"
+              value={form.grossWeight ?? ''}
+              onChange={(e) => change('grossWeight', e.target.value)}
+            />
+          </Field>
+          <Field label="体积 CBM" error={fieldErrors.volumeCbm}>
+            <input
+              className={inputClass(fieldErrors.volumeCbm)}
+              disabled={!editable}
+              inputMode="decimal"
+              value={form.volumeCbm ?? ''}
+              onChange={(e) => change('volumeCbm', e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <h2 className="text-sm font-semibold">发货人 Shipper *</h2>
+            <p className="mt-1 text-sm text-muted">
+              可选择常用发货人自动带入，也可以新建本票发货人。
+            </p>
+          </div>
+          <Field label="选择常用发货人">
+            <select
+              className={input}
+              disabled={!editable}
+              value={form.sourceShipperId ?? ''}
+              onChange={(e) => selectShipper(e.target.value)}
+            >
+              <option value="">+ 新建发货人</option>
+              {shippers.map((shipper) => (
+                <option key={shipper.id} value={shipper.id}>
+                  {shipper.name}
+                  {shipper.isDefault ? '（默认）' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {form.sourceShipperId ? (
+            <div className="rounded border border-border bg-sidebar px-3 py-2 text-sm text-muted">
+              {formatSelectedShipper(shippers.find((item) => item.id === form.sourceShipperId))}
+            </div>
+          ) : editable ? (
+            <label className="flex items-center gap-2 self-end text-sm">
+              <input
+                checked={saveShipperToAddressBook}
+                disabled={busy}
+                type="checkbox"
+                onChange={(e) => setSaveShipperToAddressBook(e.target.checked)}
+              />
+              保存到常用发货人
+            </label>
+          ) : null}
+          <Field label="发货人名称" required error={fieldErrors.shipperName}>
+            <input
+              className={inputClass(fieldErrors.shipperName)}
+              disabled={!editable}
+              value={form.shipperName ?? ''}
+              onChange={(e) => change('shipperName', e.target.value)}
+            />
+          </Field>
+          <Field label="发货人地址" required error={fieldErrors.shipperAddress}>
+            <textarea
+              className={`${inputClass(fieldErrors.shipperAddress)} min-h-24 py-2`}
+              disabled={!editable}
+              value={form.shipperAddress ?? ''}
+              onChange={(e) => change('shipperAddress', e.target.value)}
+            />
+          </Field>
+          {editable && form.sourceShipperId ? (
+            <div className="flex flex-wrap gap-2 sm:col-span-2">
               <button
                 className={secondary}
                 disabled={busy}
-                onClick={() => void saveCurrentShipper()}
+                onClick={() =>
+                  void updateSelectedShipper({
+                    name: form.shipperName,
+                    address: form.shipperAddress,
+                  })
+                }
                 type="button"
               >
-                保存为常用发货人
+                更新所选发货人
               </button>
-            )}
+              <button
+                className={secondary}
+                disabled={busy || shippers.find((item) => item.id === form.sourceShipperId)?.isDefault}
+                onClick={() => void updateSelectedShipper({ isDefault: true })}
+                type="button"
+              >
+                设为默认
+              </button>
+              <button
+                className="h-9 rounded border border-danger/30 px-4 text-sm font-semibold text-danger disabled:opacity-40"
+                disabled={busy}
+                onClick={() => void updateSelectedShipper({ status: 'INACTIVE' })}
+                type="button"
+              >
+                停用
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <h2 className="text-sm font-semibold">订舱联系人 Booking Contact</h2>
+            <p className="mt-1 text-sm text-muted">用于接收本票订舱进度、SO 等业务通知。</p>
           </div>
-        ) : null}
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            checked={form.isDangerousGoods}
-            disabled={!editable}
-            type="checkbox"
-            onChange={(e) => change('isDangerousGoods', e.target.checked)}
-          />
-          危险品
-        </label>
+          <Field label="联系人" required error={fieldErrors.bookingContactName}>
+            <input
+              className={inputClass(fieldErrors.bookingContactName)}
+              disabled={!editable}
+              value={form.bookingContactName ?? ''}
+              onChange={(e) => change('bookingContactName', e.target.value)}
+            />
+          </Field>
+          <Field label="联系人邮箱" error={fieldErrors.bookingContact}>
+            <input
+              className={inputClass(fieldErrors.bookingContact)}
+              disabled={!editable}
+              type="email"
+              value={form.bookingContactEmail ?? ''}
+              onChange={(e) => change('bookingContactEmail', e.target.value)}
+            />
+          </Field>
+          <Field label="联系人电话" error={fieldErrors.bookingContact}>
+            <input
+              className={inputClass(fieldErrors.bookingContact)}
+              disabled={!editable}
+              value={form.bookingContactPhone ?? ''}
+              onChange={(e) => change('bookingContactPhone', e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="space-y-3 border-t border-border pt-5">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              checked={form.isDangerousGoods}
+              disabled={!editable}
+              type="checkbox"
+              onChange={(e) => change('isDangerousGoods', e.target.checked)}
+            />
+            危险品
+          </label>
+          {form.isDangerousGoods ? (
+            <div className="rounded border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+              <p className="font-semibold">危险品订舱需要额外审核。</p>
+              <p className="mt-1 text-xs">
+                请在特殊要求中填写危险品品名、UN No.、IMO Class 和 MSDS 资料状态。当前
+                V1 尚未提供独立 MSDS 上传字段，提交后操作员将进一步确认危险品资料。
+              </p>
+              {fieldErrors.dangerousGoodsInfo ? (
+                <p className="mt-2 text-sm text-danger">{fieldErrors.dangerousGoodsInfo}</p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
         <Field label="特殊要求（选填）" wide>
           <textarea
-            className={`${input} min-h-24 py-2`}
+            className={`${inputClass(fieldErrors.dangerousGoodsInfo)} min-h-24 py-2`}
             disabled={!editable}
             maxLength={2000}
+            placeholder="例如：指定船期要求、装柜要求、特殊操作说明等"
             value={form.specialInstructions ?? ''}
             onChange={(e) => change('specialInstructions', e.target.value)}
           />
@@ -608,22 +651,6 @@ export default function BookingDetailPage() {
           </div>
         </section>
       )}
-      <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">箱型与箱量（来自报价，不可修改）</h2>
-        {fieldErrors.containerRequests ? (
-          <p className="mt-1 text-sm text-danger">{fieldErrors.containerRequests}</p>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          {form.containerRequests.map((c) => (
-            <div
-              className="rounded bg-sidebar px-3 py-2 text-sm font-semibold"
-              key={c.id ?? c.containerType}
-            >
-              {c.quantity} × {c.containerType}
-            </div>
-          ))}
-        </div>
-      </section>
       {confirmingSubmit ? (
         <div
           aria-labelledby="submit-booking-title"
@@ -730,13 +757,14 @@ const secondary = 'h-9 rounded border border-border px-4 text-sm font-semibold d
 
 function validateForSubmit(form: Booking): FieldErrors {
   const errors: FieldErrors = {};
-  if (!form.commodity?.trim()) errors.commodity = '请输入品名。';
+  if (!form.commodity?.trim()) errors.commodity = '请输入货物品名。';
   if (!form.packageType) errors.packageType = '请选择包装类型。';
   if (!Number.isInteger(Number(form.packages)) || Number(form.packages) < 1)
     errors.packages = '请输入大于或等于 1 的整数。';
   if (!isPositiveDecimal(form.grossWeight)) errors.grossWeight = '请输入大于 0 的毛重。';
-  if (!isPositiveDecimal(form.volumeCbm)) errors.volumeCbm = '请输入大于 0 的体积。';
-  if (!form.cargoReadyDate) errors.cargoReadyDate = '请选择备货日期。';
+  if (form.volumeCbm && !isPositiveDecimal(form.volumeCbm))
+    errors.volumeCbm = '体积如填写，必须大于 0。';
+  if (!form.cargoReadyDate) errors.cargoReadyDate = '请选择预计货好日期。';
   if (!form.shipperName?.trim()) errors.shipperName = '请输入发货人名称。';
   if (!form.shipperAddress?.trim()) errors.shipperAddress = '请输入发货人地址。';
   if (!form.bookingContactName?.trim()) errors.bookingContactName = '请输入订舱联系人。';
@@ -744,6 +772,8 @@ function validateForSubmit(form: Booking): FieldErrors {
     errors.bookingContact = '联系人邮箱和电话至少填写一项。';
   if (form.bookingContactEmail && !/^\S+@\S+\.\S+$/.test(form.bookingContactEmail))
     errors.bookingContact = '请输入有效的联系人邮箱。';
+  if (form.isDangerousGoods && !form.specialInstructions?.trim())
+    errors.dangerousGoodsInfo = '危险品订舱请填写危险品品名、UN No.、IMO Class 和 MSDS 资料状态。';
   if (
     !form.containerRequests.length ||
     form.containerRequests.some(
@@ -764,13 +794,18 @@ function mapMissingFields(missing: string[] = []): FieldErrors {
     packageType: ['packageType', '请选择包装类型。'],
     packages: ['packages', '请输入件数。'],
     grossWeight: ['grossWeight', '请输入毛重。'],
-    volumeCbm: ['volumeCbm', '请输入体积。'],
-    cargoReadyDate: ['cargoReadyDate', '请选择备货日期。'],
+    volumeCbm: ['volumeCbm', '体积如填写，必须大于 0。'],
+    volumeCbmPositive: ['volumeCbm', '体积如填写，必须大于 0。'],
+    cargoReadyDate: ['cargoReadyDate', '请选择预计货好日期。'],
     shipperName: ['shipperName', '请输入发货人名称。'],
     shipperAddress: ['shipperAddress', '请输入发货人地址。'],
     bookingContactName: ['bookingContactName', '请输入订舱联系人。'],
     bookingContactEmailOrPhone: ['bookingContact', '联系人邮箱和电话至少填写一项。'],
     containerRequests: ['containerRequests', '请至少填写一条箱量需求。'],
+    dangerousGoodsInfo: [
+      'dangerousGoodsInfo',
+      '危险品订舱请填写危险品品名、UN No.、IMO Class 和 MSDS 资料状态。',
+    ],
   };
   return missing.reduce<FieldErrors>((result, field) => {
     const mapped = labels[field];
@@ -787,9 +822,22 @@ function formatApiError(payload: ApiErrorPayload, fallback: string) {
 }
 
 function formatContainerRequests(items: Container[]) {
-  return items.map((item) => `${item.containerType} × ${item.quantity}`).join('、');
+  return items.map((item) => `${item.quantity} × ${item.containerType}`).join('、');
+}
+
+function formatSelectedShipper(shipper?: CustomerShipper) {
+  if (!shipper) return '已选择常用发货人。';
+  const contact = [shipper.contactName, shipper.contactEmail, shipper.contactPhone]
+    .filter(Boolean)
+    .join(' / ');
+  return contact ? `已带入：${shipper.name}，${contact}` : `已带入：${shipper.name}`;
 }
 
 function formatDateTime(value: string | null) {
   return value ? new Date(value).toLocaleString('zh-CN') : '—';
+}
+
+function optionalText(value: string | null) {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }

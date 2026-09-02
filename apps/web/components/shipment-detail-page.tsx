@@ -9,6 +9,7 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import type { Shipment, ShipmentDocument } from '@/components/shipment-types';
 import { StatusBadge } from '@/components/status-badge';
+import type { StatusTone } from '@/lib/mock-data';
 
 export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const { id } = useParams<{ id: string }>();
@@ -127,9 +128,10 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   if (!shipment)
     return <ErrorState description={error || 'Shipment 不存在'} onRetry={() => void load()} />;
   const nextAction: Record<string, { path: string; label: string } | undefined> = {
-    PLANNED: { path: '/start', label: '开始履约' },
-    IN_PROGRESS: { path: '/depart', label: '确认离港' },
-    DEPARTED: { path: '/arrive', label: '确认到港' },
+    CREATED: { path: '/book', label: '确认已订舱' },
+    BOOKED: { path: '/depart', label: '确认开船' },
+    DEPARTED: { path: '/transit', label: '标记运输中' },
+    IN_TRANSIT: { path: '/arrive', label: '确认到港' },
     ARRIVED: { path: '/complete', label: '完成 Shipment' },
   };
   const action = nextAction[shipment.status];
@@ -141,7 +143,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       <PageHeader
         eyebrow={shipment.customer.name}
         title={shipment.shipmentNo}
-        description={`${shipment.polCode} → ${shipment.podCode}`}
+        description={`Basic Shipment · ${shipment.polCode} → ${shipment.podCode}`}
         actions={
           mode === 'admin' && action ? (
             <button
@@ -161,14 +163,16 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       ) : null}
       <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-4">
         <Fact label="状态">
-          <StatusBadge>{shipment.status}</StatusBadge>
+          <StatusBadge tone={shipmentStatusTone(shipment.status)}>
+            {shipmentStatusLabel(shipment.status)}
+          </StatusBadge>
         </Fact>
         <Fact label="来源 Booking" value={shipment.booking.bookingNo} />
         <Fact label="船司" value={shipment.carrierCode ?? '—'} />
-        <Fact label="Container" value={`${shipment.containers.length} 柜`} />
+        <Fact label="当前进度" value={customerProgressLabel(shipment.status)} />
       </section>
       <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">船期与提单</h2>
+        <h2 className="font-semibold">基础出运信息</h2>
         {mode === 'admin' ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <Input
@@ -194,12 +198,12 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
               onChange={(value) => setDetails({ ...details, eta: value })}
             />
             <Input
-              label="MBL"
+              label="MBL（参考）"
               value={details.mblNo}
               onChange={(value) => setDetails({ ...details, mblNo: value })}
             />
             <Input
-              label="HBL"
+              label="HBL（参考）"
               value={details.hblNo}
               onChange={(value) => setDetails({ ...details, hblNo: value })}
             />
@@ -229,9 +233,9 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
           </div>
         )}
       </section>
-      <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">Containers</h2>
-        {mode === 'admin' ? (
+      {mode === 'admin' ? (
+        <section className="rounded border border-border bg-surface p-5">
+          <h2 className="font-semibold">Containers</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-5">
             <Input
               label="柜号（4字母+7数字）"
@@ -263,43 +267,45 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
               新增 Container
             </button>
           </div>
-        ) : null}
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                <th className={head}>柜号</th>
-                <th className={head}>箱型</th>
-                <th className={head}>封条</th>
-                <th className={head}>VGM</th>
-                <th className={head}>提柜</th>
-                <th className={head}>进港</th>
-                <th className={head}>装船/卸船</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shipment.containers.map((item) => (
-                <tr className="border-b border-border" key={item.id}>
-                  <td className={cell}>{item.containerNo}</td>
-                  <td className={cell}>{item.containerType}</td>
-                  <td className={cell}>{item.sealNo ?? '—'}</td>
-                  <td className={cell}>{item.vgmWeight ? `${item.vgmWeight} KG` : '—'}</td>
-                  <td className={cell}>{dateTime(item.pickupAt)}</td>
-                  <td className={cell}>{dateTime(item.gateInAt)}</td>
-                  <td className={cell}>
-                    {dateTime(item.loadedAt)} / {dateTime(item.dischargedAt)}
-                  </td>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-sidebar text-xs text-muted">
+                  <th className={head}>柜号</th>
+                  <th className={head}>箱型</th>
+                  <th className={head}>封条</th>
+                  <th className={head}>VGM</th>
+                  <th className={head}>提柜</th>
+                  <th className={head}>进港</th>
+                  <th className={head}>装船/卸船</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {shipment.containers.length === 0 ? (
-            <div className="py-6 text-center text-sm text-muted">暂无 Container</div>
-          ) : null}
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {shipment.containers.map((item) => (
+                  <tr className="border-b border-border" key={item.id}>
+                    <td className={cell}>{item.containerNo}</td>
+                    <td className={cell}>{item.containerType}</td>
+                    <td className={cell}>{item.sealNo ?? '—'}</td>
+                    <td className={cell}>{item.vgmWeight ? `${item.vgmWeight} KG` : '—'}</td>
+                    <td className={cell}>{dateTime(item.pickupAt)}</td>
+                    <td className={cell}>{dateTime(item.gateInAt)}</td>
+                    <td className={cell}>
+                      {dateTime(item.loadedAt)} / {dateTime(item.dischargedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {shipment.containers.length === 0 ? (
+              <div className="py-6 text-center text-sm text-muted">暂无 Container</div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
       <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">Tracking Timeline</h2>
+        <h2 className="font-semibold">
+          {mode === 'admin' ? '基础进度 Timeline' : 'Shipment 进度'}
+        </h2>
         {mode === 'admin' ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <Input
@@ -351,32 +357,40 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
           </div>
         ) : null}
         <ol className="mt-5 space-y-4 border-l-2 border-border pl-5">
-          {shipment.trackingEvents.map((item) => (
-            <li className="relative" key={item.id}>
-              <span className="absolute -left-[27px] top-1 size-3 rounded-full bg-primary" />
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold">{item.eventType}</span>
-                {mode === 'admin' && !item.customerVisible ? (
-                  <span className="rounded bg-sidebar px-2 py-0.5 text-xs text-muted">
-                    内部节点
-                  </span>
-                ) : null}
-              </div>
-              <div className="text-sm text-muted">
-                {dateTime(item.eventTime)} ·{' '}
-                {item.locationName ?? item.locationCode ?? '地点待确认'}
-              </div>
-              {item.remark ? <div className="mt-1 text-sm">{item.remark}</div> : null}
+          {basicTimeline(shipment).map((item) => (
+            <li className="relative" key={item.key}>
+              <span
+                className={`absolute -left-[27px] top-1 size-3 rounded-full ${item.done ? 'bg-primary' : 'bg-border'}`}
+              />
+              <div className="font-semibold">{item.label}</div>
+              <div className="text-sm text-muted">{item.time}</div>
             </li>
           ))}
+          {mode === 'admin'
+            ? shipment.trackingEvents.map((item) => (
+                <li className="relative" key={item.id}>
+                  <span className="absolute -left-[27px] top-1 size-3 rounded-full bg-primary" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold">{item.eventType}</span>
+                    {!item.customerVisible ? (
+                      <span className="rounded bg-sidebar px-2 py-0.5 text-xs text-muted">
+                        内部节点
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-sm text-muted">
+                    {dateTime(item.eventTime)} ·{' '}
+                    {item.locationName ?? item.locationCode ?? '地点待确认'}
+                  </div>
+                  {item.remark ? <div className="mt-1 text-sm">{item.remark}</div> : null}
+                </li>
+              ))
+            : null}
         </ol>
-        {shipment.trackingEvents.length === 0 ? (
-          <div className="mt-4 text-sm text-muted">暂无 Tracking Event</div>
-        ) : null}
       </section>
-      <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">BL 与单证</h2>
-        {mode === 'admin' ? (
+      {mode === 'admin' ? (
+        <section className="rounded border border-border bg-surface p-5">
+          <h2 className="font-semibold">参考附件</h2>
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="text-sm">
               类型
@@ -408,23 +422,23 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
               上传新版本
             </button>
           </div>
-        ) : null}
-        <div className="mt-4 space-y-2">
-          {shipment.documents.map((item) => (
-            <button
-              className="block text-sm text-primary hover:underline"
-              key={item.id}
-              onClick={() => void download(item)}
-            >
-              {item.documentType} · {item.originalFilename} · V{item.version}
-              {mode === 'admin' ? ` · ${item.customerVisible ? '客户可见' : '内部'}` : ''}
-            </button>
-          ))}
-          {shipment.documents.length === 0 ? (
-            <div className="text-sm text-muted">暂无可用单证</div>
-          ) : null}
-        </div>
-      </section>
+          <div className="mt-4 space-y-2">
+            {shipment.documents.map((item) => (
+              <button
+                className="block text-sm text-primary hover:underline"
+                key={item.id}
+                onClick={() => void download(item)}
+              >
+                {item.documentType} · {item.originalFilename} · V{item.version}
+                {mode === 'admin' ? ` · ${item.customerVisible ? '客户可见' : '内部'}` : ''}
+              </button>
+            ))}
+            {shipment.documents.length === 0 ? (
+              <div className="text-sm text-muted">暂无可用单证</div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -483,3 +497,61 @@ const primary =
 const inputClass = 'h-9 w-full rounded border border-border bg-surface px-3 text-sm';
 const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
+
+function shipmentStatusLabel(status: string) {
+  return (
+    {
+      CREATED: '已创建',
+      BOOKED: '已订舱',
+      DEPARTED: '已开船',
+      IN_TRANSIT: '运输中',
+      ARRIVED: '已到港',
+      COMPLETED: '已完成',
+      CANCELLED: '已取消',
+    }[status] ?? status
+  );
+}
+
+function shipmentStatusTone(status: string): StatusTone {
+  if (status === 'COMPLETED') return 'success';
+  if (status === 'CANCELLED') return 'danger';
+  if (status === 'ARRIVED') return 'warning';
+  if (status === 'DEPARTED' || status === 'IN_TRANSIT') return 'info';
+  return 'neutral';
+}
+
+function customerProgressLabel(status: string) {
+  return (
+    {
+      CREATED: '等待订舱确认',
+      BOOKED: '等待开船',
+      DEPARTED: '已开船',
+      IN_TRANSIT: '运输中',
+      ARRIVED: '已到港',
+      COMPLETED: '已完成',
+      CANCELLED: '已取消',
+    }[status] ?? status
+  );
+}
+
+function basicTimeline(shipment: Shipment) {
+  const order = ['BOOKED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED'];
+  const rank = order.indexOf(shipment.status);
+  return [
+    { key: 'booked', status: 'BOOKED', label: '已订舱', time: dateTime(shipment.createdAt) },
+    { key: 'departed', status: 'DEPARTED', label: '已开船', time: dateTime(shipment.atd) },
+    {
+      key: 'transit',
+      status: 'IN_TRANSIT',
+      label: '运输中',
+      time: shipment.status === 'IN_TRANSIT' ? '进行中' : '—',
+    },
+    { key: 'arrived', status: 'ARRIVED', label: '已到港', time: dateTime(shipment.ata) },
+    {
+      key: 'completed',
+      status: 'COMPLETED',
+      label: '已完成',
+      time: dateTime(shipment.completedAt),
+    },
+  ].map((item) => ({ ...item, done: rank >= order.indexOf(item.status) }));
+}

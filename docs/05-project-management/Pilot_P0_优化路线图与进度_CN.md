@@ -55,7 +55,7 @@ P0-B：Quote → Booking → SO 真实业务流程
 | 7. Booking 作业状态 | P0 | 待审核、待订舱、待 SO、已订舱语义统一 | 已完成并通过状态机/数据库测试 |
 | 8. SO 登记与发布 | P0 | 结构化 SO、内部保存、核对后发布、版本追溯 | 已完成并通过可见性/并发/黄金路径测试 |
 | 9. 横向体验与权限 | P1 | 权限按钮、主数据、账号、Dashboard、中文错误 | 待开发 |
-| 10. 全链路回归 | Gate | 从真实 Excel 重新回归至 Shipment，决定是否恢复后续 UAT | 待执行 |
+| 10. 全链路回归 | Gate | 从真实 Excel 重新回归至 Shipment，决定是否恢复后续 UAT | P0-A Excel 导入已通过当前测试；P0-B4 技术 Gate 已通过 |
 
 ## 4. P0-A：真实运价 Excel 导入
 
@@ -418,13 +418,13 @@ P0 完成后处理：
 
 ## 10. 下一步执行顺序
 
-1. 启动 PostgreSQL、Redis、API 和 Worker，执行确认导入事务测试与真实队列回放。
-2. 增加 Redis Token 和 Mapping Profile 跨租户集成测试。
-3. 接入港口、船司主数据或别名确认机制。
-4. 支持附加费 Sheet 和多币种费用校验。
-5. 处理单元格多价的明确拆分/人工确认流程。
-6. 运行完整 lint、typecheck、test 和针对性 Playwright。
-7. P0-A 验收通过后进入 Booking 客户侧减负。
+1. P0-A 运价 Excel 导入已通过当前测试，测试记录见 `docs/05-project-management/TODO_2026-09-02_CN.md`。
+2. 保留并增强港口、船司主数据校验及别名确认机制。
+3. 支持附加费 Sheet 和多币种费用校验。
+4. 处理单元格多价的明确拆分/人工确认流程。
+5. 后续可在分析阶段加入 AI 智能识别，辅助判断 Sheet、表头、字段 Mapping、全局有效期、币种和多价单元格；AI 结果必须进入预览和人工确认，不能直接写库。
+6. 持续运行完整 lint、typecheck、test 和针对性 Playwright。
+7. P0-A Gate 已可作为进入或继续 P0-B Booking 客户侧减负的前置条件。
 
 ## 11. 关联文档
 

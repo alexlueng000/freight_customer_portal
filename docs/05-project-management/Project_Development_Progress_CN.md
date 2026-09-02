@@ -1,8 +1,8 @@
 # Freight Customer Portal 项目开发进度表
 
-> 更新时间：2026-08-31
+> 更新时间：2026-09-02
 >
-> 当前阶段：Phase 5 功能闭环完成，进入业务 UAT 与 Pilot Hardening
+> 当前阶段：V1.1 范围冻结，主链路收敛为 Rate → Quote → Booking → SO → Basic Shipment
 >
 > 详细实现日志：[DEVELOPMENT_PROGRESS.md](./DEVELOPMENT_PROGRESS.md)
 >
@@ -10,7 +10,7 @@
 
 ## 当前结论
 
-V1 核心链路 `Rate → Quote → Booking → Shipment → Tracking → Document → Invoice` 已接入真实数据库、鉴权、租户/客户范围、审计与主要前端页面。完整黄金路径已有 Playwright 用例；当前工作重点不是继续扩展业务域，而是完成真实样本 UAT、修复 P1 体验/安全缺口，并补齐生产邮件、Branding、可观测性和发布演练。
+根据 2026-09-02 最新 `Freight_Customer_Portal_PRD_V1.1_CN.docx`，V1 MVP 主链路已从 V1.0 的完整闭环收紧为 `Rate → Quote → Booking → SO → Basic Shipment`。当前代码已完成 Rate Import P0-A、Booking/SO/Shipment P0-B 技术 Gate，并已将 Shipment 状态与客户侧展示对齐到 V1.1 Basic Shipment 口径。Invoice、完整 BL/Document、复杂 Tracking 保留为历史实现与 Backlog 能力，不再作为 V1 P0 继续扩展。
 
 ## 阶段总览
 
@@ -18,10 +18,10 @@ V1 核心链路 `Rate → Quote → Booking → Shipment → Tracking → Docume
 | --- | --- | --- | --- | --- |
 | M0 | Monorepo、Web/API/Worker、Prisma、Docker、CI | 已完成 | 构建、Lint、TypeScript、CI 基线 | 生产部署演练 |
 | M1 | Tenant、User、Customer、Auth、RBAC、审计、租户隔离 | 主体完成 | 服务端权限与敏感域跨租户负向测试 | 密码重置、登录失败审计、安全响应头 |
-| M2 | Rate、Excel 导入、客户查价、Quote、PDF、改价 | 基础功能完成，P0 导入适配待整改 | 真实 API、异步导入/PDF、状态机与审计 | 真实复杂 Excel Mapping、预览、Profile 与样本验收 |
-| M3 | Quote 转 Booking、提交、审核、确认、SO | 功能完成，UAT 中 | 原子转单、状态机、SO 权限与负向测试 | 字段级错误提示、客户资料维护缺口 |
-| M4 | Shipment、Container、Tracking、Document | 功能完成，UAT 中 | 后台维护、客户只读、版本化文件、E2E | 真实柜/节点/BL 样本签署 |
-| M5 | Invoice、Notification、Branding | 部分完成 | Invoice 全流程；Notification 持久化与队列基线 | 生产邮件、通知中心 UI、Branding |
+| M2 | Rate、Excel 导入、客户查价、Quote、PDF、改价 | P0-A 已通过当前验收 | 真实 Excel 01/02/08 回放、异步导入/PDF、状态机与审计 | 继续用更多真实样本回归 |
+| M3 | Quote 转 Booking、提交、审核、退回、提交 Carrier/Agent、SO | 技术 Gate 通过，待业务 UAT 签署 | 原子转单、V1.1 Booking 状态机、SO 登记/发布解耦、权限负向测试 | 字段级错误提示、客户资料维护细节 |
+| M4 | Basic Shipment | V1.1 对齐完成，待业务 UAT 签署 | SO 后创建 Shipment，状态收敛为 CREATED/BOOKED/DEPARTED/IN_TRANSIT/ARRIVED/COMPLETED，客户侧简化展示 | Email/Deep Link、Dashboard 待办 |
+| M5 | Notification、Branding、Dashboard 待办 | 部分完成 | Notification 持久化与队列基线 | 生产邮件、通知中心 UI、租户 Branding、操作型 Dashboard |
 | M6 | Pilot Hardening | 进行中 | UAT 发现记录与风险登记已建立 | P1 缺口、可观测性、备份恢复、稳定性验证 |
 
 ## 第一生产纵切状态
@@ -32,10 +32,19 @@ V1 核心链路 `Rate → Quote → Booking → Shipment → Tracking → Docume
 | 创建/导入 Rate 与客户查价 | 已完成 | 后台成本接口与客户销售价接口分离 |
 | 创建、审核、发送、接受 Quote 与下载 PDF | 已完成 | 价格快照、手工改价、异步 PDF、状态审计已实现 |
 | Quote 转 Booking、提交与内部确认 | 已完成 | 转单事务、幂等和状态机已实现 |
-| 上传 SO、创建 Shipment、Container 与 Tracking | 已完成 | 文件授权、客户可见性、语义化状态动作已实现 |
-| 上传客户可见 BL 并由客户下载 | 已完成 | 文档版本、SUPERSEDED 与下载授权已实现 |
-| 创建、发布、确认 Invoice | 已完成 | Decimal 汇总、状态机、附件和通知事件已实现 |
-| 完整浏览器黄金路径 | 已建立 | 最近保存的报告为 2026-08-30，状态 passed；今天未重跑 E2E |
+| 登记/发布 SO 并创建 Basic Shipment | 已完成 | SO 结构化登记与客户发布解耦；Shipment 创建后进入 V1.1 `BOOKED` 常规状态 |
+| 客户查看 SO 与 Basic Shipment | 已完成基础能力 | 客户侧只展示船名航次、ETD/ATD、ETA/ATA、基础状态与简化 Timeline |
+| Invoice、BL、复杂 Tracking | 已实现但移出 V1 P0 | 作为历史能力和 Backlog 保留，试点前不继续扩展 |
+| 完整浏览器黄金路径 | 需按 V1.1 重定基线 | 旧黄金路径覆盖到 Invoice/BL；V1.1 应新增/更新 Rate → Quote → Booking → SO → Basic Shipment 主链 E2E |
+
+## 2026-09-02 更新摘要
+
+- 新增并采用 `Freight_Customer_Portal_PRD_V1.1_CN.docx` 作为当前范围基线：FCL-only，V1 主链路冻结为 `Rate → Quote → Booking → SO → Basic Shipment`。
+- Rate Import P0-A 已通过当前验收：真实 Excel 01/02/08 完成分析、预览、确认、队列入库、后台查价和客户查价回放。
+- Booking/SO/Shipment P0-B 技术 Gate 已通过：Booking 审核语义、提交 Carrier/Agent、SO 登记与发布解耦、Shipment 建档均已接通。
+- Shipment 已按 V1.1 重构状态口径：`CREATED → BOOKED → DEPARTED → IN_TRANSIT → ARRIVED → COMPLETED`，常规 SO 后建档直接进入 `BOOKED`。
+- 客户侧 Shipment 页面已收敛为 Basic Shipment，不再把 Container、BL、完整 Tracking 作为 V1 P0 客户任务暴露。
+- 已新增数据库迁移 `20260902190000_basic_shipment_status_v11`，用于把旧 `PLANNED/IN_PROGRESS` 数据迁移到新状态。
 
 ## 2026-08-31 更新摘要
 
@@ -48,23 +57,26 @@ V1 核心链路 `Rate → Quote → Booking → Shipment → Tracking → Docume
 
 ## 测试状态
 
-本日验证详情见 [2026-08-31 代码与测试审阅报告](./TEST_REPORT_2026-08-31_CN.md)。当前结论：
+2026-09-02 当前验证：
 
-- `pnpm lint`：通过。
-- `pnpm typecheck`：通过。
-- 不依赖数据库的 Worker 测试：2 个套件、2 个测试通过。
-- 完整 `pnpm test`：未完成；本地 PostgreSQL `localhost:5433` 未运行，数据库集成套件在初始化阶段中止，不能记为代码断言失败，也不能记为通过。
-- 最近保存的 Playwright 结果：2026-08-30，`passed`、无失败用例；该结果早于今天改动，今天的 E2E 状态为未验证。
+- `pnpm --filter @freight/api typecheck`：通过。
+- `pnpm --filter @freight/web typecheck`：通过。
+- `pnpm --filter @freight/api lint`：通过。
+- `pnpm --filter @freight/web lint`：通过。
+- `pnpm --filter @freight/api test -- shipment-state-machine.spec.ts`：通过，2/2。
+- `pnpm prisma:validate`：通过。
+- `pnpm prisma:generate`：未通过；Windows 当前有 Prisma engine DLL 文件锁，报 `EPERM rename ... query_engine-windows.dll.node`。需关闭占用 Prisma Client 的 API/Worker/dev 进程后重跑。
+- 完整 Playwright E2E：本次未重跑；旧黄金路径仍包含 V1.1 已移出 P0 的 Invoice/BL/复杂 Tracking，应按新 PRD 重定基线。
 
 ## 当前优先级
 
-1. P0：使用脱敏真实货代 Excel 完成 Sheet/表头识别、字段 Mapping、导入预览和可复用 Mapping Profile，客户无需重填平台模板。
-2. P0：整改 Booking 表单减负、内部审核状态语义及 SO 上传/客户发布解耦。
-3. 启动 PostgreSQL/Redis/MinIO 后重跑 `pnpm test` 与完整 Playwright，保存当天报告。
-4. 关闭 UAT P1：字段级校验提示、客户公司编辑、客户账号开通入口、角色化 Dashboard。
-5. 使用真实 Rate、Booking、Container、Tracking、BL、Invoice 样本完成业务签署。
-6. 接入生产邮件传输、通知中心 UI 与租户 Branding。
-7. 完成 CSP/Security Headers、密码重置、可观测性和数据库备份恢复演练。
+1. P0：关闭 `pnpm prisma:generate` 的 Windows DLL 文件锁，生成最新 Prisma Client，并应用/验证 `20260902190000_basic_shipment_status_v11` 迁移。
+2. P0：按 V1.1 重定浏览器黄金路径：Rate Search → Quote → Accepted → Booking → SO Published → Basic Shipment Viewed。
+3. P0：完成 Booking/SO/Basic Shipment 业务 UAT 签署，重点验证 SO 结构化字段、发布动作、客户直达查看和 Shipment 基础状态。
+4. P1：接入 Quote Ready、Booking Needs Update、SO Published、Shipment Departed 等 Email/Deep Link 通知。
+5. P1：实现操作型 Dashboard 待办：待审核 Booking、待 SO、即将 ETD、过期 Rate。
+6. P1：关闭字段级校验提示、客户公司编辑、客户账号开通入口、租户 Branding。
+7. P1：完成 CSP/Security Headers、密码重置、可观测性和数据库备份恢复演练。
 
 ## 文档使用约定
 

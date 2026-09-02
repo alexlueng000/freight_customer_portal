@@ -14,6 +14,7 @@ test-results
 *.tsbuildinfo
 Dockerfile.local
 .DS_Store
+~$*
 .workbuddy/
 tmp/
 output/

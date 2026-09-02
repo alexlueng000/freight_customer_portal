@@ -31,6 +31,39 @@ const soSelect = {
   status: true,
   publishedAt: true,
   createdAt: true,
+  uploadedBy: { select: { displayName: true } },
+  publishedBy: { select: { displayName: true } },
+  document: {
+    select: {
+      id: true,
+      originalFilename: true,
+      mimeType: true,
+      sizeBytes: true,
+      version: true,
+      customerVisible: true,
+      status: true,
+    },
+  },
+} satisfies Prisma.BookingSoRecordSelect;
+
+const customerSoSelect = {
+  id: true,
+  bookingId: true,
+  soNumber: true,
+  carrierCode: true,
+  vessel: true,
+  voyage: true,
+  etd: true,
+  eta: true,
+  cyCutoffAt: true,
+  siCutoffAt: true,
+  vgmCutoffAt: true,
+  terminal: true,
+  receivedAt: true,
+  version: true,
+  status: true,
+  publishedAt: true,
+  createdAt: true,
   document: {
     select: {
       id: true,
@@ -57,7 +90,7 @@ export class BookingSoService {
     await this.requireBooking(bookingId, context.tenantId);
     return this.prisma.bookingSoRecord.findMany({
       where: { tenantId: context.tenantId, bookingId },
-      select: soSelect,
+      select: customerSoSelect,
       orderBy: { version: 'desc' },
     });
   }
@@ -142,6 +175,15 @@ export class BookingSoService {
           code: 'PUBLISHABLE_SO_RECORD_NOT_FOUND',
           message: 'Publishable SO record not found',
         });
+      const latest = await tx.bookingSoRecord.aggregate({
+        where: { tenantId: context.tenantId, bookingId },
+        _max: { version: true },
+      });
+      if (record.version !== latest._max.version)
+        throw new BadRequestException({
+          code: 'SO_PUBLISH_STALE_VERSION',
+          message: 'Only the latest SO draft can be published',
+        });
       const previous = await tx.bookingSoRecord.findMany({
         where: {
           tenantId: context.tenantId,
@@ -186,26 +228,6 @@ export class BookingSoService {
         where: { id: record.documentId },
         data: { status: DocumentStatus.ACTIVE, customerVisible: true },
       });
-      if (record.booking.status === BookingStatus.BOOKING_SUBMITTED) {
-        const booked = await tx.booking.updateMany({
-          where: {
-            id: bookingId,
-            tenantId: context.tenantId,
-            status: BookingStatus.BOOKING_SUBMITTED,
-          },
-          data: {
-            status: BookingStatus.BOOKED,
-            bookedAt: now,
-            updatedById: context.userId,
-            lastStatusRemark: 'SO published',
-          },
-        });
-        if (booked.count !== 1)
-          throw new BadRequestException({
-            code: 'BOOKING_STATE_CONFLICT',
-            message: 'Booking status changed; refresh and try again',
-          });
-      }
       await tx.auditLog.createMany({
         data: [
           {
@@ -221,9 +243,9 @@ export class BookingSoService {
             actorUserId: context.userId,
             entityType: 'Booking',
             entityId: bookingId,
-            action: 'STATUS_BOOKED',
+            action: 'SO_PUBLISHED',
             beforeData: { status: record.booking.status },
-            afterData: { status: BookingStatus.BOOKED, soRecordId: soId },
+            afterData: { status: record.booking.status, soRecordId: soId, customerVisible: true },
           },
         ],
       });
@@ -265,6 +287,12 @@ export class BookingSoService {
             uploadedById: context.userId,
           },
         });
+        const booking = await tx.booking.findFirst({
+          where: { id: bookingId, tenantId: context.tenantId },
+          select: { status: true },
+        });
+        if (!booking)
+          throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
         const record = await tx.bookingSoRecord.create({
           data: {
             tenantId: context.tenantId,
@@ -288,25 +316,64 @@ export class BookingSoService {
           },
           select: soSelect,
         });
+        const transitionedToBooked = booking.status === BookingStatus.BOOKING_SUBMITTED;
+        if (transitionedToBooked) {
+          const booked = await tx.booking.updateMany({
+            where: {
+              id: bookingId,
+              tenantId: context.tenantId,
+              status: BookingStatus.BOOKING_SUBMITTED,
+            },
+            data: {
+              status: BookingStatus.BOOKED,
+              bookedAt: new Date(),
+              updatedById: context.userId,
+              lastStatusRemark: 'SO registered internally',
+            },
+          });
+          if (booked.count !== 1)
+            throw new BadRequestException({
+              code: 'BOOKING_STATE_CONFLICT',
+              message: 'Booking status changed; refresh and try again',
+            });
+        }
+        const auditLogs: Prisma.AuditLogCreateManyInput[] = [
+          {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            entityType: 'Document',
+            entityId: document.id,
+            action: 'UPLOAD_SO_INTERNAL',
+            afterData: { bookingId, version, customerVisible: false },
+          },
+          {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            entityType: 'BookingSoRecord',
+            entityId: record.id,
+            action: 'REGISTER_SO',
+            afterData: {
+              bookingId,
+              version,
+              documentId: document.id,
+              soNumber: record.soNumber,
+              customerVisible: false,
+            },
+          },
+        ];
+        if (transitionedToBooked) {
+          auditLogs.push({
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            entityType: 'Booking',
+            entityId: bookingId,
+            action: 'STATUS_BOOKED',
+            beforeData: { status: booking.status },
+            afterData: { status: BookingStatus.BOOKED, soRecordId: record.id },
+          });
+        }
         await tx.auditLog.createMany({
-          data: [
-            {
-              tenantId: context.tenantId,
-              actorUserId: context.userId,
-              entityType: 'Document',
-              entityId: document.id,
-              action: 'UPLOAD_SO_INTERNAL',
-              afterData: { bookingId, version, customerVisible: false },
-            },
-            {
-              tenantId: context.tenantId,
-              actorUserId: context.userId,
-              entityType: 'BookingSoRecord',
-              entityId: record.id,
-              action: 'CREATE_INTERNAL_DRAFT',
-              afterData: { bookingId, version, documentId: document.id },
-            },
-          ],
+          data: auditLogs,
         });
         return record;
       });

@@ -1,5 +1,5 @@
 'use client';
-import { ChevronLeft, ChevronRight, Send } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
@@ -31,7 +31,6 @@ export default function AdminQuotesPage() {
   const [data, setData] = useState<QuoteList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
-  const [sending, setSending] = useState<string | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -46,21 +45,9 @@ export default function AdminQuotesPage() {
   useEffect(() => {
     void load();
   }, [load]);
-  const send = async (id: string) => {
-    setSending(id);
-    setError(null);
-    try {
-      await request(apiFetch, `/api/v1/admin/quotes/${id}/send`, { method: 'POST' });
-      await load();
-    } catch (caught) {
-      setError(normalize(caught));
-    } finally {
-      setSending(null);
-    }
-  };
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="运营后台" title="报价" description="查看客户报价并将草稿发送给客户。" />
+      <PageHeader eyebrow="运营后台" title="报价" description="查看客户报价，进入详情核对后再确认发送。" />
       {error?.code === 'PERMISSION_DENIED' ? (
         <PermissionDeniedState />
       ) : (
@@ -116,15 +103,13 @@ export default function AdminQuotesPage() {
                         </td>
                         <td className={`${cell} text-right`}>
                           {quote.status === 'DRAFT' ? (
-                            <button
-                              className="inline-flex h-8 items-center gap-1.5 rounded bg-primary px-3 font-semibold text-surface disabled:opacity-40"
-                              disabled={sending !== null}
-                              onClick={() => void send(quote.id)}
-                              type="button"
+                            <Link
+                              className="inline-flex h-8 items-center gap-1.5 rounded border border-primary px-3 font-semibold text-primary hover:bg-primary/5"
+                              href={`/admin/quotes/${quote.id}`}
                             >
-                              <Send className="size-3.5" />
-                              {sending === quote.id ? '发送中…' : '审核并发送'}
-                            </button>
+                              <Eye className="size-3.5" />
+                              查看审核
+                            </Link>
                           ) : (
                             '—'
                           )}

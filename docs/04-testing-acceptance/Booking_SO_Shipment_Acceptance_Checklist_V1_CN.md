@@ -128,7 +128,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 预期结果：
 
-- Shipment 编号符合 `SHPyyyyMM######`，初始状态为 `PLANNED`。
+- Shipment 编号符合 `SHPyyyyMM######`，在 V1.1 常规路径中初始状态为 `BOOKED`。
 - customer、Booking、POL/POD、Carrier 和 ETD 快照正确。
 - V1 常规路径阻止重复创建；数据模型仍保留 Booking 1:N Shipment 的未来能力。
 - Shipment 创建写入 AuditLog，客户可在自己的 Shipment 列表读取。

@@ -24,15 +24,15 @@ test.describe('Shipment fulfillment', () => {
   test('internal user can open the real Shipment list and maintenance detail', async ({ page }) => {
     await login(page, adminEmail, adminPassword!, '/admin');
     await page.goto('/admin/shipments');
-    await expect(page.getByRole('heading', { name: 'Shipment 履约' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Basic Shipment' })).toBeVisible();
     const firstShipment = page.locator('tbody a[href^="/admin/shipments/"]').first();
     await expect(firstShipment).toBeVisible();
     await firstShipment.click();
     await expect(page).toHaveURL(/\/admin\/shipments\/[^/]+$/);
     await expect(page.getByRole('heading', { name: /^SHP/ })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Containers' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Tracking Timeline' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'BL 与单证' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '基础进度 Timeline' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '参考附件' })).toBeVisible();
     await expect(page.getByRole('button', { name: '保存资料' })).toBeVisible();
     await expect(page.getByRole('button', { name: '新增 Container' })).toBeVisible();
     await expect(page.getByRole('button', { name: '新增节点' })).toBeVisible();
@@ -44,14 +44,15 @@ test.describe('Shipment fulfillment', () => {
   }) => {
     await login(page, customerEmail, customerPassword!, '/portal');
     await page.goto('/portal/shipments');
-    await expect(page.getByRole('heading', { name: 'Shipment 履约' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Basic Shipment' })).toBeVisible();
     const firstShipment = page.locator('tbody a[href^="/portal/shipments/"]').first();
     await expect(firstShipment).toBeVisible();
     await firstShipment.click();
     await expect(page).toHaveURL(/\/portal\/shipments\/[^/]+$/);
     await expect(page.getByRole('heading', { name: /^SHP/ })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Tracking Timeline' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'BL 与单证' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Shipment 进度' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Containers' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: '参考附件' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '保存资料' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '新增 Container' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '新增节点' })).toHaveCount(0);

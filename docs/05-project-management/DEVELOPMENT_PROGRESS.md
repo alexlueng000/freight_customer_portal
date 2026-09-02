@@ -1,12 +1,12 @@
 # Freight Customer Portal 开发进度日志
 
-> 最后更新：2026-08-31
-> 当前阶段：Phase 5 功能闭环完成，进入业务 UAT 与 Pilot Hardening
-> 当前目标：完成真实样本 UAT、关闭 P1 缺口，并推进生产邮件、通知页面与 Branding
+> 最后更新：2026-09-02
+> 当前阶段：V1.1 范围冻结，主链路收敛为 Rate → Quote → Booking → SO → Basic Shipment
+> 当前目标：完成 V1.1 主链路 UAT、Email/Deep Link、操作型 Dashboard 与试点前安全加固
 
 ## 1. 项目当前状态
 
-项目基础环境已经建立，客户门户与运营后台界面可以正常运行。Rate、Quote、Booking、SO Document、Shipment、Container、TrackingEvent、BL 版本化与 Invoice/Billing 已接入真实数据库、鉴权、权限、租户上下文及前端页面。
+项目基础环境已经建立，客户门户与运营后台界面可以正常运行。根据 2026-09-02 最新 PRD V1.1，当前 V1 MVP 不再以完整 `Tracking → Document → Invoice` 闭环为 P0，而以 `Rate → Quote → Booking → SO → Basic Shipment` 作为商用试点主链路。Rate、Quote、Booking、SO 与 Basic Shipment 已接入真实数据库、鉴权、权限、租户/客户范围、审计及主要前端页面；Container、完整 Tracking、BL 和 Invoice/Billing 作为历史已实现能力保留，但后续不作为 V1 P0 扩展重点。
 
 本地开发入口：
 
@@ -32,8 +32,8 @@
 - 已建立 Tenant、User、Role、Permission、UserRole、CustomerCompany、CustomerContact、AuditLog、BusinessNumberCounter 等基础模型。
 - 已加入关键租户一致性约束和数据库触发器，防止跨租户绑定客户、用户和角色。
 - 已新增 RefreshSession 表，用于刷新令牌轮换和重放检测。
-- 当前 22 个 Prisma migration 已写入版本库并应用到本地测试数据库。
-- Demo seed 可重复执行，已经创建 DEMO 租户、系统角色、权限、演示客户公司、演示用户、Accepted Quote、Draft Booking、确定性的 Planned Shipment 与 Issued Invoice。
+- 当前已写入版本库的 Prisma migration 包含 V1.1 Basic Shipment 状态迁移 `20260902190000_basic_shipment_status_v11`；应用到目标数据库前需先重跑 `pnpm prisma:generate`。
+- Demo seed 可重复执行，已经创建 DEMO 租户、系统角色、权限、演示客户公司、演示用户、Accepted Quote、Draft Booking、确定性的 Booked Basic Shipment 与历史 Issued Invoice。
 
 ### 2.3 后端认证
 
@@ -201,39 +201,41 @@
 
 - 已建立 `Booking`、`BookingContainerRequest` 与独立 `BookingStatus` 状态机。
 - 已实现 `ACCEPTED Quote → DRAFT Booking` 原子转单：复制航线、船司、ETD、箱型需求和默认订舱联系人，并将 Quote 更新为 `BOOKED`。
-- 已实现客户 Booking 列表、详情、Draft 编辑、提交和取消；后台实现列表、详情、开始审核、确认、拒绝和取消。
-- 服务端强制执行 `DRAFT → SUBMITTED → UNDER_REVIEW → CONFIRMED → SO_RELEASED`，拒绝非法跳转。
+- 已实现客户 Booking 列表、详情、Draft 编辑、提交和取消；后台实现列表、详情、退回补充、审核通过、提交 Carrier/Agent、拒绝和取消。
+- 服务端已按 V1.1 强制执行 `DRAFT → SUBMITTED → REVISION_REQUIRED/APPROVED → BOOKING_SUBMITTED → BOOKED`，拒绝非法跳转。
 - Booking 编号通过租户/月度计数器并发安全生成；常规 V1 服务流程限制一份 Quote 一次转单，数据层仍保留 Quote 1:N Booking。
 - 已增加 Booking 权限、状态审计、重复转单保护、资料完整性校验、客户公司范围和跨租户负向测试。
 
 ### 2.16 SO Document 与 Shipment 建档
 
 - 已建立独立 `Shipment`、`Document`、`ShipmentStatus` 和 `DocumentStatus` 数据模型及租户一致性数据库触发器。
-- 后台仅允许对 `CONFIRMED` Booking 上传 SO；支持 PDF、PNG、JPEG，单文件最大 10 MB。
-- SO 先写入 S3 兼容对象存储，再在数据库事务内创建 Document、更新 Booking 为 `SO_RELEASED` 并写入审计；数据库失败时清理孤儿对象。
+- 后台仅允许对 `BOOKING_SUBMITTED` 或 `BOOKED` Booking 登记 SO；支持 PDF、PNG、JPEG，单文件最大 10 MB。
+- SO 先写入 S3 兼容对象存储，再在数据库事务内创建 Document 和 BookingSoRecord；首次登记 SO 时将 Booking 更新为 `BOOKED` 并写入审计，数据库失败时清理孤儿对象。
 - Document 保存对象 Key、原始文件名、MIME、大小、版本、上传者、客户可见性和状态；对象 Key 不作为授权边界。
 - 客户下载前同时校验 tenant、customer scope、`customerVisible=true` 和 ACTIVE 状态；隐藏文件及跨租户 Document ID 不可下载。
-- 后台可从 `SO_RELEASED` Booking 创建 Shipment，复制客户、航线、船司和 ETD 快照并生成租户内 Shipment 编号。
+- 后台可从已 `BOOKED` 且存在已发布 SO 的 Booking 创建 Basic Shipment，复制客户、航线、船司和 ETD 快照并生成租户内 Shipment 编号。
 - 客户与后台 Booking 详情页均展示 SO 和 Shipment；下载通过带 Bearer Token 的 API 请求完成。
-- DEMO 数据已经实际走通 Submitted → Under Review → Confirmed → SO Released → Shipment Created，并完成真实 MinIO 上传和客户下载验证。
+- DEMO 数据已经实际走通 Submitted → Approved → Booking Submitted → SO Registered/Published → Basic Shipment Created，并完成真实 MinIO 上传和客户下载验证。
 
-### 2.17 Shipment 履约明细后端
+### 2.17 Basic Shipment 后端
 
-- Shipment 已补齐 ATD/ATA、MBL/HBL 和完成时间字段，并实现独立状态机：PLANNED → IN_PROGRESS → DEPARTED → ARRIVED → COMPLETED，非终态可受控取消。
+- Shipment 已按 PRD V1.1 收敛为 Basic Shipment，状态机调整为：CREATED → BOOKED → DEPARTED → IN_TRANSIT → ARRIVED → COMPLETED，非终态可受控取消。
+- Booking 已登记并发布 SO 后创建 Shipment 的 V1.1 常规路径直接进入 BOOKED，避免客户看到没有业务意义的 Planned 阶段。
+- 新增迁移 `20260902190000_basic_shipment_status_v11`，将历史 `PLANNED` 映射为 `CREATED`，将历史 `IN_PROGRESS` 映射为 `BOOKED`。
 - 状态动作使用语义化端点，事务内同步写入系统 TrackingEvent 与包含 before/after 的 AuditLog。
 - 已建立 Container 模型，支持柜号、箱型、封条、VGM 及提柜/进港/装船/卸船时间；柜号按批准格式校验。
 - 已建立 append-oriented TrackingEvent 模型，支持事件类型、时间、地点、备注、来源和客户可见性；客户 API 自动过滤内部节点。
-- Shipment 详情已聚合 Containers、Tracking Timeline 和 Documents；客户响应自动过滤内部文件。
+- Shipment 详情仍可聚合 Containers、Tracking Timeline 和 Documents，但这些能力在 V1.1 中不作为客户侧 P0 主任务继续扩展。
 - 已实现 Shipment 的 DRAFT_BL/FINAL_BL/OTHER 上传、同类型递增版本、旧版本 SUPERSEDED、S3 对象清理和下载授权。
 - Container/TrackingEvent 增加数据库租户一致性触发器；Shipment 文档版本增加租户内唯一约束。
 - 新增 `shipment.manage`、`tracking.manage`、`document.manage` 权限，仅租户管理员、平台管理员和 Operation 默认拥有。
 
-### 2.18 Shipment 履约前端
+### 2.18 Basic Shipment 前端
 
 - 已将后台与客户门户的 Shipment 模拟页面替换为真实 API 列表和详情，支持关键词、状态筛选及 loading、empty、error 状态。
-- 后台详情支持维护船名航次、ETD/ETA、MBL/HBL，新增 Container、追加客户可见/内部 TrackingEvent，并执行 Shipment 状态动作。
-- 后台支持 DRAFT_BL、FINAL_BL 和 OTHER 文件上传、客户可见开关及新版本上传；客户侧只显示和下载服务端授权的文件。
-- 客户 Shipment 详情保持只读，不渲染资料维护、Container、TrackingEvent、状态动作或文件上传控件。
+- 后台详情支持维护船名航次、ETD/ETA、MBL/HBL 参考字段，新增 Container、追加客户可见/内部 TrackingEvent，并执行 Basic Shipment 状态动作。
+- 后台保留 DRAFT_BL、FINAL_BL 和 OTHER 参考附件上传能力；V1.1 客户侧不再把 BL/完整单证作为 P0 任务暴露。
+- 客户 Shipment 详情保持只读，只展示 Basic Shipment 摘要、船期时间和简化进度，不渲染资料维护、Container、完整 TrackingEvent、状态动作或文件上传控件。
 - Booking 详情中的 Shipment 已链接至真实履约详情页。
 - Web 生产构建改用独立 `.next-build`，不再覆盖 `next dev` 使用的 `.next` 缓存。
 
@@ -298,7 +300,7 @@
 - 浏览器验收已覆盖后台运价创建、成本与状态编辑、多条件筛选、筛选空状态和清空筛选，页面无控制台错误。
 - 浏览器验收已覆盖标准模板上传、BullMQ/Worker 异步处理、完成状态轮询和导入后列表刷新。
 - 浏览器验收已覆盖客户账号真实查价、销售价展示和采购成本/供应方/合约号/内部备注不可见。
-- 浏览器验收已覆盖后台 Shipment 列表/详情、完整布局和维护控件，以及客户 Shipment 列表/只读详情与敏感操作控件隐藏。
+- 浏览器验收基线已覆盖后台 Shipment 列表/详情、维护控件，以及客户 Shipment 列表/只读详情与敏感操作控件隐藏；V1.1 调整后需重跑 Playwright。
 - Playwright Shipment E2E：2 个 Chromium 用例全部通过。
 - 数据库集成测试已覆盖 Quote 原子转 Booking、重复转单、Booking 完整性、状态机、SO 可见性、隐藏文件、跨租户下载拒绝和 Shipment 建档。
 - Invoice 状态机与数据库集成测试共 2 个测试套件、3 个测试通过，覆盖 Decimal 汇总、费用行字段、完整状态流、审计和跨租户/跨客户读取拒绝。
@@ -316,13 +318,14 @@
 - `RateCharge` V1 规则已确认并实现；仍需在 Rate UAT 中用真实费用样本复核。
 - Quote 发送邮件通知按批准路线图属于 M5 Notifications，本阶段不提前建立完整通知域。
 - Notification 已接通 Invoice 发布事件与本地 log transport；真实 SMTP/邮件服务商、通知中心 UI、Quote/Booking/Shipment 事件仍未完成。
-- PRD UAT-07 要求的 Invoice 附件、UAT-08 越权拒绝安全日志及完整黄金路径 Playwright 已完成；核心闭环仍需业务 UAT 签署。
+- 历史 V1.0 中 Invoice 附件、越权拒绝安全日志及完整黄金路径 Playwright 已完成；V1.1 主链路仍需重新完成业务 UAT 签署。
 - 仓库 `build` 脚本已使用 `.next-build` 隔离生产构建；自定义 Next.js 构建命令仍应显式设置独立 `NEXT_DIST_DIR`。
-- Shipment 履约后端、前端、冒烟 E2E 和完整黄金路径已接通；仍需使用真实 Container/Tracking/BL 样本完成业务 UAT。
+- Shipment 后端、前端和冒烟 E2E 已按 V1.1 Basic Shipment 口径更新；仍需重跑 Prisma Client 生成、数据库迁移和 Playwright。
+- Invoice、BL 和复杂 Tracking 已从 V1.1 P0 移出；已有实现需作为历史能力冻结，避免继续扩大试点范围。
 
 ## 5. 下一步开发计划
 
-Rate → Quote → Booking → Shipment → Tracking/Document → Invoice 的持久化与权限纵向切片已经形成。当前先完成各阶段业务 UAT，再进入 Notifications 与 Branding：
+V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment。当前先完成主链路业务 UAT，再进入 Email/Deep Link、Dashboard 待办、Notifications 与 Branding；Invoice、完整 BL、复杂 Tracking 进入 Backlog。
 
 ### 5.1 Rate 业务 UAT
 
@@ -344,12 +347,13 @@ Rate → Quote → Booking → Shipment → Tracking/Document → Invoice 的持
 - [x] 在同一事务中创建 Booking 并将 Quote 更新为 `BOOKED`。
 - [x] 覆盖重复转单、非法状态和跨租户/跨客户负向测试。
 
-### 5.4 Booking → SO → Shipment
+### 5.4 Booking → SO → Basic Shipment
 
 - [x] 完成 Booking 提交、审核、确认、拒绝和取消状态动作。
 - [x] SO 上传至 S3 兼容对象存储并通过 Document 元数据授权客户下载。
-- [x] 上传 SO 后原子更新 Booking 为 `SO_RELEASED`。
-- [x] 从 Booking 创建 Shipment 并复制航线快照。
+- [x] 登记 SO 后进入 `BOOKED`，SO 发布动作独立控制客户可见性。
+- [x] 从已发布 SO 的 Booking 创建 Basic Shipment 并复制航线快照。
+- [x] Shipment 状态机已按 PRD V1.1 更新为 CREATED/BOOKED/DEPARTED/IN_TRANSIT/ARRIVED/COMPLETED。
 - [x] 覆盖隐藏文件、跨租户文件访问和 Shipment 租户一致性测试。
 - [ ] 按 [Booking/SO/Shipment 阶段验收清单](./Booking_SO_Shipment_Acceptance_Checklist_V1_CN.md) 完成业务验收。
 
@@ -357,7 +361,8 @@ Rate → Quote → Booking → Shipment → Tracking/Document → Invoice 的持
 
 - [x] 建立 Playwright 浏览器测试基线，并接入 CI 失败证据留存。
 - [x] 固化后台/客户 Shipment 列表、详情、维护权限与只读权限冒烟路径。
-- [x] 固化 Rate → Quote → Booking → SO → Shipment → 两个 Container → Tracking → BL → Invoice → 附件 → 客户确认完整黄金路径。
+- [ ] 按 PRD V1.1 重定并固化 Rate → Quote → Booking → SO → Basic Shipment 黄金路径。
+- [x] 历史黄金路径曾覆盖 Rate → Quote → Booking → SO → Shipment → 两个 Container → Tracking → BL → Invoice → 附件 → 客户确认；该路径不再代表 V1.1 P0 范围。
 - [x] 在 CI 中保留失败截图、trace、视频和 HTML 报告。
 
 ### 5.6 Invoice / Billing

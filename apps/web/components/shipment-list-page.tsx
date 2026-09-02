@@ -9,6 +9,7 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import type { Shipment } from '@/components/shipment-types';
 import { StatusBadge } from '@/components/status-badge';
+import type { StatusTone } from '@/lib/mock-data';
 
 export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
   const { apiFetch } = useAuth();
@@ -48,8 +49,12 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
     <div className="space-y-5">
       <PageHeader
         eyebrow={mode === 'admin' ? '运营后台' : '客户门户'}
-        title="Shipment 履约"
-        description="查看航线、船期、Container、Tracking Timeline 与客户可见单证。"
+        title="Basic Shipment"
+        description={
+          mode === 'admin'
+            ? '维护 SO 后的基础出运信息、船期时间与客户可见进度。'
+            : '查看已订舱后的船名航次、预计时间和基础进度。'
+        }
       />
       <section className="overflow-hidden rounded border border-border bg-surface">
         <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row">
@@ -65,11 +70,19 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
             onChange={(event) => setStatus(event.target.value)}
           >
             <option value="">全部状态</option>
-            {['PLANNED', 'IN_PROGRESS', 'DEPARTED', 'ARRIVED', 'COMPLETED', 'CANCELLED'].map(
-              (value) => (
-                <option key={value}>{value}</option>
-              ),
-            )}
+            {[
+              'CREATED',
+              'BOOKED',
+              'DEPARTED',
+              'IN_TRANSIT',
+              'ARRIVED',
+              'COMPLETED',
+              'CANCELLED',
+            ].map((value) => (
+              <option key={value} value={value}>
+                {shipmentStatusLabel(value)}
+              </option>
+            ))}
           </select>
         </div>
         {loading ? (
@@ -82,7 +95,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
           <div className="p-4">
             <EmptyState
               title="暂无匹配的 Shipment"
-              description="从 SO Released Booking 创建 Shipment 后会显示在这里。"
+              description="Booking 已登记并发布 SO 后，创建的 Basic Shipment 会显示在这里。"
             />
           </div>
         ) : (
@@ -126,7 +139,9 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
                     </td>
                     <td className={cell}>{item.containers.length}</td>
                     <td className={cell}>
-                      <StatusBadge>{item.status}</StatusBadge>
+                      <StatusBadge tone={shipmentStatusTone(item.status)}>
+                        {shipmentStatusLabel(item.status)}
+                      </StatusBadge>
                     </td>
                   </tr>
                 ))}
@@ -142,3 +157,25 @@ const date = (value: string | null) => value?.slice(0, 10) ?? '待确认';
 const control = 'h-9 rounded border border-border bg-surface px-3 text-sm sm:min-w-56';
 const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
+
+function shipmentStatusLabel(status: string) {
+  return (
+    {
+      CREATED: '已创建',
+      BOOKED: '已订舱',
+      DEPARTED: '已开船',
+      IN_TRANSIT: '运输中',
+      ARRIVED: '已到港',
+      COMPLETED: '已完成',
+      CANCELLED: '已取消',
+    }[status] ?? status
+  );
+}
+
+function shipmentStatusTone(status: string): StatusTone {
+  if (status === 'COMPLETED') return 'success';
+  if (status === 'CANCELLED') return 'danger';
+  if (status === 'ARRIVED') return 'warning';
+  if (status === 'DEPARTED' || status === 'IN_TRANSIT') return 'info';
+  return 'neutral';
+}

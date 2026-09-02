@@ -67,7 +67,29 @@ const bookingSelect = {
     },
     orderBy: { sortOrder: 'asc' as const },
   },
-  quote: { select: { quoteNo: true, currency: true, totalAmount: true } },
+  quote: {
+    select: {
+      quoteNo: true,
+      polCode: true,
+      podCode: true,
+      carrierCode: true,
+      etd: true,
+      currency: true,
+      totalAmount: true,
+      sourceRate: {
+        select: {
+          polName: true,
+          podName: true,
+          serviceName: true,
+        },
+      },
+      items: {
+        where: { chargeCode: 'OCEAN_FREIGHT', containerType: { not: null } },
+        select: { containerType: true, quantity: true },
+        orderBy: { sortOrder: 'asc' as const },
+      },
+    },
+  },
   shipments: {
     select: {
       id: true,
@@ -79,6 +101,15 @@ const bookingSelect = {
     orderBy: { createdAt: 'desc' as const },
   },
 } satisfies Prisma.BookingSelect;
+
+type BookingReviewIssue = {
+  code: string;
+  severity: 'error' | 'warning';
+  message: string;
+  field: string;
+  blocking: boolean;
+  details?: Record<string, string | null>;
+};
 
 const shipmentSelect = {
   id: true,
@@ -441,6 +472,16 @@ export class BookingsService {
           code: 'SHIPPER_NOT_IN_CUSTOMER_SCOPE',
           message: 'The selected shipper is outside the current customer scope',
         });
+      if (dto.grossWeight && new Prisma.Decimal(dto.grossWeight).lte(0))
+        throw new BadRequestException({
+          code: 'BOOKING_GROSS_WEIGHT_INVALID',
+          message: 'Gross weight must be greater than 0',
+        });
+      if (dto.volumeCbm && new Prisma.Decimal(dto.volumeCbm).lte(0))
+        throw new BadRequestException({
+          code: 'BOOKING_VOLUME_CBM_INVALID',
+          message: 'Volume CBM must be greater than 0 when provided',
+        });
       const updated = await tx.booking.update({
         where: { id },
         data: {
@@ -492,12 +533,15 @@ export class BookingsService {
       'packageType',
       'packages',
       'grossWeight',
-      'volumeCbm',
       'cargoReadyDate',
       'shipperName',
       'shipperAddress',
       'bookingContactName',
     ].filter((key) => !booking[key as keyof typeof booking]);
+    if (booking.grossWeight && booking.grossWeight.lte(0)) missing.push('grossWeight');
+    if (booking.volumeCbm && booking.volumeCbm.lte(0)) missing.push('volumeCbmPositive');
+    if (booking.isDangerousGoods && !booking.specialInstructions?.trim())
+      missing.push('dangerousGoodsInfo');
     if (!booking.bookingContactEmail && !booking.bookingContactPhone)
       missing.push('bookingContactEmailOrPhone');
     if (booking.containerRequests.length === 0) missing.push('containerRequests');
@@ -560,6 +604,7 @@ export class BookingsService {
           shipmentNo,
           bookingId: id,
           customerCompanyId: booking.customerCompanyId,
+          status: 'BOOKED',
           carrierCode: booking.carrierCode,
           vessel: dto.vessel?.trim(),
           voyage: dto.voyage?.trim(),
@@ -589,9 +634,15 @@ export class BookingsService {
     return this.transition(id, BookingStatus.CANCELLED, dto, false);
   }
   approve(id: string, dto: BookingActionDto) {
-    return this.internalTransition(id, BookingStatus.APPROVED, BookingReviewActionType.APPROVE, {
-      internalRemark: dto.remark,
-    });
+    return this.internalTransition(
+      id,
+      BookingStatus.APPROVED,
+      BookingReviewActionType.APPROVE,
+      {
+        internalRemark: dto.remark,
+      },
+      { validateReview: true },
+    );
   }
   requestRevision(id: string, dto: RequestBookingRevisionDto) {
     return this.internalTransition(
@@ -696,12 +747,13 @@ export class BookingsService {
       carrierSourceName?: string;
       carrierReference?: string;
     },
+    options: { validateReview?: boolean } = {},
   ) {
     const context = this.requireInternal();
     return this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findFirst({
         where: { id, ...this.internalWhere(context) },
-        select: { id: true, status: true },
+        select: bookingSelect,
       });
       if (!booking)
         throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
@@ -711,6 +763,16 @@ export class BookingsService {
           message: `Booking cannot transition from ${booking.status} to ${target}`,
           details: { from: booking.status, to: target },
         });
+      if (options.validateReview) {
+        const reviewIssues = this.buildReviewIssues(booking);
+        const blockingIssues = reviewIssues.filter((issue) => issue.blocking);
+        if (blockingIssues.length)
+          throw new BadRequestException({
+            code: 'BOOKING_REVIEW_BLOCKED',
+            message: 'Booking has blocking review issues and cannot be approved',
+            details: { reviewIssues: blockingIssues },
+          });
+      }
       const now = new Date();
       const changed = await tx.booking.updateMany({
         where: { id, tenantId: context.tenantId, status: booking.status },
@@ -820,7 +882,93 @@ export class BookingsService {
     });
     if (!booking)
       throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
-    return booking;
+    return internal ? { ...booking, reviewIssues: this.buildReviewIssues(booking) } : booking;
+  }
+
+  private buildReviewIssues(booking: Prisma.BookingGetPayload<{ select: typeof bookingSelect }>) {
+    const issues: BookingReviewIssue[] = [];
+    const bookingCargoReadyDate = dateOnly(booking.cargoReadyDate);
+    const bookingEtd = dateOnly(booking.etd);
+    if (bookingCargoReadyDate && bookingEtd && bookingCargoReadyDate > bookingEtd) {
+      issues.push({
+        code: 'CARGO_READY_AFTER_ETD',
+        severity: 'error',
+        blocking: true,
+        field: 'cargoReadyDate',
+        message: '预计货好日期晚于当前 ETD',
+        details: { cargoReadyDate: bookingCargoReadyDate, etd: bookingEtd },
+      });
+    }
+    if (!booking.bookingContactName?.trim()) {
+      issues.push({
+        code: 'MISSING_BOOKING_CONTACT',
+        severity: 'error',
+        blocking: true,
+        field: 'bookingContactName',
+        message: '缺少订舱联系人姓名',
+      });
+    }
+    if (!booking.bookingContactEmail?.trim() && !booking.bookingContactPhone?.trim()) {
+      issues.push({
+        code: 'MISSING_CONTACT_CHANNEL',
+        severity: 'error',
+        blocking: true,
+        field: 'bookingContact',
+        message: '订舱联系人缺少邮箱或电话',
+      });
+    }
+    if (!booking.grossWeight || booking.grossWeight.lte(0)) {
+      issues.push({
+        code: 'INVALID_GROSS_WEIGHT',
+        severity: 'error',
+        blocking: true,
+        field: 'grossWeight',
+        message: '毛重必须大于 0',
+      });
+    }
+    if (booking.isDangerousGoods) {
+      if (!booking.specialInstructions?.trim()) {
+        issues.push({
+          code: 'DANGEROUS_GOODS_INCOMPLETE',
+          severity: 'error',
+          blocking: true,
+          field: 'specialInstructions',
+          message: '危险品订舱缺少品名、UN No.、IMO Class 或 MSDS 资料说明',
+        });
+      } else {
+        issues.push({
+          code: 'DANGEROUS_GOODS_MANUAL_REVIEW',
+          severity: 'warning',
+          blocking: false,
+          field: 'isDangerousGoods',
+          message: '危险品资料需人工核对后再继续',
+        });
+      }
+    }
+    const mismatchMessage = this.findQuoteMismatch(booking);
+    if (mismatchMessage) {
+      issues.push({
+        code: 'BOOKING_QUOTE_MISMATCH',
+        severity: 'error',
+        blocking: true,
+        field: 'quote',
+        message: mismatchMessage,
+      });
+    }
+    return issues;
+  }
+
+  private findQuoteMismatch(booking: Prisma.BookingGetPayload<{ select: typeof bookingSelect }>) {
+    const quote = booking.quote;
+    if (!quote) return 'Booking 缺少来源报价，无法确认客户已接受的商务条件。';
+    if (booking.polCode !== quote.polCode) return 'Booking 起运港与来源报价不一致。';
+    if (booking.podCode !== quote.podCode) return 'Booking 目的港与来源报价不一致。';
+    if ((booking.carrierCode ?? '') !== (quote.carrierCode ?? ''))
+      return 'Booking 船司与来源报价不一致。';
+    if (dateOnly(booking.etd) !== dateOnly(quote.etd)) return 'Booking ETD 与来源报价不一致。';
+    if (containerSignature(booking.containerRequests) !== containerSignature(quote.items))
+      return 'Booking 箱量与来源报价不一致。';
+    return null;
   }
   private requireCustomer() {
     const c = this.requestContext.requireAuthenticated();
@@ -899,4 +1047,22 @@ export class BookingsService {
       hasContactPhone: Boolean(value.contactPhone),
     };
   }
+}
+
+function dateOnly(value: Date | null | undefined) {
+  return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function containerSignature(
+  items: Array<{ containerType: string | null; quantity: number | Prisma.Decimal }>,
+) {
+  const grouped = new Map<string, number>();
+  for (const item of items) {
+    if (!item.containerType) continue;
+    grouped.set(item.containerType, (grouped.get(item.containerType) ?? 0) + Number(item.quantity));
+  }
+  return [...grouped]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([containerType, quantity]) => `${containerType}:${quantity}`)
+    .join('|');
 }

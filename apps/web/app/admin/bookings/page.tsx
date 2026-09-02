@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { bookingStatusLabel, bookingStatusTone } from '@/lib/booking-status';
 interface Booking {
   id: string;
   bookingNo: string;
@@ -67,7 +68,9 @@ export default function AdminBookingsPage() {
               'REJECTED',
               'CANCELLED',
             ].map((s) => (
-              <option key={s}>{s}</option>
+              <option key={s} value={s}>
+                {bookingStatusLabel(s)}
+              </option>
             ))}
           </select>
         </div>
@@ -118,7 +121,9 @@ export default function AdminBookingsPage() {
                       </div>
                     </td>
                     <td className={cell}>
-                      <StatusBadge>{b.status}</StatusBadge>
+                      <StatusBadge tone={bookingStatusTone(b.status)}>
+                        {bookingStatusLabel(b.status)}
+                      </StatusBadge>
                     </td>
                     <td className={cell}>{b.createdAt.slice(0, 10)}</td>
                   </tr>

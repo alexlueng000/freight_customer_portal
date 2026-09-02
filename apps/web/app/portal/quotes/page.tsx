@@ -9,7 +9,7 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
-import { quoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
+import { customerQuoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Quote {
   id: string;
@@ -57,7 +57,7 @@ export default function QuotesPage() {
       <PageHeader
         eyebrow="客户门户"
         title="我的报价"
-        description="查看报价申请、销售确认进度及已发送的正式报价。"
+        description="查看报价申请、销售确认进度及可决策的正式报价。"
       />
       <section className="overflow-hidden rounded border border-border bg-surface">
         {loading ? (
@@ -123,7 +123,7 @@ export default function QuotesPage() {
                         <td className={cell}>{quote.validUntil.slice(0, 10)}</td>
                         <td className={cell}>
                           <StatusBadge tone={quoteStatusTone(quote.status)}>
-                            {quoteStatusLabel(quote.status)}
+                            {customerQuoteStatusLabel(quote.status)}
                           </StatusBadge>
                         </td>
                         <td className={`${cell} min-w-28 whitespace-nowrap text-right`}>

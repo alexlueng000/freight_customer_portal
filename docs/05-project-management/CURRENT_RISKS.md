@@ -1,7 +1,7 @@
 # Freight Customer Portal 当前风险登记
 
-> 最后更新：2026-08-30
-> 当前阶段：Phase 5 — Invoice / Billing 子阶段已完成
+> 最后更新：2026-09-02
+> 当前阶段：V1.1 范围冻结，主链路收敛为 Rate → Quote → Booking → SO → Basic Shipment
 > 适用范围：本地开发至首批试点上线前
 
 ## 1. 使用说明
@@ -33,6 +33,8 @@
 | DEV-01    | P2     | `next dev` 与 `next build` 共用 `.next` 可能互相污染          | CLOSED   | 2026-08-29             |
 | DATA-01   | P1     | 生产迁移、备份恢复和回滚演练尚未完成                          | OPEN     | 首次生产发布前         |
 | SCOPE-01  | P2     | 多个业务页面仍为模拟数据，容易被误认为已可交付                | OPEN     | 对应模块完成时         |
+| SCOPE-02  | P1     | V1.0 已实现的 Invoice/BL/复杂 Tracking 可能造成 V1.1 范围漂移 | OPEN     | 外部试点前             |
+| DEV-02    | P2     | Prisma Client 生成被 Windows engine DLL 文件锁阻塞            | OPEN     | 下一次数据库迁移验证前 |
 
 ## 3. 详细风险与关闭标准
 
@@ -83,14 +85,14 @@
 
 - **状态**：CLOSED
 
-- **现状**：已建立 Playwright/Chromium 基线并接入 CI，Shipment 与 Invoice/Billing 的内部/客户权限共 4 个用例已通过；完整黄金路径使用真实 API、PostgreSQL、MinIO 与客户页面完成 Rate → Quote → Booking → SO → Shipment → 两个 Container → Tracking → BL → Invoice → 附件 → 客户确认。
+- **现状**：已建立 Playwright/Chromium 基线并接入 CI。历史 V1.0 黄金路径曾使用真实 API、PostgreSQL、MinIO 与客户页面完成 Rate → Quote → Booking → SO → Shipment → 两个 Container → Tracking → BL → Invoice → 附件 → 客户确认；V1.1 主链路收紧后需要重定为 Rate → Quote → Booking → SO → Basic Shipment。
 - **影响**：页面路由、Cookie 刷新、权限分流和完整业务链可能在单元/接口测试均通过时发生回归。
 - **当前缓解**：关键页面已进行人工浏览器回归；Shipment 与 Invoice/Billing 冒烟 E2E 可重复执行，失败时保留截图、视频、trace 和 HTML 报告；API 与 Worker 继续提供领域和租户隔离覆盖。
 - **处理结果**：CI 启动 S3 兼容对象存储，幂等 seed 后串行执行全部 Chromium 用例；黄金路径每次使用唯一业务编号，失败保留截图、视频、trace 和 HTML 报告。
 - **关闭标准**：CI 中可稳定运行核心黄金路径及关键负向路径，失败时保留截图、trace 或视频证据。
 - **关闭日期**：2026-08-30
-- **验证证据**：本地 `pnpm test:e2e:golden` 真实执行通过；Shipment/Invoice 冒烟、API 租户隔离和隐藏文件负向测试继续保留。
-- **剩余风险**：需观察 CI 多次运行稳定性；业务 UAT 签署仍独立进行。
+- **验证证据**：历史本地 `pnpm test:e2e:golden` 真实执行通过；Shipment/Invoice 冒烟、API 租户隔离和隐藏文件负向测试继续保留。
+- **剩余风险**：需按 PRD V1.1 重定黄金路径并观察 CI 多次运行稳定性；业务 UAT 签署仍独立进行。
 
 ### TEST-02 — 前端自动化测试基线不足
 
@@ -132,7 +134,7 @@
 
 ### DATA-01 — 生产迁移和恢复流程尚未演练
 
-- **现状**：当前 19 个 Prisma migration 已在本地测试数据库应用，但还没有针对试点数据的备份、恢复、迁移失败和回滚演练记录。
+- **现状**：Prisma migration 已持续增加，并已新增 V1.1 Basic Shipment 状态迁移 `20260902190000_basic_shipment_status_v11`；但还没有针对试点数据的备份、恢复、迁移失败和回滚演练记录。
 - **影响**：首次发布或后续模型变更时，失败恢复时间和数据损失风险不可量化。
 - **当前缓解**：迁移已纳入版本控制；禁止修改已应用迁移；Demo seed 与生产开关分离。
 - **建议措施**：建立发布前备份、migration deploy、校验和故障恢复流程；使用接近生产的数据量演练。
@@ -145,6 +147,22 @@
 - **当前缓解**：开发进度日志已明确真实 API 覆盖范围。
 - **建议措施**：页面显式标记未接入模块；模块完成时同时替换模拟数据、补齐后端授权和测试。
 - **关闭标准**：所有对外试点页面均连接真实 API，具备 loading、empty、error、permission-denied 状态和对应自动化验证。
+
+### SCOPE-02 — V1.0 历史实现造成 V1.1 范围漂移
+
+- **现状**：最新 PRD V1.1 已将 V1 P0 收紧为 `Rate → Quote → Booking → SO → Basic Shipment`，并明确把 Invoice、完整 BL/Document、完整 Tracking、LCL、空运、报关、财务等移出 V1 P0；但代码库历史上已经实现了 Invoice/Billing、Shipment Document、Container 和较完整 Tracking 页面。
+- **影响**：试点演示或后续开发可能继续按 V1.0 完整 ERP 闭环推进，导致客户教育成本、UAT 范围、缺陷数量和发布风险上升。
+- **当前缓解**：Basic Shipment 页面已按 V1.1 降噪；客户侧不再把 Container、BL 和完整 Tracking 作为 P0 主任务暴露；进度文档已标记 Invoice/BL/复杂 Tracking 为历史能力和 Backlog。
+- **建议措施**：外部试点只开放 V1.1 主链路；冻结或隐藏非 P0 菜单入口；E2E 黄金路径按 V1.1 重定基线；所有新增需求先检查是否服务 Rate/Quote/Booking/SO/Basic Shipment。
+- **关闭标准**：试点演示脚本、验收清单、Dashboard 和 E2E 均只围绕 V1.1 主链路；非 P0 能力在产品文档和 UI 中明确标记为 Backlog/历史能力或对试点隐藏。
+
+### DEV-02 — Prisma Client 生成被 Windows DLL 文件锁阻塞
+
+- **现状**：`pnpm prisma:validate` 已通过，但 `pnpm prisma:generate` 在 Windows 下更新 `query_engine-windows.dll.node` 时失败，错误为 `EPERM rename ... query_engine-windows.dll.node.tmp* -> query_engine-windows.dll.node`。本机存在多个 Node 进程，疑似 API、Worker、测试或 dev server 持有 Prisma engine DLL。
+- **影响**：V1.1 ShipmentStatus enum 虽已通过 TypeScript 与 schema validate，但如果不重新生成 Prisma Client，后续数据库迁移验证、集成测试或运行时可能仍使用旧生成产物。
+- **当前缓解**：API/Web typecheck 和 lint 通过；Shipment 状态机单测通过；schema validate 通过。
+- **建议措施**：关闭正在运行的 API/Worker/Next dev/test 进程后重跑 `pnpm prisma:generate`；随后执行 migration deploy/dev、seed、Shipment/Booking 相关集成测试和 V1.1 Playwright。
+- **关闭标准**：`pnpm prisma:generate`、`pnpm prisma:validate`、V1.1 migration 应用、相关 API 测试和 Playwright 主链路 E2E 全部通过，并记录执行日期。
 
 ### PRICE-01 — RateCharge 客户计价边界（已关闭）
 

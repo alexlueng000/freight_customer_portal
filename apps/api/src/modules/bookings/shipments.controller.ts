@@ -47,12 +47,22 @@ export class ShipmentsController {
   @Post(':id/start')
   @RequirePermissions('shipment.manage')
   start(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
-    return this.shipments.transition(id, ShipmentStatus.IN_PROGRESS, dto);
+    return this.shipments.transition(id, ShipmentStatus.BOOKED, dto);
+  }
+  @Post(':id/book')
+  @RequirePermissions('shipment.manage')
+  book(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
+    return this.shipments.transition(id, ShipmentStatus.BOOKED, dto);
   }
   @Post(':id/depart')
   @RequirePermissions('shipment.manage')
   depart(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
     return this.shipments.transition(id, ShipmentStatus.DEPARTED, dto);
+  }
+  @Post(':id/transit')
+  @RequirePermissions('shipment.manage')
+  transit(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
+    return this.shipments.transition(id, ShipmentStatus.IN_TRANSIT, dto);
   }
   @Post(':id/arrive')
   @RequirePermissions('shipment.manage')

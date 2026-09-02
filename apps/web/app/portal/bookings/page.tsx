@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { bookingStatusTone, customerBookingStatusLabel } from '@/lib/booking-status';
 
 interface Booking {
   id: string;
@@ -95,7 +96,9 @@ export default function PortalBookingsPage() {
                         .join(' / ') || '待填写'}
                     </td>
                     <td className={cell}>
-                      <StatusBadge>{b.status}</StatusBadge>
+                      <StatusBadge tone={bookingStatusTone(b.status)}>
+                        {customerBookingStatusLabel(b.status)}
+                      </StatusBadge>
                     </td>
                   </tr>
                 ))}
