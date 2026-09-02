@@ -2,13 +2,13 @@
 
 > 执行日期：2026-09-02
 > 范围：Rate → Quote → Booking → SO → Shipment，以及 P0-B1–B3 的权限、状态机和事务回归
-> 当前结论：**技术 Gate 通过；待业务 UAT 签署**
+> 当前结论：**V1.1 正常业务主链已确认走通；技术 Gate 通过；正式签署姓名待补录**
 
 ## 1. 已通过门禁
 
 | 门禁 | 执行结果 | 证据 |
 | --- | --- | --- |
-| Prisma schema | 通过 | `prisma validate` 成功；本地测试库 27 个 migration，无待应用 migration |
+| Prisma schema | 通过 | `prisma validate` 成功；本地测试库 29 个 migration，无待应用 migration |
 | TypeScript | 通过 | API、Web、Worker `tsc --noEmit` 全部通过 |
 | ESLint | 通过 | API、Web、Worker 均为 0 warning / 0 error |
 | API 单元/集成测试 | 通过 | 23 suites、101 tests 全部通过 |
@@ -55,6 +55,7 @@ Swagger JSON 已确认以下新增路径可见：审批、退回、提交船司�
 - [x] `golden-path.spec.ts` 通过。
 - [x] Shipment、Invoice Playwright 场景通过。
 - [x] Swagger 新增 Booking/SO action endpoint 可见。
-- [ ] 业务负责人完成 UAT 签署。
+- [x] 项目负责人确认 V1.1 正常业务主链人工走通。
+- [ ] 正式归档时补录产品/业务/技术签署人姓名。
 
-P0-B4 自动化与技术 Gate 已通过，可恢复 Shipment、Tracking、Document 和 Invoice 后续业务 UAT；最终业务验收结论仍需负责人签署。
+P0-B4 自动化与技术 Gate 已通过，V1.1 正常业务主链已经确认走通。Invoice、BL、复杂 Tracking 不恢复为 V1.1 P0；正式归档仍需补录签署人姓名。

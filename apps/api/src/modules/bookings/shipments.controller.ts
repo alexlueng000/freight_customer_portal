@@ -44,35 +44,15 @@ export class ShipmentsController {
     return this.shipments.addEvent(id, dto);
   }
 
-  @Post(':id/start')
-  @RequirePermissions('shipment.manage')
-  start(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
-    return this.shipments.transition(id, ShipmentStatus.BOOKED, dto);
-  }
-  @Post(':id/book')
-  @RequirePermissions('shipment.manage')
-  book(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
-    return this.shipments.transition(id, ShipmentStatus.BOOKED, dto);
-  }
   @Post(':id/depart')
   @RequirePermissions('shipment.manage')
   depart(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
     return this.shipments.transition(id, ShipmentStatus.DEPARTED, dto);
   }
-  @Post(':id/transit')
-  @RequirePermissions('shipment.manage')
-  transit(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
-    return this.shipments.transition(id, ShipmentStatus.IN_TRANSIT, dto);
-  }
   @Post(':id/arrive')
   @RequirePermissions('shipment.manage')
   arrive(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
     return this.shipments.transition(id, ShipmentStatus.ARRIVED, dto);
-  }
-  @Post(':id/complete')
-  @RequirePermissions('shipment.manage')
-  complete(@Param('id') id: string, @Body() dto: ShipmentActionDto) {
-    return this.shipments.transition(id, ShipmentStatus.COMPLETED, dto);
   }
   @Post(':id/cancel')
   @RequirePermissions('shipment.manage')

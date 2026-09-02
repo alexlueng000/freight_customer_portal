@@ -1,8 +1,8 @@
 # Freight Customer Portal 开发进度日志
 
 > 最后更新：2026-09-02
-> 当前阶段：V1.1 范围冻结，主链路收敛为 Rate → Quote → Booking → SO → Basic Shipment
-> 当前目标：完成 V1.1 主链路 UAT、Email/Deep Link、操作型 Dashboard 与试点前安全加固
+> 当前阶段：V1.1 基线已封板，进入 P1 试点优化
+> 当前目标：完成 Email/Deep Link、操作型 Dashboard 与试点前安全加固
 
 ## 1. 项目当前状态
 
@@ -219,9 +219,9 @@
 
 ### 2.17 Basic Shipment 后端
 
-- Shipment 已按 PRD V1.1 收敛为 Basic Shipment，状态机调整为：CREATED → BOOKED → DEPARTED → IN_TRANSIT → ARRIVED → COMPLETED，非终态可受控取消。
-- Booking 已登记并发布 SO 后创建 Shipment 的 V1.1 常规路径直接进入 BOOKED，避免客户看到没有业务意义的 Planned 阶段。
-- 新增迁移 `20260902190000_basic_shipment_status_v11`，将历史 `PLANNED` 映射为 `CREATED`，将历史 `IN_PROGRESS` 映射为 `BOOKED`。
+- Shipment 已按最新 V1 收敛要求调整为：PLANNED → DEPARTED → ARRIVED，另有 CANCELLED；DEPARTED 即代表运输中。
+- Booking 已登记并发布 SO 后创建 Shipment，初始进入 PLANNED / 待开船。
+- 迁移 `20260902190000_basic_shipment_status_v11` 曾将历史 `PLANNED/IN_PROGRESS` 过渡到 V1.1 初版状态；最终迁移 `20260902223000_simplify_shipment_status_v1` 将存量 `CREATED/BOOKED` 收敛为 `PLANNED`、`IN_TRANSIT` 收敛为 `DEPARTED`、`COMPLETED` 收敛为 `ARRIVED`。
 - 状态动作使用语义化端点，事务内同步写入系统 TrackingEvent 与包含 before/after 的 AuditLog。
 - 已建立 Container 模型，支持柜号、箱型、封条、VGM 及提柜/进港/装船/卸船时间；柜号按批准格式校验。
 - 已建立 append-oriented TrackingEvent 模型，支持事件类型、时间、地点、备注、来源和客户可见性；客户 API 自动过滤内部节点。
@@ -353,15 +353,15 @@ V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment。当前�
 - [x] SO 上传至 S3 兼容对象存储并通过 Document 元数据授权客户下载。
 - [x] 登记 SO 后进入 `BOOKED`，SO 发布动作独立控制客户可见性。
 - [x] 从已发布 SO 的 Booking 创建 Basic Shipment 并复制航线快照。
-- [x] Shipment 状态机已按 PRD V1.1 更新为 CREATED/BOOKED/DEPARTED/IN_TRANSIT/ARRIVED/COMPLETED。
+- [x] Shipment 状态机已按最新 V1 收敛要求更新为 PLANNED/DEPARTED/ARRIVED/CANCELLED。
 - [x] 覆盖隐藏文件、跨租户文件访问和 Shipment 租户一致性测试。
-- [ ] 按 [Booking/SO/Shipment 阶段验收清单](./Booking_SO_Shipment_Acceptance_Checklist_V1_CN.md) 完成业务验收。
+- [x] V1.1 正常业务主链已由项目负责人确认走通；正式归档时补录验收签署人姓名。
 
 ### 5.5 自动化验收
 
 - [x] 建立 Playwright 浏览器测试基线，并接入 CI 失败证据留存。
 - [x] 固化后台/客户 Shipment 列表、详情、维护权限与只读权限冒烟路径。
-- [ ] 按 PRD V1.1 重定并固化 Rate → Quote → Booking → SO → Basic Shipment 黄金路径。
+- [x] 按 PRD V1.1 重定并固化 Rate → Quote → Booking → SO → Basic Shipment 黄金路径。
 - [x] 历史黄金路径曾覆盖 Rate → Quote → Booking → SO → Shipment → 两个 Container → Tracking → BL → Invoice → 附件 → 客户确认；该路径不再代表 V1.1 P0 范围。
 - [x] 在 CI 中保留失败截图、trace、视频和 HTML 报告。
 

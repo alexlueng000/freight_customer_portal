@@ -46,11 +46,12 @@ export interface Shipment {
   ata: string | null;
   mblNo: string | null;
   hblNo: string | null;
-  completedAt: string | null;
   createdAt: string;
-  booking: { bookingNo: string };
+  booking: {
+    bookingNo: string;
+    bookedAt: string | null;
+    quote: { sourceRate: { polName: string; podName: string } | null } | null;
+    containerRequests: Array<{ containerType: string; quantity: number }>;
+  };
   customer: { id: string; name: string };
-  containers: ShipmentContainer[];
-  trackingEvents: ShipmentEvent[];
-  documents: ShipmentDocument[];
 }

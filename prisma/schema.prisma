@@ -136,12 +136,9 @@ enum CustomerShipperStatus {
 }
 
 enum ShipmentStatus {
-  CREATED
-  BOOKED
+  PLANNED
   DEPARTED
-  IN_TRANSIT
   ARRIVED
-  COMPLETED
   CANCELLED
 }
 
@@ -781,7 +778,7 @@ model Shipment {
   shipmentNo        String         @db.VarChar(50)
   bookingId         String
   customerCompanyId String
-  status            ShipmentStatus @default(CREATED)
+  status            ShipmentStatus @default(PLANNED)
   carrierCode       String?        @db.VarChar(20)
   vessel            String?        @db.VarChar(100)
   voyage            String?        @db.VarChar(50)

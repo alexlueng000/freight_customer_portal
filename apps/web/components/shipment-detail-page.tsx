@@ -2,14 +2,15 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
-import type { Shipment, ShipmentDocument } from '@/components/shipment-types';
+import type { Shipment } from '@/components/shipment-types';
 import { StatusBadge } from '@/components/status-badge';
 import type { StatusTone } from '@/lib/mock-data';
+import { formatDateTime } from '@/lib/date-time';
 
 export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const { id } = useParams<{ id: string }>();
@@ -18,31 +19,12 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [details, setDetails] = useState({
-    vessel: '',
-    voyage: '',
-    etd: '',
-    eta: '',
-    mblNo: '',
-    hblNo: '',
-  });
-  const [container, setContainer] = useState({
-    containerNo: '',
-    containerType: '40HQ',
-    sealNo: '',
-    vgmWeight: '',
-  });
-  const [event, setEvent] = useState({
-    eventType: 'CONTAINER_GATED_IN',
-    eventTime: '',
-    locationCode: '',
-    locationName: '',
-    remark: '',
-    customerVisible: true,
-  });
-  const [documentType, setDocumentType] = useState('DRAFT_BL');
-  const [customerVisible, setCustomerVisible] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [notice, setNotice] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [action, setAction] = useState<'depart' | 'arrive' | null>(null);
+  const [occurredAt, setOccurredAt] = useState('');
+  const [remark, setRemark] = useState('');
+  const [details, setDetails] = useState({ vessel: '', voyage: '', etd: '', eta: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,8 +39,6 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
         voyage: payload.voyage ?? '',
         etd: localDateTime(payload.etd),
         eta: localDateTime(payload.eta),
-        mblNo: payload.mblNo ?? '',
-        hblNo: payload.hblNo ?? '',
       });
     } catch (reason) {
       setError((reason as Error).message);
@@ -68,7 +48,17 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   }, [apiFetch, id]);
   useEffect(() => void load(), [load]);
 
-  const jsonAction = async (path: string, body: object, method = 'POST') => {
+  const detailsDirty = useMemo(
+    () =>
+      !!shipment &&
+      (details.vessel !== (shipment.vessel ?? '') ||
+        details.voyage !== (shipment.voyage ?? '') ||
+        details.etd !== localDateTime(shipment.etd) ||
+        details.eta !== localDateTime(shipment.eta)),
+    [details, shipment],
+  );
+
+  const request = async (path: string, body: object, method = 'POST') => {
     setBusy(true);
     setError('');
     try {
@@ -80,61 +70,60 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       const payload = (await response.json()) as { message?: string };
       if (!response.ok) throw new Error(payload.message ?? '操作失败。');
       await load();
+      return true;
     } catch (reason) {
       setError((reason as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
   };
-  const upload = async () => {
-    if (!file) return;
-    setBusy(true);
-    setError('');
-    try {
-      const form = new FormData();
-      form.append('documentType', documentType);
-      form.append('customerVisible', String(customerVisible));
-      form.append('file', file);
-      const response = await apiFetch(`/api/v1/shipments/${id}/documents`, {
-        method: 'POST',
-        body: form,
-      });
-      const payload = (await response.json()) as { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? '文件上传失败。');
-      setFile(null);
-      await load();
-    } catch (reason) {
-      setError((reason as Error).message);
-    } finally {
-      setBusy(false);
-    }
+
+  const beginAction = (value: 'depart' | 'arrive') => {
+    setAction(value);
+    setOccurredAt(localDateTime(new Date().toISOString()));
+    setRemark('');
   };
-  const download = async (document: ShipmentDocument) => {
-    setError('');
-    const response = await apiFetch(`/api/v1/documents/${document.id}/download`);
-    if (!response.ok) {
-      const payload = (await response.json()) as { message?: string };
-      setError(payload.message ?? '文件下载失败。');
+  const confirmAction = async () => {
+    if (!shipment || !action || !occurredAt) return;
+    const actual = new Date(occurredAt);
+    if (
+      action === 'depart' &&
+      shipment.etd &&
+      actual < new Date(shipment.etd) &&
+      !window.confirm('实际开船时间早于计划 ETD，请确认时间是否正确。')
+    )
       return;
-    }
-    const url = URL.createObjectURL(await response.blob());
-    const anchor = window.document.createElement('a');
-    anchor.href = url;
-    anchor.download = document.originalFilename;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    const ok = await request(`/${action}`, { occurredAt: actual.toISOString(), remark });
+    if (ok) setAction(null);
   };
+  const saveDetails = async () => {
+    const ok = await request(
+      '',
+      { ...details, etd: toIso(details.etd), eta: toIso(details.eta) },
+      'PATCH',
+    );
+    if (ok) {
+      setEditing(false);
+      setNotice('航程计划已保存');
+    }
+  };
+
   if (loading) return <LoadingState rows={8} />;
   if (!shipment)
     return <ErrorState description={error || 'Shipment 不存在'} onRetry={() => void load()} />;
-  const nextAction: Record<string, { path: string; label: string } | undefined> = {
-    CREATED: { path: '/book', label: '确认已订舱' },
-    BOOKED: { path: '/depart', label: '确认开船' },
-    DEPARTED: { path: '/transit', label: '标记运输中' },
-    IN_TRANSIT: { path: '/arrive', label: '确认到港' },
-    ARRIVED: { path: '/complete', label: '完成 Shipment' },
-  };
-  const action = nextAction[shipment.status];
+
+  const nextAction =
+    shipment.status === 'PLANNED'
+      ? { key: 'depart' as const, label: '标记已开船' }
+      : shipment.status === 'DEPARTED'
+        ? { key: 'arrive' as const, label: '标记已到港' }
+        : null;
+  const containerSummary = shipment.booking.containerRequests
+    .map((item) => `${item.quantity} × ${item.containerType}`)
+    .join('，');
+  const routeNames = shipment.booking.quote?.sourceRate;
+
   return (
     <div className="space-y-5">
       <Link className="text-sm text-primary hover:underline" href={`/${mode}/shipments`}>
@@ -143,415 +132,121 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       <PageHeader
         eyebrow={shipment.customer.name}
         title={shipment.shipmentNo}
-        description={`Basic Shipment · ${shipment.polCode} → ${shipment.podCode}`}
+        description={routeNames ? `${routeNames.polName} → ${routeNames.podName}` : `${shipment.polCode} → ${shipment.podCode}`}
         actions={
-          mode === 'admin' && action ? (
-            <button
-              className={primary}
-              disabled={busy}
-              onClick={() => void jsonAction(action.path, {})}
-            >
-              {action.label}
-            </button>
-          ) : undefined
+          <StatusBadge tone={shipmentStatusTone(shipment.status)}>
+            {shipmentStatusLabel(shipment.status, mode)}
+          </StatusBadge>
         }
       />
-      {error ? (
-        <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
-          {error}
+      {error ? <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
+      {notice ? <div className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">{notice}</div> : null}
+
+      <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-3">
+        {routeNames ? <Fact label="航线代码" value={`${shipment.polCode} → ${shipment.podCode}`} /> : null}
+        <Fact label="船司 · 船名 / 航次" value={`${shipment.carrierCode ?? '—'} · ${shipment.vessel ?? '待确认'} / ${shipment.voyage ?? '—'}`} />
+        <Fact label="ETD / ETA" value={`${dateTime(shipment.etd)} / ${dateTime(shipment.eta)}`} />
+        <Fact label="箱型与数量" value={containerSummary || '—'} />
+        <div>
+          <div className="text-xs text-muted">来源 Booking</div>
+          <Link className="mt-1 inline-block font-semibold text-primary hover:underline" href={`/${mode}/bookings/${shipment.bookingId}`}>
+            {shipment.booking.bookingNo} →
+          </Link>
         </div>
-      ) : null}
-      <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-4">
-        <Fact label="状态">
-          <StatusBadge tone={shipmentStatusTone(shipment.status)}>
-            {shipmentStatusLabel(shipment.status)}
-          </StatusBadge>
-        </Fact>
-        <Fact label="来源 Booking" value={shipment.booking.bookingNo} />
-        <Fact label="船司" value={shipment.carrierCode ?? '—'} />
-        <Fact label="当前进度" value={customerProgressLabel(shipment.status)} />
       </section>
+
       <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">基础出运信息</h2>
-        {mode === 'admin' ? (
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <Input
-              label="船名"
-              value={details.vessel}
-              onChange={(value) => setDetails({ ...details, vessel: value })}
-            />
-            <Input
-              label="航次"
-              value={details.voyage}
-              onChange={(value) => setDetails({ ...details, voyage: value })}
-            />
-            <Input
-              label="ETD"
-              type="datetime-local"
-              value={details.etd}
-              onChange={(value) => setDetails({ ...details, etd: value })}
-            />
-            <Input
-              label="ETA"
-              type="datetime-local"
-              value={details.eta}
-              onChange={(value) => setDetails({ ...details, eta: value })}
-            />
-            <Input
-              label="MBL（参考）"
-              value={details.mblNo}
-              onChange={(value) => setDetails({ ...details, mblNo: value })}
-            />
-            <Input
-              label="HBL（参考）"
-              value={details.hblNo}
-              onChange={(value) => setDetails({ ...details, hblNo: value })}
-            />
-            <button
-              className={primary}
-              disabled={busy}
-              onClick={() =>
-                void jsonAction(
-                  '',
-                  { ...details, etd: toIso(details.etd), eta: toIso(details.eta) },
-                  'PATCH',
-                )
-              }
-            >
-              保存资料
-            </button>
-          </div>
-        ) : (
-          <div className="mt-4 grid gap-4 sm:grid-cols-4">
-            <Fact
-              label="船名/航次"
-              value={`${shipment.vessel ?? '待确认'} / ${shipment.voyage ?? '—'}`}
-            />
-            <Fact label="ETD/ATD" value={`${dateTime(shipment.etd)} / ${dateTime(shipment.atd)}`} />
-            <Fact label="ETA/ATA" value={`${dateTime(shipment.eta)} / ${dateTime(shipment.ata)}`} />
-            <Fact label="MBL/HBL" value={`${shipment.mblNo ?? '—'} / ${shipment.hblNo ?? '—'}`} />
-          </div>
-        )}
-      </section>
-      {mode === 'admin' ? (
-        <section className="rounded border border-border bg-surface p-5">
-          <h2 className="font-semibold">Containers</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-5">
-            <Input
-              label="柜号（4字母+7数字）"
-              value={container.containerNo}
-              onChange={(value) => setContainer({ ...container, containerNo: value.toUpperCase() })}
-            />
-            <Input
-              label="箱型"
-              value={container.containerType}
-              onChange={(value) =>
-                setContainer({ ...container, containerType: value.toUpperCase() })
-              }
-            />
-            <Input
-              label="封条号"
-              value={container.sealNo}
-              onChange={(value) => setContainer({ ...container, sealNo: value })}
-            />
-            <Input
-              label="VGM (KG)"
-              value={container.vgmWeight}
-              onChange={(value) => setContainer({ ...container, vgmWeight: value })}
-            />
-            <button
-              className={`${primary} self-end`}
-              disabled={busy || !/^[A-Z]{4}\d{7}$/.test(container.containerNo)}
-              onClick={() => void jsonAction('/containers', optional(container))}
-            >
-              新增 Container
-            </button>
-          </div>
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                  <th className={head}>柜号</th>
-                  <th className={head}>箱型</th>
-                  <th className={head}>封条</th>
-                  <th className={head}>VGM</th>
-                  <th className={head}>提柜</th>
-                  <th className={head}>进港</th>
-                  <th className={head}>装船/卸船</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shipment.containers.map((item) => (
-                  <tr className="border-b border-border" key={item.id}>
-                    <td className={cell}>{item.containerNo}</td>
-                    <td className={cell}>{item.containerType}</td>
-                    <td className={cell}>{item.sealNo ?? '—'}</td>
-                    <td className={cell}>{item.vgmWeight ? `${item.vgmWeight} KG` : '—'}</td>
-                    <td className={cell}>{dateTime(item.pickupAt)}</td>
-                    <td className={cell}>{dateTime(item.gateInAt)}</td>
-                    <td className={cell}>
-                      {dateTime(item.loadedAt)} / {dateTime(item.dischargedAt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {shipment.containers.length === 0 ? (
-              <div className="py-6 text-center text-sm text-muted">暂无 Container</div>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-      <section className="rounded border border-border bg-surface p-5">
-        <h2 className="font-semibold">
-          {mode === 'admin' ? '基础进度 Timeline' : 'Shipment 进度'}
-        </h2>
-        {mode === 'admin' ? (
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <Input
-              label="节点类型"
-              value={event.eventType}
-              onChange={(value) => setEvent({ ...event, eventType: value.toUpperCase() })}
-            />
-            <Input
-              label="事件时间"
-              type="datetime-local"
-              value={event.eventTime}
-              onChange={(value) => setEvent({ ...event, eventTime: value })}
-            />
-            <Input
-              label="地点代码"
-              value={event.locationCode}
-              onChange={(value) => setEvent({ ...event, locationCode: value.toUpperCase() })}
-            />
-            <Input
-              label="地点名称"
-              value={event.locationName}
-              onChange={(value) => setEvent({ ...event, locationName: value })}
-            />
-            <Input
-              label="备注"
-              value={event.remark}
-              onChange={(value) => setEvent({ ...event, remark: value })}
-            />
-            <label className="flex items-end gap-2 pb-2 text-sm">
-              <input
-                checked={event.customerVisible}
-                onChange={(e) => setEvent({ ...event, customerVisible: e.target.checked })}
-                type="checkbox"
-              />
-              客户可见
-            </label>
-            <button
-              className={primary}
-              disabled={busy || !event.eventTime || !event.eventType}
-              onClick={() =>
-                void jsonAction('/events', {
-                  ...optional(event),
-                  eventTime: toIso(event.eventTime),
-                })
-              }
-            >
-              新增节点
-            </button>
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold">运输进度</h2>
+          {mode === 'admin' && nextAction ? (
+            <button className={primary} disabled={busy} onClick={() => beginAction(nextAction.key)}>{nextAction.label}</button>
+          ) : null}
+        </div>
         <ol className="mt-5 space-y-4 border-l-2 border-border pl-5">
           {basicTimeline(shipment).map((item) => (
             <li className="relative" key={item.key}>
-              <span
-                className={`absolute -left-[27px] top-1 size-3 rounded-full ${item.done ? 'bg-primary' : 'bg-border'}`}
-              />
-              <div className="font-semibold">{item.label}</div>
+              <span className={`absolute -left-[27px] top-1 size-3 rounded-full ${item.done ? 'bg-primary' : 'bg-border'}`} />
+              <div className="font-semibold">{item.done ? '✓ ' : '○ '}{item.label}</div>
               <div className="text-sm text-muted">{item.time}</div>
             </li>
           ))}
-          {mode === 'admin'
-            ? shipment.trackingEvents.map((item) => (
-                <li className="relative" key={item.id}>
-                  <span className="absolute -left-[27px] top-1 size-3 rounded-full bg-primary" />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold">{item.eventType}</span>
-                    {!item.customerVisible ? (
-                      <span className="rounded bg-sidebar px-2 py-0.5 text-xs text-muted">
-                        内部节点
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="text-sm text-muted">
-                    {dateTime(item.eventTime)} ·{' '}
-                    {item.locationName ?? item.locationCode ?? '地点待确认'}
-                  </div>
-                  {item.remark ? <div className="mt-1 text-sm">{item.remark}</div> : null}
-                </li>
-              ))
-            : null}
         </ol>
       </section>
-      {mode === 'admin' ? (
-        <section className="rounded border border-border bg-surface p-5">
-          <h2 className="font-semibold">参考附件</h2>
-          <div className="mt-4 flex flex-wrap items-end gap-3">
-            <label className="text-sm">
-              类型
-              <select
-                className={`${inputClass} mt-1 block`}
-                value={documentType}
-                onChange={(e) => setDocumentType(e.target.value)}
-              >
-                <option>DRAFT_BL</option>
-                <option>FINAL_BL</option>
-                <option>OTHER</option>
-              </select>
-            </label>
-            <input
-              accept="application/pdf,image/png,image/jpeg"
-              className="text-sm"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              type="file"
-            />
-            <label className="flex gap-2 pb-2 text-sm">
-              <input
-                checked={customerVisible}
-                onChange={(e) => setCustomerVisible(e.target.checked)}
-                type="checkbox"
-              />
-              客户可见
-            </label>
-            <button className={primary} disabled={busy || !file} onClick={() => void upload()}>
-              上传新版本
-            </button>
+
+      <section className="rounded border border-border bg-surface p-5">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold">航程计划</h2>
+          {mode === 'admin' && !editing ? <button className={secondary} onClick={() => { setNotice(''); setEditing(true); }}>编辑航程计划</button> : null}
+        </div>
+        {editing ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <Input label="船名" value={details.vessel} onChange={(value) => setDetails({ ...details, vessel: value })} />
+            <Input label="航次" value={details.voyage} onChange={(value) => setDetails({ ...details, voyage: value })} />
+            <Input label="ETD" type="datetime-local" value={details.etd} onChange={(value) => setDetails({ ...details, etd: value })} />
+            <Input label="ETA" type="datetime-local" value={details.eta} onChange={(value) => setDetails({ ...details, eta: value })} />
+            <div className="flex gap-2 sm:col-span-2">
+              <button className={primary} disabled={busy || !detailsDirty} onClick={() => void saveDetails()}>保存航程计划</button>
+              <button className={secondary} disabled={busy} onClick={() => { setEditing(false); setDetails({ vessel: shipment.vessel ?? '', voyage: shipment.voyage ?? '', etd: localDateTime(shipment.etd), eta: localDateTime(shipment.eta) }); }}>取消</button>
+            </div>
           </div>
-          <div className="mt-4 space-y-2">
-            {shipment.documents.map((item) => (
-              <button
-                className="block text-sm text-primary hover:underline"
-                key={item.id}
-                onClick={() => void download(item)}
-              >
-                {item.documentType} · {item.originalFilename} · V{item.version}
-                {mode === 'admin' ? ` · ${item.customerVisible ? '客户可见' : '内部'}` : ''}
-              </button>
-            ))}
-            {shipment.documents.length === 0 ? (
-              <div className="text-sm text-muted">暂无可用单证</div>
-            ) : null}
+        ) : (
+          <div className="mt-4 grid gap-4 sm:grid-cols-4">
+            <Fact label="船名" value={shipment.vessel ?? '—'} />
+            <Fact label="航次" value={shipment.voyage ?? '—'} />
+            <Fact label="ETD" value={dateTime(shipment.etd)} />
+            <Fact label="ETA" value={dateTime(shipment.eta)} />
+            <Fact label="实际开船" value={dateTime(shipment.atd)} />
+            <Fact label="实际到港" value={dateTime(shipment.ata)} />
           </div>
-        </section>
+        )}
+      </section>
+
+      {action ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div role="dialog" aria-label={action === 'depart' ? '确认已开船' : '确认已到港'} className="w-full max-w-md rounded bg-surface p-5 shadow-xl">
+            <h2 className="font-semibold">{action === 'depart' ? '确认已开船' : '确认已到港'}</h2>
+            <div className="mt-4 space-y-3">
+              <Input label={action === 'depart' ? '实际开船时间 *' : '实际到港时间 *'} type="datetime-local" value={occurredAt} onChange={setOccurredAt} />
+              <Input label="备注（选填）" value={remark} onChange={setRemark} />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button className={secondary} disabled={busy} onClick={() => setAction(null)}>取消</button>
+              <button className={primary} disabled={busy || !occurredAt} onClick={() => void confirmAction()}>{action === 'depart' ? '确认已开船' : '确认已到港'}</button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
 }
 
-function Input({
-  label,
-  value,
-  onChange,
-  type = 'text',
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-}) {
-  return (
-    <label className="text-sm">
-      <span className="mb-1 block font-medium">{label}</span>
-      <input
-        className={inputClass}
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
-  );
+function Input({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+  return <label className="text-sm"><span className="mb-1 block font-medium">{label}</span><input className={inputClass} type={type} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
-function Fact({
-  label,
-  value,
-  children,
-}: {
-  label: string;
-  value?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-xs text-muted">{label}</div>
-      <div className="mt-1 font-semibold">{children ?? value}</div>
-    </div>
-  );
-}
-function optional<T extends Record<string, unknown>>(value: T) {
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [key, item === '' ? undefined : item]),
-  );
+function Fact({ label, value }: { label: string; value: string }) {
+  return <div><div className="text-xs text-muted">{label}</div><div className="mt-1 font-semibold">{value}</div></div>;
 }
 const toIso = (value: string) => (value ? new Date(value).toISOString() : undefined);
-const localDateTime = (value: string | null) =>
-  value ? new Date(value).toISOString().slice(0, 16) : '';
-const dateTime = (value: string | null) =>
-  value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
-const primary =
-  'h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40';
+const localDateTime = (value: string | null) => value ? new Date(value).toISOString().slice(0, 16) : '';
+const dateTime = formatDateTime;
+const primary = 'h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40';
+const secondary = 'h-9 rounded border border-border bg-surface px-4 text-sm font-semibold disabled:opacity-40';
 const inputClass = 'h-9 w-full rounded border border-border bg-surface px-3 text-sm';
-const head = 'px-4 py-3 font-semibold';
-const cell = 'px-4 py-3 align-middle';
 
-function shipmentStatusLabel(status: string) {
-  return (
-    {
-      CREATED: '已创建',
-      BOOKED: '已订舱',
-      DEPARTED: '已开船',
-      IN_TRANSIT: '运输中',
-      ARRIVED: '已到港',
-      COMPLETED: '已完成',
-      CANCELLED: '已取消',
-    }[status] ?? status
-  );
+function shipmentStatusLabel(status: string, mode: 'admin' | 'portal') {
+  return ({ PLANNED: mode === 'portal' ? '待开船' : '待开船', DEPARTED: mode === 'portal' ? '运输中' : '已开船', ARRIVED: '已到港', CANCELLED: '已取消' }[status] ?? status);
 }
-
 function shipmentStatusTone(status: string): StatusTone {
-  if (status === 'COMPLETED') return 'success';
+  if (status === 'ARRIVED') return 'success';
   if (status === 'CANCELLED') return 'danger';
-  if (status === 'ARRIVED') return 'warning';
-  if (status === 'DEPARTED' || status === 'IN_TRANSIT') return 'info';
+  if (status === 'DEPARTED') return 'info';
   return 'neutral';
 }
-
-function customerProgressLabel(status: string) {
-  return (
-    {
-      CREATED: '等待订舱确认',
-      BOOKED: '等待开船',
-      DEPARTED: '已开船',
-      IN_TRANSIT: '运输中',
-      ARRIVED: '已到港',
-      COMPLETED: '已完成',
-      CANCELLED: '已取消',
-    }[status] ?? status
-  );
-}
-
 function basicTimeline(shipment: Shipment) {
-  const order = ['BOOKED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED'];
-  const rank = order.indexOf(shipment.status);
+  const rank = shipment.status === 'ARRIVED' ? 2 : shipment.status === 'DEPARTED' ? 1 : shipment.status === 'CANCELLED' ? -1 : 0;
   return [
-    { key: 'booked', status: 'BOOKED', label: '已订舱', time: dateTime(shipment.createdAt) },
-    { key: 'departed', status: 'DEPARTED', label: '已开船', time: dateTime(shipment.atd) },
-    {
-      key: 'transit',
-      status: 'IN_TRANSIT',
-      label: '运输中',
-      time: shipment.status === 'IN_TRANSIT' ? '进行中' : '—',
-    },
-    { key: 'arrived', status: 'ARRIVED', label: '已到港', time: dateTime(shipment.ata) },
-    {
-      key: 'completed',
-      status: 'COMPLETED',
-      label: '已完成',
-      time: dateTime(shipment.completedAt),
-    },
-  ].map((item) => ({ ...item, done: rank >= order.indexOf(item.status) }));
+    { key: 'booked', label: '已订舱', time: dateTime(shipment.booking.bookedAt), done: rank >= 0 },
+    { key: 'departed', label: '已开船', time: shipment.atd ? dateTime(shipment.atd) : `预计 ${dateTime(shipment.etd)}`, done: rank >= 1 },
+    { key: 'arrived', label: '已到港', time: shipment.ata ? dateTime(shipment.ata) : `预计 ${dateTime(shipment.eta)}`, done: rank >= 2 },
+  ];
 }

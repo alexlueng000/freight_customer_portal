@@ -71,12 +71,9 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
           >
             <option value="">全部状态</option>
             {[
-              'CREATED',
-              'BOOKED',
+              'PLANNED',
               'DEPARTED',
-              'IN_TRANSIT',
               'ARRIVED',
-              'COMPLETED',
               'CANCELLED',
             ].map((value) => (
               <option key={value} value={value}>
@@ -137,7 +134,11 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
                     <td className={cell}>
                       {date(item.etd)} / {date(item.eta)}
                     </td>
-                    <td className={cell}>{item.containers.length}</td>
+                    <td className={cell}>
+                      {item.booking.containerRequests
+                        .map((request) => `${request.quantity} × ${request.containerType}`)
+                        .join('，') || '—'}
+                    </td>
                     <td className={cell}>
                       <StatusBadge tone={shipmentStatusTone(item.status)}>
                         {shipmentStatusLabel(item.status)}
@@ -161,21 +162,17 @@ const cell = 'px-4 py-3 align-middle';
 function shipmentStatusLabel(status: string) {
   return (
     {
-      CREATED: '已创建',
-      BOOKED: '已订舱',
-      DEPARTED: '已开船',
-      IN_TRANSIT: '运输中',
+      PLANNED: '待开船',
+      DEPARTED: '运输中',
       ARRIVED: '已到港',
-      COMPLETED: '已完成',
       CANCELLED: '已取消',
     }[status] ?? status
   );
 }
 
 function shipmentStatusTone(status: string): StatusTone {
-  if (status === 'COMPLETED') return 'success';
+  if (status === 'ARRIVED') return 'success';
   if (status === 'CANCELLED') return 'danger';
-  if (status === 'ARRIVED') return 'warning';
-  if (status === 'DEPARTED' || status === 'IN_TRANSIT') return 'info';
+  if (status === 'DEPARTED') return 'info';
   return 'neutral';
 }

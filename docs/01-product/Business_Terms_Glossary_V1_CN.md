@@ -147,8 +147,8 @@
 | 对象 | 状态流（代码里的枚举值 → 中文） |
 | --- | --- |
 | **Quote** | `DRAFT`(草稿/待销售确认) → `SENT`(已发送) → `VIEWED`(客户已看) → `ACCEPTED`(已接受) / `REJECTED`(已拒绝) / `EXPIRED`(已过期) / `BOOKED`(已转订舱) |
-| **Booking** | `DRAFT`(草稿) → `SUBMITTED`(已提交) → `UNDER_REVIEW`(审核中) → `CONFIRMED`(已确认) → `SO_RELEASED`(SO 已放出)；另有 `REJECTED`(拒绝) / `CANCELLED`(取消) |
-| **Shipment** | `PLANNED`(计划中) → `IN_PROGRESS`(进行中) → `DEPARTED`(已离港) → `ARRIVED`(已到港) → `COMPLETED`(已完成)；可 `CANCELLED`(取消) |
+| **Booking** | `DRAFT`（草稿）→ `SUBMITTED`（待审核）→ `REJECTED`（待客户补充，可重新提交）或 `APPROVED`（待订舱）→ `BOOKING_SUBMITTED`（已提交订舱、待 SO）→ `BOOKED`（已订舱）；另有 `CANCELLED`（已取消） |
+| **Shipment** | `PLANNED`（待开船）→ `DEPARTED`（运输中）→ `ARRIVED`（已到港）；起运前或运输中可受控进入 `CANCELLED`（已取消） |
 | **Invoice** | `DRAFT`(草稿) → `ISSUED`(已发布) → `CUSTOMER_CONFIRMED`(客户已确认) → `PAID`(已收款)；可 `VOID`(作废) |
 | **Document** | `ACTIVE`(当前有效) → `SUPERSEDED`(被新版本替代) |
 

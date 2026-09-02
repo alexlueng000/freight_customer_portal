@@ -235,12 +235,12 @@
 - **建议修正方向**：
   - 前端 Auth Context 应暴露服务端返回的有效 permissions，业务页面按 permission + object status 共同判断操作可见性。
   - Booking 详情只有在用户拥有 `booking.manage` 且状态允许时，才显示审核备注和审核/确认/拒绝/取消按钮。
-  - 只有拥有 `shipment.create` 且 Booking 为 `SO_RELEASED` 时，才显示“创建 Shipment”。
+  - 只有拥有 `shipment.create`、Booking 为 `BOOKED` 且存在已发布 SO 时，才显示“创建 Shipment”。
   - 无管理权限的 Sales 保持只读视图；可显示“由操作人员处理”之类的角色提示，但不能展示禁用或可点击的死按钮。
   - 保留服务端 Guard 和权限负向测试，前端控制只用于正确体验，不能成为安全边界。
   - 统一扫描 Customer、Rate、Quote、Booking、Shipment、Document、Invoice 页面，找出所有仅按状态渲染而未按权限控制的操作。
 - **验收标准**：
-  - Sales 打开 `SUBMITTED` / `UNDER_REVIEW` / `CONFIRMED` Booking 时，不显示审核备注和任何 `booking.manage` 操作。
+  - Sales 打开 `SUBMITTED` / `APPROVED` / `BOOKING_SUBMITTED` / `BOOKED` Booking 时，不显示审核备注和任何 `booking.manage` 操作。
   - Operation 在相同状态下看到符合状态机的操作按钮并能正常执行。
   - 用户即使绕过前端直接调用端点，Sales 仍收到 403，Operation 正常执行。
   - 权限变化或用户停用后重新获取会话，页面操作可见性与服务端有效权限一致。
@@ -285,7 +285,12 @@
   - 历史 `UNDER_REVIEW` 数据仍可读取，并有明确的继续处理或迁移方式。
 - **优先级**：P0
 - **实施时机**：当前测试闭环完成后，与 Booking 表单减负优化一起实施。
-- **状态**：OPEN
+- **修正记录**：
+  - 已删除无业务价值的 `UNDER_REVIEW / CONFIRMED` 主链语义，改为 `SUBMITTED → REJECTED/APPROVED → BOOKING_SUBMITTED → BOOKED`。
+  - Operation 可从待审核直接执行“退回补充”或“审核通过”；审核通过后仍需单独记录提交 Carrier/Agent，收到并登记 SO 后才进入 `BOOKED`。
+  - 状态转换、重复操作、审计与数据库集成测试已经覆盖，并通过 V1.1 Golden Path 回归。
+- **关闭日期**：2026-09-02
+- **状态**：RESOLVED
 
 ## UAT-OPT-012 SO 来源不清且“上传”和“放给客户”被合并
 
@@ -332,7 +337,12 @@
   - 自动化测试覆盖内部上传、客户不可见、放出后可见、旧版本不可见、跨租户拒绝和无发布权限拒绝。
 - **优先级**：P0
 - **实施时机**：当前测试闭环完成后，与 Booking/SO/Shipment 流程优化一起实施。
-- **状态**：OPEN
+- **修正记录**：
+  - 已增加 Carrier/Agent 提交对象、参考号、提交时间和备注；SO 来源由 Booking Execution 自动带入并允许受控修正。
+  - SO 改为结构化登记，附件仅作凭证；内部登记与发布给客户为两个独立动作，未发布时客户不可见。
+  - 已覆盖 SO 版本、客户可见性、跨租户/跨客户拒绝、无权限拒绝以及发布后创建 Basic Shipment 的数据库和浏览器回归。
+- **关闭日期**：2026-09-02
+- **状态**：RESOLVED
 
 ## UAT-DEFECT-003 客户创建后缺少公司信息编辑能力
 

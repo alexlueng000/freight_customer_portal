@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, RoleCode, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
@@ -24,24 +24,16 @@ const select = {
   ata: true,
   mblNo: true,
   hblNo: true,
-  completedAt: true,
   createdAt: true,
-  booking: { select: { bookingNo: true } },
-  customer: { select: { id: true, name: true } },
-  containers: { orderBy: { createdAt: 'asc' as const } },
-  trackingEvents: { orderBy: { eventTime: 'desc' as const } },
-  documents: {
-    where: { status: 'ACTIVE' as const },
-    orderBy: [{ documentType: 'asc' as const }, { version: 'desc' as const }],
+  booking: {
     select: {
-      id: true,
-      documentType: true,
-      originalFilename: true,
-      version: true,
-      customerVisible: true,
-      createdAt: true,
+      bookingNo: true,
+      bookedAt: true,
+      quote: { select: { sourceRate: { select: { polName: true, podName: true } } } },
+      containerRequests: { select: { containerType: true, quantity: true }, orderBy: { sortOrder: 'asc' as const } },
     },
   },
+  customer: { select: { id: true, name: true } },
 } satisfies Prisma.ShipmentSelect;
 
 @Injectable()
@@ -56,7 +48,7 @@ export class ShipmentsService {
     const context = this.requestContext.requireAuthenticated();
     return this.prisma.shipment
       .findMany({ where: this.scope(context), select, orderBy: { createdAt: 'desc' }, take: 100 })
-      .then((rows) => rows.map((row) => this.redact(row, !!context.customerCompanyId)));
+      .then((rows) => rows);
   }
 
   async get(id: string) {
@@ -67,12 +59,17 @@ export class ShipmentsService {
     });
     if (!shipment)
       throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
-    return this.redact(shipment, !!context.customerCompanyId);
+    return shipment;
   }
 
   async update(id: string, dto: UpdateShipmentDto) {
     const context = this.requireInternal();
     const current = await this.findInternal(id, context.tenantId);
+    if (dto.etd && dto.eta && new Date(dto.eta) < new Date(dto.etd))
+      throw new BadRequestException({
+        code: 'ETA_BEFORE_ETD',
+        message: 'ETA cannot be earlier than ETD',
+      });
     const data = {
       ...(dto.vessel !== undefined ? { vessel: dto.vessel.trim() } : {}),
       ...(dto.voyage !== undefined ? { voyage: dto.voyage.trim() } : {}),
@@ -184,14 +181,22 @@ export class ShipmentsService {
       if (!current)
         throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
       this.stateMachine.assertTransition(current.status, to);
-      const now = new Date();
+      if (to !== ShipmentStatus.CANCELLED && !dto.occurredAt)
+        throw new BadRequestException({
+          code: 'SHIPMENT_OCCURRED_AT_REQUIRED',
+          message: 'Actual event time is required',
+        });
+      const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
+      if (to === ShipmentStatus.ARRIVED && current.atd && occurredAt < current.atd)
+        throw new BadRequestException({
+          code: 'ACTUAL_ARRIVAL_BEFORE_DEPARTURE',
+          message: 'Actual arrival time cannot be earlier than actual departure time',
+        });
       const times =
         to === ShipmentStatus.DEPARTED
-          ? { atd: now }
+          ? { atd: occurredAt }
           : to === ShipmentStatus.ARRIVED
-            ? { ata: now }
-            : to === ShipmentStatus.COMPLETED
-              ? { completedAt: now }
+            ? { ata: occurredAt }
               : {};
       const shipment = await tx.shipment.update({
         where: { id },
@@ -203,7 +208,7 @@ export class ShipmentsService {
           tenantId: context.tenantId,
           shipmentId: id,
           eventType: `SHIPMENT_${to}`,
-          eventTime: now,
+          eventTime: occurredAt,
           remark: dto.remark?.trim(),
           sourceType: 'SYSTEM',
           customerVisible: true,
@@ -218,7 +223,7 @@ export class ShipmentsService {
           entityId: id,
           action: 'STATUS_TRANSITION',
           beforeData: { status: current.status },
-          afterData: { status: to, remark: dto.remark },
+          afterData: { status: to, occurredAt, remark: dto.remark },
         },
       });
       return shipment;
@@ -236,20 +241,6 @@ export class ShipmentsService {
     if (context.customerCompanyId)
       throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
     return context;
-  }
-  private redact<
-    T extends {
-      trackingEvents: { customerVisible: boolean }[];
-      documents: { customerVisible: boolean }[];
-    },
-  >(row: T, customer: boolean) {
-    return customer
-      ? {
-          ...row,
-          trackingEvents: row.trackingEvents.filter((e) => e.customerVisible),
-          documents: row.documents.filter((d) => d.customerVisible),
-        }
-      : row;
   }
   private scope(context: {
     tenantId: string;

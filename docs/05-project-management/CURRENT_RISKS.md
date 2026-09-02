@@ -34,7 +34,7 @@
 | DATA-01   | P1     | 生产迁移、备份恢复和回滚演练尚未完成                          | OPEN     | 首次生产发布前         |
 | SCOPE-01  | P2     | 多个业务页面仍为模拟数据，容易被误认为已可交付                | OPEN     | 对应模块完成时         |
 | SCOPE-02  | P1     | V1.0 已实现的 Invoice/BL/复杂 Tracking 可能造成 V1.1 范围漂移 | OPEN     | 外部试点前             |
-| DEV-02    | P2     | Prisma Client 生成被 Windows engine DLL 文件锁阻塞            | OPEN     | 下一次数据库迁移验证前 |
+| DEV-02    | P2     | Prisma Client 生成被 Windows engine DLL 文件锁阻塞            | CLOSED   | 2026-09-02             |
 
 ## 3. 详细风险与关闭标准
 
@@ -158,11 +158,15 @@
 
 ### DEV-02 — Prisma Client 生成被 Windows DLL 文件锁阻塞
 
-- **现状**：`pnpm prisma:validate` 已通过，但 `pnpm prisma:generate` 在 Windows 下更新 `query_engine-windows.dll.node` 时失败，错误为 `EPERM rename ... query_engine-windows.dll.node.tmp* -> query_engine-windows.dll.node`。本机存在多个 Node 进程，疑似 API、Worker、测试或 dev server 持有 Prisma engine DLL。
+- **状态**：CLOSED
+- **现状**：此前 Windows 环境因 Prisma engine DLL 文件锁导致 generate 失败；本次已在可用环境重新生成 Client，并完成迁移和主链回归。
 - **影响**：V1.1 ShipmentStatus enum 虽已通过 TypeScript 与 schema validate，但如果不重新生成 Prisma Client，后续数据库迁移验证、集成测试或运行时可能仍使用旧生成产物。
 - **当前缓解**：API/Web typecheck 和 lint 通过；Shipment 状态机单测通过；schema validate 通过。
 - **建议措施**：关闭正在运行的 API/Worker/Next dev/test 进程后重跑 `pnpm prisma:generate`；随后执行 migration deploy/dev、seed、Shipment/Booking 相关集成测试和 V1.1 Playwright。
 - **关闭标准**：`pnpm prisma:generate`、`pnpm prisma:validate`、V1.1 migration 应用、相关 API 测试和 Playwright 主链路 E2E 全部通过，并记录执行日期。
+- **关闭日期**：2026-09-02
+- **验证证据**：Prisma Client 生成和 schema validate 通过；V1.1 migration deploy 成功；Booking/Shipment 状态机 5/5、Booking/SO 数据库集成 8/8、V1.1 Playwright Golden Path 1/1 通过。
+- **剩余风险**：CI 和 Windows 开发机仍需避免运行中的进程占用 Prisma engine；不再阻塞当前 V1.1 验证。
 
 ### PRICE-01 — RateCharge 客户计价边界（已关闭）
 

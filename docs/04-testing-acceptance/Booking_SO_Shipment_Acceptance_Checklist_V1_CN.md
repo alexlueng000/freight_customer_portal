@@ -3,7 +3,7 @@
 > 文档版本：V1.2
 > 日期：2026-09-02
 > 适用范围：Accepted Quote 转 Booking、Booking 提交/审核/确认、SO 上传下载、Shipment 建档
-> 当前结论：P0-B4 自动化与技术 Gate 通过；待业务 UAT 签署
+> 当前结论：V1.1 正常业务主链已由项目负责人确认走通；自动化与技术 Gate 通过，正式签署栏待补姓名
 
 ## 1. 验收目标
 
@@ -26,7 +26,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 ## 2. 验收前置条件
 
 - Web、API、PostgreSQL、Redis 和 MinIO 均已启动且 readiness 正常。
-- 当前 27 个 Prisma migration 已应用，权限和 DEMO seed 已执行。
+- 当前 29 个 Prisma migration 已应用，权限和 DEMO seed 已执行。
 - 准备 Tenant Admin/Operation、Customer Admin 和另一个租户的测试账号。
 - 准备一份 PDF、PNG 或 JPEG 格式 SO，大小不超过 10 MB。
 - 验收不得通过直接修改数据库跳过状态动作。
@@ -128,7 +128,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 预期结果：
 
-- Shipment 编号符合 `SHPyyyyMM######`，在 V1.1 常规路径中初始状态为 `BOOKED`。
+- Shipment 编号符合 `SHPyyyyMM######`，V1 常规路径初始状态为 `PLANNED / 待开船`。
 - customer、Booking、POL/POD、Carrier 和 ETD 快照正确。
 - V1 常规路径阻止重复创建；数据模型仍保留 Booking 1:N Shipment 的未来能力。
 - Shipment 创建写入 AuditLog，客户可在自己的 Shipment 列表读取。
@@ -140,7 +140,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 ### TECH-UAT-007
 
 - [x] Prisma schema validate/generate 通过。
-- [x] P0-B1–B3 新 migration 在本地 PostgreSQL 成功应用；当前共 27 个 migration。
+- [x] V1.1 最终状态迁移在本地 PostgreSQL 成功应用；当前共 29 个 migration，数据库 schema 为最新。
 - [x] API/Web TypeScript typecheck 通过。
 - [x] API/Web ESLint 通过。
 - [x] 当前全量 API 23 个测试套件、101 项测试通过。
@@ -150,10 +150,13 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 - [x] 隐藏文件与跨租户 Document 下载负向测试通过。
 - [x] P0-B4 Booking、黄金路径、Shipment、Invoice 共 6 个 Playwright 场景实跑通过。
 - [x] 新增 Booking/SO action endpoint 已在 Swagger/OpenAPI JSON 中确认可见。
+- [x] 2026-09-02 复验 V1.1 Golden Path 1/1、Basic Shipment 后台/客户侧冒烟 2/2 通过。
 
 详细执行证据与剩余项见 `P0_B4_REGRESSION_GATE_REPORT_2026-09-02_CN.md`。
 
 ## 8. 验收签署
+
+2026-09-02，项目负责人已在当前任务中确认核心正常闭环人工走通。本表保留姓名栏，供正式归档时补录，不据此虚构签署人。
 
 | 角色       | 姓名 | 结论                         | 日期 | 备注 |
 | ---------- | ---- | ---------------------------- | ---- | ---- |

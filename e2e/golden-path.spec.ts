@@ -9,7 +9,7 @@ const customerEmail = process.env.E2E_CUSTOMER_EMAIL ?? 'customer@demo.freight.l
 const adminPassword = process.env.E2E_ADMIN_PASSWORD;
 const customerPassword = process.env.E2E_CUSTOMER_PASSWORD;
 
-test.describe('Rate to Invoice golden path', () => {
+test.describe('V1.1 Rate to Basic Shipment golden path', () => {
   test.skip(
     !adminPassword || !customerPassword,
     'Set E2E_ADMIN_PASSWORD and E2E_CUSTOMER_PASSWORD',
@@ -190,117 +190,32 @@ test.describe('Rate to Invoice golden path', () => {
       }),
       'create shipment',
     );
-    for (const [containerNo, sealNo] of [
-      [`EAEA${numericSuffix(run, 1)}`, 'SEAL-1'],
-      [`EAEB${numericSuffix(run, 2)}`, 'SEAL-2'],
-    ]) {
-      await apiOk(
-        request.post(`${apiBase}/shipments/${shipment.id}/containers`, {
-          headers: bearer(adminToken),
-          data: { containerNo, containerType: '40HQ', sealNo, vgmWeight: '19000.00' },
-        }),
-        'add container',
-      );
-    }
-    await apiOk(
-      request.post(`${apiBase}/shipments/${shipment.id}/start`, {
-        headers: bearer(adminToken),
-        data: { remark: 'Operations started' },
-      }),
-      'start shipment',
-    );
     await apiOk(
       request.post(`${apiBase}/shipments/${shipment.id}/depart`, {
         headers: bearer(adminToken),
-        data: { remark: 'Vessel departed on schedule' },
+        data: { occurredAt: addDays(now, 7).toISOString(), remark: 'Vessel departed on schedule' },
       }),
       'depart shipment',
     );
-    await apiOk(
-      request.post(`${apiBase}/shipments/${shipment.id}/events`, {
-        headers: bearer(adminToken),
-        data: {
-          eventType: 'VESSEL_DEPARTED',
-          eventTime: new Date().toISOString(),
-          locationCode: 'CNSHA',
-          locationName: 'Shanghai',
-          remark: 'Customer-visible departure milestone',
-          customerVisible: true,
-        },
-      }),
-      'add tracking event',
-    );
-    await apiOk(
-      request.post(`${apiBase}/shipments/${shipment.id}/documents`, {
-        headers: bearer(adminToken),
-        multipart: {
-          documentType: 'FINAL_BL',
-          customerVisible: 'true',
-          file: { name: `BL-${run}.pdf`, mimeType: 'application/pdf', buffer: pdfFixture('BL') },
-        },
-      }),
-      'upload BL',
-    );
-
-    const invoice = await apiJson<{ id: string; invoiceNo: string }>(
-      await request.post(`${apiBase}/admin/invoices`, {
-        headers: bearer(adminToken),
-        data: {
-          shipmentId: shipment.id,
-          currency: 'USD',
-          taxAmount: '25.00',
-          dueDate: dateOnly(addDays(now, 30)),
-          lines: [
-            {
-              chargeCode: 'OCEAN_FREIGHT',
-              description: 'Ocean freight',
-              quantity: '2',
-              unitPrice: '650.00',
-            },
-            { chargeCode: 'DOC', description: 'Documentation', quantity: '1', unitPrice: '75.00' },
-          ],
-        },
-      }),
-      'create invoice',
-    );
-    await apiOk(
-      request.post(`${apiBase}/admin/invoices/${invoice.id}/documents`, {
-        headers: bearer(adminToken),
-        multipart: {
-          file: {
-            name: `INVOICE-${run}.pdf`,
-            mimeType: 'application/pdf',
-            buffer: pdfFixture('INVOICE'),
-          },
-        },
-      }),
-      'upload invoice attachment',
-    );
-    await apiOk(
-      request.post(`${apiBase}/admin/invoices/${invoice.id}/issue`, {
-        headers: bearer(adminToken),
-      }),
-      'issue invoice',
-    );
-    await apiOk(
-      request.post(`${apiBase}/invoices/${invoice.id}/confirm`, { headers: bearer(customerToken) }),
-      'confirm invoice',
-    );
+    const invalidArrival = await request.post(`${apiBase}/shipments/${shipment.id}/arrive`, {
+      headers: bearer(adminToken),
+      data: { occurredAt: addDays(now, 6).toISOString() },
+    });
+    expect(invalidArrival.status()).toBe(400);
+    await expectApiCode(invalidArrival, 'ACTUAL_ARRIVAL_BEFORE_DEPARTURE');
 
     const customerContext = await browser.newContext();
     await browserLogin(customerContext.request, customerEmail, customerPassword!);
     const customerPage = await customerContext.newPage();
     await customerPage.goto(`/portal/shipments/${shipment.id}`);
     await expect(customerPage.getByRole('heading', { name: shipment.shipmentNo })).toBeVisible();
-    await expect(customerPage.getByText('EAEA', { exact: false })).toBeVisible();
-    await expect(customerPage.getByText('EAEB', { exact: false })).toBeVisible();
-    await expect(customerPage.getByText('Customer-visible departure milestone')).toBeVisible();
-    await expect(customerPage.getByText(`BL-${run}.pdf`)).toBeVisible();
-
-    await customerPage.goto(`/portal/billing/${invoice.id}`);
-    await expect(customerPage.getByRole('heading', { name: invoice.invoiceNo })).toBeVisible();
-    await expect(customerPage.getByText('CUSTOMER_CONFIRMED')).toBeVisible();
-    await expect(customerPage.getByText(`INVOICE-${run}.pdf`)).toBeVisible();
+    await expect(customerPage.getByText('Shanghai → Long Beach')).toBeVisible();
+    await expect(customerPage.getByText('CNSHA → USLGB')).toBeVisible();
+    await expect(customerPage.getByText('GOLDEN STAR', { exact: true })).toBeVisible();
+    await expect(customerPage.getByText(`GP${run.slice(-5)}`, { exact: true })).toBeVisible();
+    await expect(customerPage.getByText('运输中', { exact: true }).first()).toBeVisible();
+    await expect(customerPage.getByRole('heading', { name: 'Containers' })).toHaveCount(0);
+    await expect(customerPage.getByRole('heading', { name: '参考附件' })).toHaveCount(0);
     await customerContext.close();
   });
 });
@@ -326,6 +241,11 @@ async function apiJson<T>(response: APIResponse, operation: string): Promise<T> 
   return body;
 }
 
+async function expectApiCode(response: APIResponse, expectedCode: string) {
+  const body = (await response.json()) as { code?: string };
+  expect(body.code).toBe(expectedCode);
+}
+
 async function browserLogin(request: APIRequestContext, email: string, password: string) {
   await apiJson(
     await request.post(`${webBase}/api/v1/auth/login`, {
@@ -338,7 +258,5 @@ async function browserLogin(request: APIRequestContext, email: string, password:
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
 const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
-const numericSuffix = (run: string, offset: number) =>
-  String((Number.parseInt(run.slice(-6), 36) + offset) % 10_000_000).padStart(7, '0');
 const pdfFixture = (label: string) =>
   Buffer.from(`%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n% ${label} golden path\n%%EOF`);

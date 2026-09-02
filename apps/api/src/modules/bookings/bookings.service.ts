@@ -604,7 +604,7 @@ export class BookingsService {
           shipmentNo,
           bookingId: id,
           customerCompanyId: booking.customerCompanyId,
-          status: 'BOOKED',
+          status: 'PLANNED',
           carrierCode: booking.carrierCode,
           vessel: dto.vessel?.trim(),
           voyage: dto.voyage?.trim(),
