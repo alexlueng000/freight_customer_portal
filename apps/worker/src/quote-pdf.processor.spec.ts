@@ -12,6 +12,7 @@ describe('generateQuotePdf', () => {
       validUntil: '2026-09-30T00:00:00.000Z',
       currency: 'USD',
       totalAmount: '1360',
+      customerTerms: 'Subject to space and equipment availability.',
       version: 1,
       customerName: 'Northstar Trading',
       items: [

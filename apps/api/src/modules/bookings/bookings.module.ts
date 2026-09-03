@@ -11,8 +11,10 @@ import { DocumentsService } from './documents.service.js';
 import { ShipmentsController } from './shipments.controller.js';
 import { ShipmentsService } from './shipments.service.js';
 import { ShipmentStateMachine } from './shipment-state-machine.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [
     BookingsController,
     AdminBookingsController,

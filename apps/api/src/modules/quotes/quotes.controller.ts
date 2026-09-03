@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nest
 import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { CreateQuoteDto } from './dto/create-quote.dto.js';
 import { ListQuotesDto } from './dto/list-quotes.dto.js';
+import { RejectQuoteDto } from './dto/reject-quote.dto.js';
 import { QuotesService } from './quotes.service.js';
 import { QuotePdfQueueService } from './quote-pdf-queue.service.js';
 
@@ -54,7 +55,7 @@ export class QuotesController {
   @Post(':id/reject')
   @RequirePermissions('quote.reject')
   @ApiOkResponse({ description: 'Reject a sent or viewed, non-expired customer quote' })
-  reject(@Param('id') id: string) {
-    return this.quotes.reject(id);
+  reject(@Param('id') id: string, @Body() dto: RejectQuoteDto) {
+    return this.quotes.reject(id, dto);
   }
 }

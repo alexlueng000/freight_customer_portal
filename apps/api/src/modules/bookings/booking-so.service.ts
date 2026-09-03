@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { BookingSoRecordStatus, BookingStatus, DocumentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +11,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
 import { DocumentStorageService } from './document-storage.service.js';
 import type { CreateBookingSoRecordDto } from './dto/create-booking-so-record.dto.js';
+import { NotificationEventsService } from '../notifications/notification-events.service.js';
 
 const soSelect = {
   id: true,
@@ -83,6 +85,7 @@ export class BookingSoService {
     private readonly prisma: PrismaService,
     private readonly requestContext: RequestContextService,
     private readonly storage: DocumentStorageService,
+    @Optional() private readonly notificationEvents?: NotificationEventsService,
   ) {}
 
   async listInternal(bookingId: string) {
@@ -154,7 +157,7 @@ export class BookingSoService {
 
   async publish(bookingId: string, soId: string) {
     const context = this.requireInternal();
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const record = await tx.bookingSoRecord.findFirst({
         where: {
           id: soId,
@@ -167,7 +170,8 @@ export class BookingSoService {
           id: true,
           documentId: true,
           version: true,
-          booking: { select: { status: true } },
+          soNumber: true,
+          booking: { select: { status: true, bookingNo: true, customerCompanyId: true } },
         },
       });
       if (!record)
@@ -249,8 +253,30 @@ export class BookingSoService {
           },
         ],
       });
-      return tx.bookingSoRecord.findUniqueOrThrow({ where: { id: soId }, select: soSelect });
+      const publishedRecord = await tx.bookingSoRecord.findUniqueOrThrow({
+        where: { id: soId },
+        select: soSelect,
+      });
+      const emailJobs =
+        (await this.notificationEvents?.createCustomerNotifications(tx, {
+          tenantId: context.tenantId,
+          customerCompanyId: record.booking.customerCompanyId,
+          type: 'SO_PUBLISHED',
+          payload: {
+            title: 'SO 已发布',
+            description: `${record.booking.bookingNo} 的 SO ${record.soNumber} 已可以查看和下载。`,
+            bookingId,
+            bookingNo: record.booking.bookingNo,
+            soRecordId: soId,
+            soNumber: record.soNumber,
+            documentId: record.documentId,
+            href: `/portal/bookings/${bookingId}`,
+          },
+        })) ?? [];
+      return { publishedRecord, emailJobs };
     });
+    await this.notificationEvents?.enqueueEmailNotifications(result.emailJobs);
+    return result.publishedRecord;
   }
 
   private async uploadDraft(
@@ -385,11 +411,12 @@ export class BookingSoService {
 
   private validateFile(file?: Express.Multer.File): asserts file is Express.Multer.File {
     if (!file?.buffer.length)
-      throw new BadRequestException({ code: 'SO_FILE_REQUIRED', message: 'SO file is required' });
+      throw this.fieldError('SO_FILE_REQUIRED', 'SO file is required', {
+        file: ['file is required'],
+      });
     if (!new Set(['application/pdf', 'image/png', 'image/jpeg']).has(file.mimetype))
-      throw new BadRequestException({
-        code: 'SO_FILE_TYPE_INVALID',
-        message: 'SO must be a PDF, PNG, or JPEG file',
+      throw this.fieldError('SO_FILE_TYPE_INVALID', 'SO must be a PDF, PNG, or JPEG file', {
+        file: ['file must be a PDF, PNG, or JPEG file'],
       });
   }
 
@@ -411,5 +438,13 @@ export class BookingSoService {
         message: 'Internal booking access requires an internal account',
       });
     return context;
+  }
+
+  private fieldError(
+    code: string,
+    message: string,
+    fieldErrors: Record<string, string[]>,
+  ): BadRequestException {
+    return new BadRequestException({ code, message, details: { fieldErrors } });
   }
 }

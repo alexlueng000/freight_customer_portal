@@ -1,4 +1,12 @@
-import { CustomerStatus, MarkupType, UserStatus, UserType } from '@prisma/client';
+import {
+  CustomerStatus,
+  MarkupType,
+  Prisma,
+  QuoteStatus,
+  RoleCode,
+  UserStatus,
+  UserType,
+} from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
 import { CustomersService } from './customers.service.js';
@@ -42,6 +50,8 @@ describe('customers database integration', () => {
   afterAll(async () => {
     if (tenantIds.length) {
       await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.quoteItem.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.quote.deleteMany({ where: { tenantId: { in: tenantIds } } });
       await prisma.userRole.deleteMany({ where: { user: { tenantId: { in: tenantIds } } } });
       await prisma.user.deleteMany({ where: { tenantId: { in: tenantIds } } });
       await prisma.customerContact.deleteMany({ where: { tenantId: { in: tenantIds } } });
@@ -122,6 +132,58 @@ describe('customers database integration', () => {
         where: { tenantId: tenantAId, entityId: customerAId, action: 'CUSTOMER_UPDATED' },
       }),
     ).resolves.toBe(3);
+  });
+
+  it('requires a sales role for the owner and assigns unowned draft quotes when binding a customer', async () => {
+    const salesRole = await createRole(tenantAId, RoleCode.SALES);
+    const operationRole = await createRole(tenantAId, RoleCode.OPERATION);
+    const salesUser = await createUser(
+      tenantAId,
+      `sales-${testRunId}@example.test`,
+      UserType.INTERNAL,
+    );
+    const operationUser = await createUser(
+      tenantAId,
+      `operation-${testRunId}@example.test`,
+      UserType.INTERNAL,
+    );
+    await prisma.userRole.createMany({
+      data: [
+        { userId: salesUser.id, roleId: salesRole.id, assignedById: adminAId },
+        { userId: operationUser.id, roleId: operationRole.id, assignedById: adminAId },
+      ],
+    });
+    const quote = await prisma.quote.create({
+      data: {
+        tenantId: tenantAId,
+        quoteNo: `QT-OWNER-${testRunId}`,
+        customerCompanyId: customerAId,
+        status: QuoteStatus.DRAFT,
+        polCode: 'CNSZX',
+        podCode: 'USNYC',
+        validUntil: new Date('2026-09-30T00:00:00.000Z'),
+        currency: 'USD',
+        subtotal: new Prisma.Decimal('100.0000'),
+        totalAmount: new Prisma.Decimal('100.0000'),
+      },
+    });
+
+    await expect(
+      runAs(tenantAId, adminAId, undefined, () =>
+        customers.update(customerAId, { salesOwnerId: operationUser.id }),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_SALES_OWNER' } });
+
+    await runAs(tenantAId, adminAId, undefined, () =>
+      customers.update(customerAId, { salesOwnerId: salesUser.id }),
+    );
+
+    await expect(
+      prisma.quote.findUniqueOrThrow({
+        where: { id: quote.id },
+        select: { salesOwnerId: true },
+      }),
+    ).resolves.toMatchObject({ salesOwnerId: salesUser.id });
   });
 
   it('limits a customer user to its bound company inside the tenant', async () => {
@@ -221,5 +283,13 @@ function createUser(
       userType,
       status: UserStatus.ACTIVE,
     },
+  });
+}
+
+function createRole(tenantId: string, code: RoleCode) {
+  return prisma.role.upsert({
+    where: { tenantId_code: { tenantId, code } },
+    create: { tenantId, code, name: code },
+    update: {},
   });
 }

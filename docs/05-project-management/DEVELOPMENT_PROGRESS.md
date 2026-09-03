@@ -262,7 +262,10 @@
 - 已增加 Notification 与 User 的数据库租户一致性触发器，防止跨租户收件人绑定。
 - 已实现当前用户站内通知列表与已读接口：`GET /api/v1/notifications`、`POST /api/v1/notifications/:id/read`。
 - Invoice 发布会在同一数据库事务中为目标客户的 ACTIVE 用户创建站内与邮件通知；邮件任务按 Notification ID 幂等入 BullMQ，配置 3 次指数退避。
+- SO Published、Shipment Created、Shipment Departed、Shipment Arrived 和 Booking Needs Update 已接入客户站内通知、邮件 Notification message log 与可点击 Deep Link。
+- 顶部通知菜单已从静态示例切换为真实通知 API，支持未读角标、加载/空状态、点击标记已读并跳转业务对象。
 - Worker 会在发送前重新校验 tenant + notification ID，记录尝试次数、成功或失败状态；本地开发提供显式 `EMAIL_DELIVERY_MODE=log`。
+- Worker 邮件发送支持通用通知 payload 中的标题和正文，Invoice 发布通知保留兼容兜底文案。
 - Invoice 数据库集成测试已验证发布 Invoice 后生成一条站内和一条邮件通知。
 
 ### 2.22 Invoice 附件闭环
@@ -290,13 +293,38 @@
 - 客户详情页已增加“开通客户账号”入口；用户管理页支持按客户公司筛选，并可预绑定客户公司创建客户用户。
 - 客户详情页已增加公司编辑抽屉，覆盖基本资料、信用账期、基础加价和状态；可选字段支持清空，切换至“无加价”会清除旧加价值。
 - 统一 API 校验响应已增加 `details.fieldErrors`，客户编辑表单会映射为中文字段级提示。
+- Rate 手工新建/编辑表单已接入服务端字段级错误：重复运价编号、有效期顺序、重复箱型和附加费箱型错误会定位到对应输入项，并显示中文提交提示。
+- Booking/SO 表单已接入字段级错误：客户 Booking 保存/提交会保留服务端字段定位，后台 SO 登记会对 SO No.、来源、船名航次、ETD 和文件错误进行控件级提示。
 - 浏览器回归已覆盖管理员编辑与清空、字段提示、客户账号入口预绑定，以及 Operation 无客户管理按钮；回归中修复了异步加载客户选项后预选丢失的问题。
 - API / Web TypeScript 与 ESLint 已通过；Auth、Customer 数据库集成测试通过，共 2 个测试套件、9 个测试。
-- 字段级错误能力仍需逐步接入其他高频业务表单。
+- 字段级错误能力仍需逐步接入 Quote 等其他高频业务表单。
+
+### 2.25 P1 通知与 Dashboard 当前批次
+
+- 新增 `DashboardModule`，提供 `GET /api/v1/dashboard/admin` 与 `GET /api/v1/dashboard/portal` 聚合接口。
+- 后台 Dashboard 已从模拟数据切换为服务端聚合数据，显示待审核 Booking、待登记 SO、运输中 Shipment 和未读通知，并提供业务对象 Deep Link。
+- 客户 Dashboard 已从模拟数据切换为服务端聚合数据，显示待处理 Quote、待补资料/草稿 Booking、进行中 Shipment、待确认账单和未读通知。
+- 客户 Dashboard Quote 待办覆盖 `SENT/VIEWED` 待确认报价，以及 `ACCEPTED` 且尚未创建 Booking 的待转订舱报价；对应列表筛选统一为 `status=pending`，避免报价被查看后从待办列表消失。
+- Dashboard 查询继续按 tenant、customerCompany 和 Sales owner 范围过滤，不依赖前端过滤实现数据隔离。
+- 已新增 Dashboard 数据库集成测试，覆盖租户范围、客户范围、Quote 待办、统计值和未读通知。
+- 顶部栏已移除硬编码“今日待处理 6 项”，避免演示数据与真实 Dashboard 聚合不一致。
+
+### 2.26 P1 表单可读性与待办一致性体验
+
+- 已新增共享 `RequiredMark`、`FieldLabel`、`RequiredLegend` 组件，将页面内零散的红色 `*` 统一为醒目的“* 必填”徽标。
+- 运价、报价改价、客户、联系人、用户、客户 Booking、后台 SO 登记等主要表单入口已接入统一必填标识。
+- 客户 Quote 列表的待办筛选已统一识别 `SENT / VIEWED / ACCEPTED`，其中 `ACCEPTED` Quote 会继续显示“创建订舱”动作。
+- 客户首页待办空状态文案已补充待确认 Quote 和待创建订舱 Quote，减少“列表有动作但首页无待办”的理解断层。
 
 ## 3. 已完成验证
 
 > 2026-09-03 本轮 P1 验证：API / Web TypeScript 与 ESLint 通过；Auth、Customer 数据库集成测试通过，共 2 个测试套件、9 个测试。浏览器回归覆盖管理员客户编辑、中文字段提示、保存与清空、加价切换、客户账号入口预绑定，以及 Operation 权限负向场景，均已通过。
+
+> 2026-09-03 通知与 Dashboard 批次验证：API / Web / Worker TypeScript 与 ESLint 通过；Booking/SO 数据库集成测试 4 suites、15 tests 通过；Dashboard 数据库集成测试 1 suite、4 tests 通过；Worker 邮件通知测试 1 suite、2 tests 通过；`git diff --check` 通过。
+
+> 2026-09-03 客户首页 Quote 待办与表单标识验证：`pnpm --filter api test -- dashboard.service.spec.ts` 通过，1 suite、4 tests；`pnpm --filter api typecheck`、`pnpm --filter web typecheck`、`pnpm --filter api lint`、`pnpm --filter web lint` 均通过。
+
+> 2026-09-03 V1.1 手工闭环复验：真实演示单 `BOOK202609000007 → SHP202609000001` 已完成 SO 发布、Basic Shipment 创建、开船和到港。复验中修正创建 Basic Shipment 缺少二次确认、Shipment 状态动作使用浏览器原生确认框两个体验问题。V1.1 主链路进入收口状态，下一阶段重点转向用户体验、通知和操作型 Dashboard。
 
 > 2026-08-31 复核说明：当天 `pnpm lint` 与 `pnpm typecheck` 通过。完整 `pnpm test` 因本地 PostgreSQL `localhost:5433` 未运行而在数据库初始化阶段中止；下列 API/Worker/E2E 通过数量是 2026-08-30 及此前已保存的验证基线，不代表 2026-08-31 已重新全量通过。详见 [2026-08-31 代码与测试审阅报告](./TEST_REPORT_2026-08-31_CN.md)。
 
@@ -324,14 +352,14 @@
 
 ## 4. 当前未完成事项与风险
 
-- Dashboard、通用 Documents 等页面仍有模拟数据或占位内容；Rate、Quote、Booking、SO、Shipment 和 Invoice/Billing 已接入真实 API。
+- 通用 Documents 等页面仍有模拟数据或占位内容；Rate、Quote、Booking、SO、Shipment、Invoice/Billing 和 Dashboard 已接入真实 API。Dashboard 当前为第一版服务端聚合，后续需继续做角色化细分、浏览器回归和更完整的异常/空状态打磨。
 - 通用 permission decorator / guard 已实现，但完整权限矩阵和其他业务模块的敏感操作权限仍需逐模块落地。
 - 前端仍缺少组件测试；Playwright 已覆盖 Shipment、Invoice 冒烟及完整核心黄金路径。
 - 忘记密码和重置密码尚未实现。
 - 登录失败审计、账号锁定策略、CSP 和更完整的 Security Headers 尚未完成。
 - `RateCharge` V1 规则已确认并实现；仍需在 Rate UAT 中用真实费用样本复核。
 - Quote 发送邮件通知按批准路线图属于 M5 Notifications，本阶段不提前建立完整通知域。
-- Notification 已接通 Invoice 发布事件与本地 log transport；真实 SMTP/邮件服务商、通知中心 UI、Quote/Booking/Shipment 事件仍未完成。
+- Notification 已接通 Invoice、SO、Booking 补资料和 Basic Shipment 关键事件与本地 log transport；真实 SMTP/邮件服务商、完整通知中心和 Quote Ready 通知仍未完成。客户 Dashboard 已通过聚合接口展示待处理 Quote，但尚未发送 Quote Ready 通知。
 - 历史 V1.0 中 Invoice 附件、越权拒绝安全日志及完整黄金路径 Playwright 已完成；V1.1 正常业务主链已验收并通过提交 `d94460a` 与标签 `v1.1.0-baseline` 封板。
 - 仓库 `build` 脚本已使用 `.next-build` 隔离生产构建；自定义 Next.js 构建命令仍应显式设置独立 `NEXT_DIST_DIR`。
 - Shipment 后端、前端和冒烟 E2E 已按 V1.1 Basic Shipment 口径更新；Prisma Client、数据库迁移和 Playwright 基线回归均已完成。
@@ -339,9 +367,9 @@
 
 ## 5. 下一步开发计划
 
-V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线已完成业务验收并封板。当前优先完成 P1 权限、客户维护与表单错误体验，再进入 Email/Deep Link、Dashboard 待办、Notifications 与 Branding；Invoice、完整 BL、复杂 Tracking 进入 Backlog。
+V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线已完成业务验收并封板。2026-09-03 已用真实演示单 `BOOK202609000007 → SHP202609000001` 复验到 Basic Shipment 到港。当前优先级从功能闭环转向试点用户体验、通知和操作型 Dashboard；Invoice、完整 BL、复杂 Tracking 进入 Backlog。
 
-2026-09-03 收口说明：核心闭环与第一批 P1 优化已完成并提交；2026-09-04 从人工探索性测试、剩余字段错误接入和试点加固继续，不扩大 V1.1 P0 范围。
+2026-09-03 收口说明：核心闭环与第一批 P1 优化已完成；同日已开始第二批字段级错误优化并完成 Rate 手工表单及 Booking/SO 表单接入。2026-09-04 起重点做人工探索性测试、关键动作体验打磨、通知与 Dashboard，不扩大 V1.1 P0 范围。
 
 ### 5.1 Rate 业务 UAT
 
@@ -372,6 +400,8 @@ V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线�
 - [x] Shipment 状态机已按最新 V1 收敛要求更新为 PLANNED/DEPARTED/ARRIVED/CANCELLED。
 - [x] 覆盖隐藏文件、跨租户文件访问和 Shipment 租户一致性测试。
 - [x] V1.1 正常业务主链已由项目负责人确认走通；正式归档时补录验收签署人姓名。
+- [x] 真实演示单 `BOOK202609000007 → SHP202609000001` 已复验到已到港状态，确认客户可见 Basic Shipment 闭环成立。
+- [x] 创建 Basic Shipment 和 Shipment 状态动作已统一为站内确认体验，不再依赖浏览器原生确认框。
 
 ### 5.5 自动化验收
 
@@ -394,11 +424,22 @@ V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线�
 - [x] 建立 Notification 持久化、租户约束、站内列表/已读 API 和 BullMQ 邮件任务基线。
 - [x] Invoice 发布事件生成站内与邮件 Notification message log。
 - [ ] 接入批准的生产邮件传输并验证重试、失败恢复和投递日志。
-- [ ] 接入 Quote、Booking 与 Shipment 的批准通知事件。
-- [ ] 完成通知中心前端与未读状态。
+- [x] 优先接入 SO Published、Shipment Created、Shipment Departed 和 Shipment Arrived 的客户通知及 Deep Link。
+- [x] 接入 Booking Needs Update 业务协同通知事件。
+- [x] 完成顶部通知入口、未读状态和点击已读；完整通知中心页面待后续补充。
+- [ ] 接入 Quote Ready 通知事件。
 - [ ] 完成租户品牌名、Logo、主色和自定义域名配置。
 
-### 5.8 第一批 P1：权限与客户维护
+### 5.8 操作型 Dashboard 与体验打磨
+
+- [x] 将后台 Dashboard 接入真实 API，显示待审核 Booking、待登记 SO、运输中 Shipment 和未读通知。
+- [x] 将客户 Dashboard 接入真实 API，显示待处理 Quote、待补资料 Booking、进行中 Shipment、待确认账单和未读通知。
+- [x] 修复客户 Quote 待办状态口径：`SENT/VIEWED` 待确认、`ACCEPTED` 待创建 Booking 均进入首页待办与 `status=pending` 列表。
+- [x] 为通知和 Dashboard 条目提供可直达业务对象的 Deep Link。
+- [ ] 补充 Dashboard 角色化细分、即将 ETD 和浏览器回归。
+- [ ] 持续清理关键动作二次确认、成功反馈、空状态、中文文案和字段级错误提示。
+
+### 5.9 第一批 P1：权限与客户维护
 
 - [x] 登录态返回数据库有效权限集合。
 - [x] 关键业务操作入口从角色硬编码升级为“权限 + 业务状态”控制。
@@ -406,7 +447,10 @@ V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线�
 - [x] 增加客户账号开通入口及客户公司预绑定。
 - [x] 完成客户公司编辑 UI。
 - [x] 建立统一字段级 API 错误响应，并接入客户编辑表单中文提示。
-- [ ] 将统一字段级错误提示继续接入其他高频业务表单。
+- [x] 将统一字段级错误提示接入 Rate 手工新建/编辑表单。
+- [x] 将统一字段级错误提示接入 Booking/SO 表单。
+- [x] 统一主要表单必填项的醒目标识，替换零散红色星号。
+- [ ] 将统一字段级错误提示继续接入 Quote 等其他高频业务表单。
 - [x] 完成上述 P1 改动的浏览器回归。
 
 ## 6. 后续里程碑

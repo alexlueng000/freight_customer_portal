@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   BookingReviewActionType,
@@ -24,6 +25,7 @@ import type { CreateCustomerShipperDto } from './dto/create-customer-shipper.dto
 import type { UpdateCustomerShipperDto } from './dto/update-customer-shipper.dto.js';
 import type { RequestBookingRevisionDto } from './dto/request-booking-revision.dto.js';
 import type { SubmitBookingToCarrierDto } from './dto/submit-booking-to-carrier.dto.js';
+import { NotificationEventsService } from '../notifications/notification-events.service.js';
 
 const bookingSelect = {
   id: true,
@@ -146,6 +148,7 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly requestContext: RequestContextService,
     private readonly stateMachine: BookingStateMachine,
+    @Optional() private readonly notificationEvents?: NotificationEventsService,
   ) {}
 
   async create(dto: CreateBookingDto) {
@@ -468,20 +471,21 @@ export class BookingsService {
           })
         : null;
       if (dto.sourceShipperId && !shipper)
-        throw new BadRequestException({
-          code: 'SHIPPER_NOT_IN_CUSTOMER_SCOPE',
-          message: 'The selected shipper is outside the current customer scope',
-        });
+        throw this.fieldError(
+          'SHIPPER_NOT_IN_CUSTOMER_SCOPE',
+          'The selected shipper is outside the current customer scope',
+          { sourceShipperId: ['sourceShipperId must belong to the current customer company'] },
+        );
       if (dto.grossWeight && new Prisma.Decimal(dto.grossWeight).lte(0))
-        throw new BadRequestException({
-          code: 'BOOKING_GROSS_WEIGHT_INVALID',
-          message: 'Gross weight must be greater than 0',
+        throw this.fieldError('BOOKING_GROSS_WEIGHT_INVALID', 'Gross weight must be greater than 0', {
+          grossWeight: ['grossWeight must be greater than 0'],
         });
       if (dto.volumeCbm && new Prisma.Decimal(dto.volumeCbm).lte(0))
-        throw new BadRequestException({
-          code: 'BOOKING_VOLUME_CBM_INVALID',
-          message: 'Volume CBM must be greater than 0 when provided',
-        });
+        throw this.fieldError(
+          'BOOKING_VOLUME_CBM_INVALID',
+          'Volume CBM must be greater than 0 when provided',
+          { volumeCbm: ['volumeCbm must be greater than 0 when provided'] },
+        );
       const updated = await tx.booking.update({
         where: { id },
         data: {
@@ -549,14 +553,14 @@ export class BookingsService {
       throw new BadRequestException({
         code: 'BOOKING_INCOMPLETE',
         message: 'Complete required booking fields before submitting',
-        details: { missing },
+        details: { missing, fieldErrors: this.missingBookingFieldErrors(missing) },
       });
     return this.transition(id, BookingStatus.SUBMITTED, {}, false);
   }
 
   async createShipment(id: string, dto: CreateShipmentDto) {
     const context = this.requireInternal();
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findFirst({
         where: {
           id,
@@ -566,6 +570,7 @@ export class BookingsService {
         },
         select: {
           id: true,
+          bookingNo: true,
           customerCompanyId: true,
           carrierCode: true,
           polCode: true,
@@ -626,8 +631,28 @@ export class BookingsService {
           afterData: { shipmentNo, bookingId: id, status: shipment.status },
         },
       });
-      return shipment;
+      const emailJobs =
+        (await this.notificationEvents?.createCustomerNotifications(tx, {
+          tenantId: context.tenantId,
+          customerCompanyId: booking.customerCompanyId,
+          type: 'SHIPMENT_CREATED',
+          payload: {
+            title: 'Shipment 已创建',
+            description: `${shipment.shipmentNo} 已由 Booking ${booking.bookingNo} 创建。`,
+            bookingId: id,
+            bookingNo: booking.bookingNo,
+            shipmentId: shipment.id,
+            shipmentNo: shipment.shipmentNo,
+            polCode: shipment.polCode,
+            podCode: shipment.podCode,
+            carrierCode: shipment.carrierCode,
+            href: `/portal/shipments/${shipment.id}`,
+          },
+        })) ?? [];
+      return { shipment, emailJobs };
     });
+    await this.notificationEvents?.enqueueEmailNotifications(result.emailJobs);
+    return result.shipment;
   }
 
   cancel(id: string, dto: BookingActionDto) {
@@ -650,6 +675,7 @@ export class BookingsService {
       BookingStatus.REVISION_REQUIRED,
       BookingReviewActionType.REQUEST_REVISION,
       dto,
+      { notifyCustomer: true },
     );
   }
   submitToCarrier(id: string, dto: SubmitBookingToCarrierDto) {
@@ -666,9 +692,8 @@ export class BookingsService {
   }
   reject(id: string, dto: BookingActionDto) {
     if (!dto.remark)
-      throw new BadRequestException({
-        code: 'BOOKING_REJECTION_REASON_REQUIRED',
-        message: 'A rejection reason is required',
+      throw this.fieldError('BOOKING_REJECTION_REASON_REQUIRED', 'A rejection reason is required', {
+        remark: ['remark is required when rejecting a booking'],
       });
     return this.internalTransition(id, BookingStatus.REJECTED, BookingReviewActionType.REJECT, {
       customerVisibleRemark: dto.remark,
@@ -747,13 +772,13 @@ export class BookingsService {
       carrierSourceName?: string;
       carrierReference?: string;
     },
-    options: { validateReview?: boolean } = {},
+    options: { validateReview?: boolean; notifyCustomer?: boolean } = {},
   ) {
     const context = this.requireInternal();
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findFirst({
         where: { id, ...this.internalWhere(context) },
-        select: bookingSelect,
+        select: { ...bookingSelect, customerCompanyId: true },
       });
       if (!booking)
         throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
@@ -816,8 +841,29 @@ export class BookingsService {
           afterData: { status: target, reviewActionId: reviewAction.id },
         },
       });
-      return tx.booking.findUniqueOrThrow({ where: { id }, select: bookingSelect });
+      const updated = await tx.booking.findUniqueOrThrow({ where: { id }, select: bookingSelect });
+      const emailJobs =
+        options.notifyCustomer && target === BookingStatus.REVISION_REQUIRED
+          ? ((await this.notificationEvents?.createCustomerNotifications(tx, {
+              tenantId: context.tenantId,
+              customerCompanyId: booking.customerCompanyId,
+              type: 'BOOKING_NEEDS_UPDATE',
+              payload: {
+                title: 'Booking 资料需要补充',
+                description:
+                  details.customerVisibleRemark?.trim() ||
+                  `${booking.bookingNo} 需要补充资料后再继续订舱。`,
+                bookingId: booking.id,
+                bookingNo: booking.bookingNo,
+                reasonCode: details.reasonCode ?? null,
+                href: `/portal/bookings/${booking.id}`,
+              },
+            })) ?? [])
+          : [];
+      return { booking: updated, emailJobs };
     });
+    await this.notificationEvents?.enqueueEmailNotifications(result.emailJobs);
+    return result.booking;
   }
 
   private async listScoped(query: ListBookingsDto, internal: boolean) {
@@ -1046,6 +1092,23 @@ export class BookingsService {
       hasContactEmail: Boolean(value.contactEmail),
       hasContactPhone: Boolean(value.contactPhone),
     };
+  }
+
+  private fieldError(
+    code: string,
+    message: string,
+    fieldErrors: Record<string, string[]>,
+  ): BadRequestException {
+    return new BadRequestException({ code, message, details: { fieldErrors } });
+  }
+
+  private missingBookingFieldErrors(missing: string[]): Record<string, string[]> {
+    const mapped: Record<string, string[]> = {};
+    for (const field of missing) {
+      const target = field === 'bookingContactEmailOrPhone' ? 'bookingContact' : field;
+      mapped[target] = [`${target} is required before submitting`];
+    }
+    return mapped;
   }
 }
 

@@ -44,6 +44,7 @@ const rolePermissions = {
     'customer.read',
     'customer.manage',
     'customer_user.read',
+    'rate.read',
     'quote.read',
     'quote.manage',
     'booking.read',

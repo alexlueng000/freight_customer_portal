@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MarkupType, Prisma, UserType } from '@prisma/client';
+import { MarkupType, Prisma, QuoteStatus, RoleCode, UserType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
 import type { CreateCustomerDto } from './dto/create-customer.dto.js';
@@ -218,6 +218,20 @@ export class CustomersService {
         data,
         select: customerSelect,
       });
+      if (dto.salesOwnerId && dto.salesOwnerId !== existing.salesOwnerId) {
+        await tx.quote.updateMany({
+          where: {
+            tenantId: context.tenantId,
+            customerCompanyId: id,
+            salesOwnerId: null,
+            status: QuoteStatus.DRAFT,
+          },
+          data: {
+            salesOwnerId: dto.salesOwnerId,
+            updatedById: context.userId,
+          },
+        });
+      }
       await tx.auditLog.create({
         data: {
           tenantId: context.tenantId,
@@ -328,13 +342,18 @@ export class CustomersService {
   ): Promise<void> {
     if (!salesOwnerId) return;
     const owner = await this.prisma.user.findFirst({
-      where: { id: salesOwnerId, tenantId, userType: UserType.INTERNAL },
+      where: {
+        id: salesOwnerId,
+        tenantId,
+        userType: UserType.INTERNAL,
+        userRoles: { some: { role: { code: RoleCode.SALES } } },
+      },
       select: { id: true },
     });
     if (!owner) {
       throw new BadRequestException({
         code: 'INVALID_SALES_OWNER',
-        message: 'Sales owner must be an internal user in the current tenant',
+        message: 'Sales owner must be a sales user in the current tenant',
       });
     }
   }

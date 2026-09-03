@@ -19,6 +19,7 @@ export interface QuotePdfJobData {
     validUntil: string;
     currency: string;
     totalAmount: string;
+    customerTerms: string | null;
     version: number;
     customerName: string;
     items: Array<{
@@ -122,6 +123,23 @@ export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffe
         width: 127,
         align: 'right',
       });
+    if (quote.customerTerms?.trim()) {
+      y += 78;
+      if (y > 690) {
+        pdf.addPage();
+        y = 60;
+      }
+      pdf
+        .fillColor('#17212B')
+        .font('Helvetica-Bold')
+        .fontSize(10)
+        .text('TERMS', 48, y);
+      pdf
+        .fillColor('#5B6570')
+        .font('Helvetica')
+        .fontSize(8.5)
+        .text(quote.customerTerms.trim(), 48, y + 18, { width: 499, lineGap: 3 });
+    }
     pdf
       .fillColor('#5B6570')
       .font('Helvetica')

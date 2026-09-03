@@ -87,8 +87,12 @@ describe('quote database integration', () => {
           podCode: 'USLAX',
           podName: 'Los Angeles',
           carrierCode: 'COSCO',
+          serviceName: 'Pacific Express',
           effectiveDate: day(-1),
           expiryDate: day(30),
+          transitDays: 18,
+          supplierName: 'Demo Supplier',
+          contractNo: 'SC-2026',
           currency: 'USD',
           status: RateStatus.ACTIVE,
           prices: {
@@ -176,11 +180,19 @@ describe('quote database integration', () => {
     });
     const detail = await runAs(tenantA, userA, customerA, () => service.get(created.id));
     expect(detail.items.map((item) => item.quantity.toString())).toEqual(['2', '1', '2']);
+    expect(detail.items.map((item) => item.chargeBasis)).toEqual([
+      'PER_CONTAINER',
+      'PER_BL',
+      'PER_CONTAINER',
+    ]);
     expect(detail.items.map((item) => item.amount.toString())).toEqual(['2600', '20', '80']);
     expect(detail.totalAmount.toString()).toBe('2700');
     expect(JSON.stringify(detail)).not.toContain('costAmount');
+    expect(JSON.stringify(detail)).not.toContain('supplierName');
+    expect(JSON.stringify(detail)).not.toContain('contractNo');
     const stored = await prisma.quoteItem.findFirstOrThrow({ where: { quoteId: created.id } });
     expect(stored.costAmount?.toString()).toBe('1000');
+    expect(stored.chargeBasis).toBe('PER_CONTAINER');
   });
   it('blocks cross-customer and cross-tenant quote access', async () => {
     const own = await runAs(tenantA, userA, customerA, () =>
@@ -195,8 +207,51 @@ describe('quote database integration', () => {
         service.create({ rateId: rateA, containerType: '40HQ', quantity: 1 }),
       ),
     ).rejects.toMatchObject({ response: { code: 'RATE_NOT_AVAILABLE' } });
+    try {
+      await runAs(tenantA, userA, customerA, () =>
+        service.create({ rateId: rateA, containerType: '20GP', quantity: 1 }),
+      );
+      throw new Error('Expected rate price validation to fail');
+    } catch (caught) {
+      const response = errorResponse(caught);
+      expect(response.code).toBe('RATE_PRICE_NOT_AVAILABLE');
+      expect(response.details?.fieldErrors?.containerType).toHaveLength(1);
+    }
+  });
+  it('lets sales edit review terms and validity without exposing internal notes', async () => {
+    await expect(
+      runInternal(() =>
+        service.updateReview(quoteId, {
+          validUntil: day(31).toISOString().slice(0, 10),
+        }),
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'QUOTE_VALID_UNTIL_EXCEEDS_RATE' },
+    });
+
+    const updated = await runInternal(() =>
+      service.updateReview(quoteId, {
+        validUntil: day(10).toISOString().slice(0, 10),
+        customerTerms: 'Subject to space and equipment availability.',
+        internalNote: 'Matched competitor lane offer.',
+      }),
+    );
+    expect(updated.validUntil.toISOString().slice(0, 10)).toBe(day(10).toISOString().slice(0, 10));
+    expect(updated.customerTerms).toBe('Subject to space and equipment availability.');
+    expect(updated.internalNote).toBe('Matched competitor lane offer.');
+
+    const customerDetail = await runAs(tenantA, userA, customerA, () => service.get(quoteId));
+    expect(customerDetail.customerTerms).toBe('Subject to space and equipment availability.');
+    expect(JSON.stringify(customerDetail)).not.toContain('internalNote');
+    expect(JSON.stringify(customerDetail)).not.toContain('Matched competitor lane offer');
   });
   it('allows an internal user to override draft prices with an audit trail', async () => {
+    const internalDetail = await runInternal(() => service.getInternal(quoteId));
+    expect(internalDetail.sourceRate).toMatchObject({
+      rateNo: `RATE-${runId}`,
+      supplierName: 'Demo Supplier',
+      contractNo: 'SC-2026',
+    });
     const item = await prisma.quoteItem.findFirstOrThrow({
       where: { quoteId, chargeCode: 'OCEAN_FREIGHT' },
     });
@@ -221,6 +276,22 @@ describe('quote database integration', () => {
   });
   it('enforces send, viewed and accept transitions with idempotent acceptance', async () => {
     await runInternal(() => service.send(quoteId));
+    const sentQuote = await runInternal(() => service.getInternal(quoteId));
+    expect(sentQuote.sentAt).toBeDefined();
+    expect(sentQuote.sentBy).toMatchObject({ id: internalUser });
+    try {
+      await runInternal(() =>
+        service.overridePrices(quoteId, {
+          reason: 'Too late',
+          items: [{ itemId: 'missing-item', unitPrice: '1' }],
+        }),
+      );
+      throw new Error('Expected status validation to fail');
+    } catch (caught) {
+      const response = errorResponse(caught);
+      expect(response.code).toBe('QUOTE_PRICE_OVERRIDE_NOT_ALLOWED');
+      expect(response.details?.fieldErrors?.status).toHaveLength(1);
+    }
     const viewed = await runAs(tenantA, userA, customerA, () => service.get(quoteId));
     expect(viewed.status).toBe('VIEWED');
     const accepted = await runAs(tenantA, userA, customerA, () => service.accept(quoteId));
@@ -284,4 +355,14 @@ function createUser(tenantId: string, customerCompanyId: string, suffix: string)
 function day(offset: number) {
   const date = new Date();
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + offset));
+}
+function errorResponse(error: unknown): {
+  code?: string;
+  details?: { fieldErrors?: Record<string, string[]> };
+} {
+  return (
+    error as {
+      response?: { code?: string; details?: { fieldErrors?: Record<string, string[]> } };
+    }
+  ).response ?? {};
 }

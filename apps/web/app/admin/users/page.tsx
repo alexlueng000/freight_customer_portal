@@ -14,6 +14,7 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { FilterBar } from '@/components/filter-bar';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
+import { FieldLabel } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 
 type UserType = 'INTERNAL' | 'CUSTOMER';
@@ -731,7 +732,7 @@ function FormField({
 }) {
   return (
     <label className="block text-sm">
-      <span className="font-medium">{label}</span>
+      <FieldLabel label={label} />
       <span className="mt-1.5 block">{children}</span>
       {error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}
     </label>

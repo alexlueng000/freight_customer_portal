@@ -87,10 +87,35 @@ export class RatesService {
   }
 
   private validate(dto: CreateRateDto): void {
-    if (this.businessDate(dto.effectiveDate) > this.businessDate(dto.expiryDate)) throw new BadRequestException({ code: 'INVALID_RATE_VALIDITY', message: 'Effective date must not be after expiry date' });
-    if (new Set(dto.prices.map((p) => p.containerType)).size !== dto.prices.length) throw new BadRequestException({ code: 'DUPLICATE_CONTAINER_TYPE', message: 'Each container type may appear only once' });
-    if (dto.charges.some((c) => c.chargeBasis === ChargeBasis.PER_CONTAINER && !c.containerType)) throw new BadRequestException({ code: 'INVALID_RATE_CHARGE', message: 'PER_CONTAINER charge requires containerType' });
-    if (dto.charges.some((c) => c.chargeBasis !== ChargeBasis.PER_CONTAINER && c.containerType)) throw new BadRequestException({ code: 'INVALID_RATE_CHARGE', message: 'containerType is only valid for PER_CONTAINER charges' });
+    if (this.businessDate(dto.effectiveDate) > this.businessDate(dto.expiryDate))
+      throw this.fieldError('INVALID_RATE_VALIDITY', 'Effective date must not be after expiry date', {
+        expiryDate: ['expiryDate must not be before effectiveDate'],
+      });
+    const duplicateContainerTypeIndex = this.duplicateContainerTypeIndex(dto.prices);
+    if (duplicateContainerTypeIndex >= 0)
+      throw this.fieldError('DUPLICATE_CONTAINER_TYPE', 'Each container type may appear only once', {
+        [`prices.${duplicateContainerTypeIndex}.containerType`]: [
+          'containerType must not be duplicated within a rate',
+        ],
+      });
+    const missingContainerTypeIndex = dto.charges.findIndex(
+      (c) => c.chargeBasis === ChargeBasis.PER_CONTAINER && !c.containerType,
+    );
+    if (missingContainerTypeIndex >= 0)
+      throw this.fieldError('INVALID_RATE_CHARGE', 'PER_CONTAINER charge requires containerType', {
+        [`charges.${missingContainerTypeIndex}.containerType`]: [
+          'containerType is required for PER_CONTAINER charges',
+        ],
+      });
+    const invalidContainerTypeIndex = dto.charges.findIndex(
+      (c) => c.chargeBasis !== ChargeBasis.PER_CONTAINER && c.containerType,
+    );
+    if (invalidContainerTypeIndex >= 0)
+      throw this.fieldError('INVALID_RATE_CHARGE', 'containerType is only valid for PER_CONTAINER charges', {
+        [`charges.${invalidContainerTypeIndex}.containerType`]: [
+          'containerType is only valid for PER_CONTAINER charges',
+        ],
+      });
   }
 
   private createData(dto: CreateRateDto, tenantId: string, userId: string): Prisma.RateUncheckedCreateInput {
@@ -110,5 +135,28 @@ export class RatesService {
 
   private businessDate(value: string | Date): Date { return value instanceof Date ? value : new Date(`${value.slice(0, 10)}T00:00:00.000Z`); }
   private auditData(rate: Awaited<ReturnType<RatesService['getById']>>): Prisma.InputJsonValue { return { rateNo: rate.rateNo, polCode: rate.polCode, podCode: rate.podCode, carrierCode: rate.carrierCode, effectiveDate: rate.effectiveDate.toISOString().slice(0, 10), expiryDate: rate.expiryDate.toISOString().slice(0, 10), currency: rate.currency, status: rate.status, prices: rate.prices.map((p) => ({ containerType: p.containerType, costAmount: p.costAmount.toString(), sellAmount: p.sellAmount?.toString() ?? null, currency: p.currency })), charges: rate.charges.map((c) => ({ chargeCode: c.chargeCode, chargeBasis: c.chargeBasis, containerType: c.containerType, amount: c.amount.toString(), currency: c.currency, isIncluded: c.isIncluded })) }; }
-  private rethrowConflict(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException({ code: 'RATE_NUMBER_EXISTS', message: 'Rate number already exists in this tenant' }); throw error; }
+  private fieldError(
+    code: string,
+    message: string,
+    fieldErrors: Record<string, string[]>,
+  ): BadRequestException {
+    return new BadRequestException({ code, message, details: { fieldErrors } });
+  }
+  private duplicateContainerTypeIndex(prices: CreateRateDto['prices']): number {
+    const seen = new Set<string>();
+    return prices.findIndex((price) => {
+      if (seen.has(price.containerType)) return true;
+      seen.add(price.containerType);
+      return false;
+    });
+  }
+  private rethrowConflict(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+      throw new ConflictException({
+        code: 'RATE_NUMBER_EXISTS',
+        message: 'Rate number already exists in this tenant',
+        details: { fieldErrors: { rateNo: ['rateNo must be unique within tenant'] } },
+      });
+    throw error;
+  }
 }

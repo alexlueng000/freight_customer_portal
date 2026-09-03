@@ -12,11 +12,20 @@ import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
+import { FieldLabel } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 import { hasPermission } from '@/lib/auth';
 
 type CustomerStatus = 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
 type MarkupType = 'NONE' | 'FIXED' | 'PERCENT';
+type UserStatus = 'INVITED' | 'ACTIVE' | 'LOCKED' | 'DISABLED';
+type RoleCode =
+  | 'TENANT_ADMIN'
+  | 'SALES'
+  | 'OPERATION'
+  | 'FINANCE'
+  | 'CUSTOMER_ADMIN'
+  | 'CUSTOMER_USER';
 
 interface CustomerDetail {
   id: string;
@@ -49,6 +58,21 @@ interface CustomerContact {
   createdAt: string;
   updatedAt: string;
 }
+
+interface CustomerAccount {
+  id: string;
+  email: string;
+  displayName: string;
+  status: UserStatus;
+  lastLoginAt: string | null;
+  userRoles: Array<{ role: { code: RoleCode; name: string } }>;
+}
+
+interface UserListResponse {
+  items: CustomerAccount[];
+}
+
+type SalesUserOption = Pick<CustomerAccount, 'id' | 'displayName' | 'email' | 'userRoles'>;
 
 interface ApiErrorPayload {
   code?: string;
@@ -107,6 +131,7 @@ const customerEditSchema = z
       ),
     defaultMarkupType: z.enum(['NONE', 'FIXED', 'PERCENT']),
     defaultMarkupValue: optionalDecimal,
+    salesOwnerId: z.string(),
     status: z.enum(['ACTIVE', 'INACTIVE', 'BLOCKED']),
   })
   .superRefine((value, context) => {
@@ -131,12 +156,37 @@ const statusTones = {
   BLOCKED: 'danger',
 } as const;
 
+const userStatusLabels: Record<UserStatus, string> = {
+  INVITED: '待激活',
+  ACTIVE: '启用',
+  LOCKED: '锁定',
+  DISABLED: '停用',
+};
+
+const userStatusTones = {
+  INVITED: 'info',
+  ACTIVE: 'success',
+  LOCKED: 'warning',
+  DISABLED: 'neutral',
+} as const;
+
+const roleLabels: Record<RoleCode, string> = {
+  TENANT_ADMIN: '租户管理员',
+  SALES: '销售',
+  OPERATION: '操作',
+  FINANCE: '财务',
+  CUSTOMER_ADMIN: '客户管理员',
+  CUSTOMER_USER: '客户用户',
+};
+
 export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
   const customerId = params.id;
   const { apiFetch, user } = useAuth();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [contacts, setContacts] = useState<CustomerContact[]>([]);
+  const [customerAccounts, setCustomerAccounts] = useState<CustomerAccount[]>([]);
+  const [salesUsers, setSalesUsers] = useState<SalesUserOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<CustomerDetailApiError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -164,6 +214,38 @@ export default function CustomerDetailPage() {
   useEffect(() => {
     void load();
   }, [load, reloadKey]);
+
+  useEffect(() => {
+    if (!hasPermission(user, 'user.read')) return;
+    const customerQuery = new URLSearchParams({
+      page: '1',
+      pageSize: '100',
+      userType: 'CUSTOMER',
+      customerCompanyId: customerId,
+    });
+    const salesQuery = new URLSearchParams({
+      page: '1',
+      pageSize: '100',
+      userType: 'INTERNAL',
+      status: 'ACTIVE',
+    });
+    Promise.all([
+      requestJson<UserListResponse>(apiFetch, `/api/v1/users?${customerQuery.toString()}`),
+      requestJson<UserListResponse>(apiFetch, `/api/v1/users?${salesQuery.toString()}`),
+    ])
+      .then(([customerUsersResult, internalUsersResult]) => {
+        setCustomerAccounts(customerUsersResult.items);
+        setSalesUsers(
+          internalUsersResult.items.filter((item) =>
+            item.userRoles.some(({ role }) => role.code === 'SALES'),
+          ),
+        );
+      })
+      .catch(() => {
+        setCustomerAccounts([]);
+        setSalesUsers([]);
+      });
+  }, [apiFetch, customerId, user]);
 
   const canCreate = hasPermission(user, 'customer.manage');
 
@@ -303,6 +385,34 @@ export default function CustomerDetailPage() {
         )}
       </section>
 
+      <section className="rounded border border-border bg-surface">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold">客户账号</h2>
+            <p className="mt-1 text-sm text-muted">该公司下可登录客户门户的账号。</p>
+          </div>
+          {hasPermission(user, 'user.manage') ? (
+            <Link
+              className="inline-flex h-9 items-center rounded border border-border px-4 text-sm font-semibold"
+              href={`/admin/users?customerCompanyId=${customerId}&createCustomer=1`}
+            >
+              开通账号
+            </Link>
+          ) : null}
+        </div>
+        {customerAccounts.length === 0 ? (
+          <div className="p-4">
+            <EmptyState title="暂无客户账号" description="开通账号后，登录用户会显示在这里。" />
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {customerAccounts.map((account) => (
+              <CustomerAccountRow account={account} key={account.id} />
+            ))}
+          </div>
+        )}
+      </section>
+
       {createOpen ? (
         <CreateContactDialog
           apiFetch={apiFetch}
@@ -317,6 +427,7 @@ export default function CustomerDetailPage() {
           customer={customer}
           onClose={() => setEditOpen(false)}
           onUpdated={handleUpdated}
+          salesUsers={salesUsers}
         />
       ) : null}
     </div>
@@ -328,13 +439,29 @@ function EditCustomerDialog({
   customer,
   onClose,
   onUpdated,
+  salesUsers,
 }: {
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   customer: CustomerDetail;
   onClose: () => void;
   onUpdated: (customer: CustomerDetail) => void;
+  salesUsers: SalesUserOption[];
 }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const selectableSalesUsers = useMemo(() => {
+    if (!customer.salesOwner || salesUsers.some((sales) => sales.id === customer.salesOwner?.id)) {
+      return salesUsers;
+    }
+    return [
+      {
+        id: customer.salesOwner.id,
+        displayName: customer.salesOwner.displayName,
+        email: customer.salesOwner.email,
+        userRoles: [{ role: { code: 'SALES' as const, name: '销售' } }],
+      },
+      ...salesUsers,
+    ];
+  }, [customer.salesOwner, salesUsers]);
   const {
     register,
     handleSubmit,
@@ -352,6 +479,7 @@ function EditCustomerDialog({
       paymentTermDays: customer.paymentTermDays?.toString() ?? '',
       defaultMarkupType: customer.defaultMarkupType,
       defaultMarkupValue: customer.defaultMarkupValue ?? '',
+      salesOwnerId: customer.salesOwner?.id ?? '',
       status: customer.status,
     },
   });
@@ -375,6 +503,7 @@ function EditCustomerDialog({
             defaultMarkupType: values.defaultMarkupType,
             defaultMarkupValue:
               values.defaultMarkupType === 'NONE' ? null : values.defaultMarkupValue,
+            salesOwnerId: values.salesOwnerId || null,
             status: values.status,
           }),
         },
@@ -446,6 +575,16 @@ function EditCustomerDialog({
                 {Object.entries(statusLabels).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField error={errors.salesOwnerId?.message} label="销售负责人">
+              <select {...register('salesOwnerId')} className={inputClass}>
+                <option value="">未分配</option>
+                {selectableSalesUsers.map((sales) => (
+                  <option key={sales.id} value={sales.id}>
+                    {sales.displayName} ({sales.email})
                   </option>
                 ))}
               </select>
@@ -543,6 +682,34 @@ function ContactRow({ contact }: { contact: CustomerContact }) {
         ) : (
           <span className="text-sm text-muted">普通联系人</span>
         )}
+      </div>
+    </article>
+  );
+}
+
+function CustomerAccountRow({ account }: { account: CustomerAccount }) {
+  const roleText =
+    account.userRoles.map(({ role }) => roleLabels[role.code] ?? role.name).join('、') || '未分配';
+
+  return (
+    <article className="grid gap-4 px-5 py-4 md:grid-cols-[minmax(200px,1fr)_180px_160px] md:items-center">
+      <div className="flex items-start gap-3">
+        <div className="grid size-9 shrink-0 place-items-center rounded bg-sidebar text-muted">
+          <UserRound aria-hidden className="size-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="font-medium">{account.displayName}</div>
+          <div className="mt-0.5 truncate text-xs text-muted">{account.email}</div>
+        </div>
+      </div>
+      <div className="text-sm text-muted">{roleText}</div>
+      <div className="flex items-center gap-3 md:justify-end">
+        <StatusBadge tone={userStatusTones[account.status]}>
+          {userStatusLabels[account.status]}
+        </StatusBadge>
+        <span className="text-xs text-muted">
+          {account.lastLoginAt ? formatDateTime(account.lastLoginAt) : '从未登录'}
+        </span>
       </div>
     </article>
   );
@@ -742,7 +909,7 @@ function FormField({
 }) {
   return (
     <label className="block text-sm">
-      <span className="font-medium">{label}</span>
+      <FieldLabel label={label} />
       <span className="mt-1.5 block">{children}</span>
       {error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}
     </label>
@@ -781,6 +948,7 @@ function applyServerFieldErrors(
     paymentTermDays: '账期必须是 0–3650 的整数',
     defaultMarkupType: '请选择有效加价类型',
     defaultMarkupValue: '请输入有效加价值',
+    salesOwnerId: '请选择有效销售负责人',
     status: '请选择有效状态',
   };
   for (const field of Object.keys(fieldErrors))
@@ -792,7 +960,7 @@ function localizeCustomerError(error: CustomerDetailApiError): string {
   const messages: Record<string, string> = {
     VALIDATION_ERROR: '请检查标红字段后重新提交。',
     INVALID_MARKUP: '请检查加价类型和加价值是否匹配。',
-    INVALID_SALES_OWNER: '销售负责人必须是当前租户的内部用户。',
+    INVALID_SALES_OWNER: '销售负责人必须是当前租户的销售账号。',
     CUSTOMER_NOT_FOUND: '客户不存在或已无法访问。',
     PERMISSION_DENIED: '你没有编辑客户公司的权限。',
   };
@@ -816,6 +984,12 @@ function formatAmount(value: string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(value));
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(value),
+  );
 }
 
 function formatMarkup(customer: CustomerDetail): string {

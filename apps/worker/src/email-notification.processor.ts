@@ -16,6 +16,23 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 }
 
+function emailSubject(type: string, payload: Record<string, unknown>): string {
+  const title = stringValue(payload.title);
+  if (title) return title;
+  if (type === 'INVOICE_ISSUED') return `Invoice ${stringValue(payload.invoiceNo)} issued`;
+  return 'Freight portal notification';
+}
+
+function emailText(type: string, payload: Record<string, unknown>): string {
+  const description = stringValue(payload.description);
+  const href = stringValue(payload.href);
+  if (description) return href ? `${description}\n\nOpen: ${href}` : description;
+  if (type === 'INVOICE_ISSUED') {
+    return `Your invoice ${stringValue(payload.invoiceNo)} for ${stringValue(payload.currency)} ${stringValue(payload.totalAmount)} has been issued. Due date: ${stringValue(payload.dueDate)}.`;
+  }
+  return 'You have a new freight portal notification.';
+}
+
 export async function processEmailNotification(
   prisma: PrismaClient,
   delivery: EmailDelivery,
@@ -39,8 +56,8 @@ export async function processEmailNotification(
     const payload = notification.payload as Record<string, unknown>;
     await delivery.send({
       to: notification.recipient,
-      subject: `Invoice ${stringValue(payload.invoiceNo)} issued`,
-      text: `Your invoice ${stringValue(payload.invoiceNo)} for ${stringValue(payload.currency)} ${stringValue(payload.totalAmount)} has been issued. Due date: ${stringValue(payload.dueDate)}.`,
+      subject: emailSubject(notification.type, payload),
+      text: emailText(notification.type, payload),
     });
     await prisma.notification.update({
       where: { id: notification.id },

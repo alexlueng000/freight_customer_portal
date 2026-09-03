@@ -1,4 +1,5 @@
 'use client';
+import { AlertTriangle, CheckCircle2, Ship } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -6,6 +7,7 @@ import { useAuth } from '@/components/auth-provider';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
+import { FieldLabel } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 import { bookingStatusLabel, bookingStatusTone } from '@/lib/booking-status';
 import { hasPermission } from '@/lib/auth';
@@ -82,6 +84,7 @@ interface SoRecord {
   vessel: string | null;
   voyage: string | null;
   etd: string | null;
+  eta: string | null;
   receivedAt: string;
   publishedAt: string | null;
   createdAt: string;
@@ -95,6 +98,19 @@ interface SoRecord {
   publishedBy: { displayName: string } | null;
   document: { id: string; originalFilename: string; customerVisible: boolean };
 }
+interface ApiErrorPayload {
+  code?: string;
+  message?: string;
+  details?: { errors?: string[]; reviewIssues?: ReviewIssue[]; fieldErrors?: Record<string, string[]> };
+}
+type SoFieldErrors = Partial<
+  Record<'file' | 'soNumber' | 'sourceType' | 'sourceName' | 'carrierCode' | 'vessel' | 'voyage' | 'etd' | 'receivedAt', string>
+>;
+type OperationNotice = {
+  tone: 'success' | 'danger';
+  title: string;
+  description: string;
+};
 export default function AdminBookingDetail() {
   const { id } = useParams<{ id: string }>();
   const { apiFetch, user } = useAuth();
@@ -102,8 +118,16 @@ export default function AdminBookingDetail() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
   const [dialog, setDialog] = useState<
-    'approve' | 'revision' | 'reject' | 'carrier' | 'register-so' | 'publish-so' | null
+    | 'approve'
+    | 'revision'
+    | 'reject'
+    | 'carrier'
+    | 'register-so'
+    | 'publish-so'
+    | 'create-shipment'
+    | null
   >(null);
   const [remark, setRemark] = useState('');
   const [reasonCode, setReasonCode] = useState('CARGO_INCOMPLETE');
@@ -118,6 +142,7 @@ export default function AdminBookingDetail() {
   const [soVessel, setSoVessel] = useState('');
   const [soVoyage, setSoVoyage] = useState('');
   const [soEtd, setSoEtd] = useState('');
+  const [soFieldErrors, setSoFieldErrors] = useState<SoFieldErrors>({});
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -150,13 +175,14 @@ export default function AdminBookingDetail() {
   ) => {
     setBusy(true);
     setError('');
+    setOperationNotice(null);
     try {
       const r = await apiFetch(`/api/v1/admin/bookings/${id}/${action}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const p = (await r.json()) as { message?: string };
+      const p = (await r.json()) as ApiErrorPayload;
       if (!r.ok) throw new Error(formatActionError(p));
       setRemark('');
       setSourceName('');
@@ -171,13 +197,21 @@ export default function AdminBookingDetail() {
     }
   };
   const uploadSo = async () => {
-    if (!soFile || !soNumber.trim()) return;
+    const clientErrors: SoFieldErrors = {
+      ...(!soFile ? { file: '请选择 SO 文件。' } : {}),
+      ...(!soNumber.trim() ? { soNumber: '请输入 SO No.' } : {}),
+    };
+    setSoFieldErrors(clientErrors);
+    if (Object.keys(clientErrors).length) return;
+    if (!soFile) return;
+    const submittedSoNumber = soNumber.trim();
     setBusy(true);
     setError('');
+    setOperationNotice(null);
     try {
       const form = new FormData();
       form.append('file', soFile);
-      form.append('soNumber', soNumber.trim());
+      form.append('soNumber', submittedSoNumber);
       form.append('sourceType', soSourceType);
       form.append('receivedAt', new Date().toISOString());
       if (soSourceName.trim()) form.append('sourceName', soSourceName.trim());
@@ -189,17 +223,32 @@ export default function AdminBookingDetail() {
         method: 'POST',
         body: form,
       });
-      const payload = (await response.json()) as { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? 'SO 内部保存失败。');
+      const payload = (await response.json()) as ApiErrorPayload;
+      if (!response.ok) {
+        setSoFieldErrors(mapSoFieldErrors(payload));
+        throw new Error(formatSoError(payload));
+      }
       setSoFile(null);
       setSoNumber('');
       setSoVessel('');
       setSoVoyage('');
       setSoEtd('');
+      setSoFieldErrors({});
       setDialog(null);
       await load();
+      setOperationNotice({
+        tone: 'success',
+        title: 'SO 已登记成功',
+        description: `SO ${submittedSoNumber} 已保存为内部记录，客户暂不可见。发布后客户才能查看和下载。`,
+      });
     } catch (caught) {
-      setError((caught as Error).message);
+      const message = (caught as Error).message;
+      setError(message);
+      setOperationNotice({
+        tone: 'danger',
+        title: 'SO 登记失败',
+        description: message,
+      });
     } finally {
       setBusy(false);
     }
@@ -207,6 +256,8 @@ export default function AdminBookingDetail() {
   const publishSo = async (soId: string) => {
     setBusy(true);
     setError('');
+    setOperationNotice(null);
+    const soNumberToPublish = soRecords.find((record) => record.id === soId)?.soNumber;
     try {
       const response = await apiFetch(`/api/v1/admin/bookings/${id}/so-records/${soId}/publish`, {
         method: 'POST',
@@ -216,8 +267,55 @@ export default function AdminBookingDetail() {
       setPublishingSoId(null);
       setDialog(null);
       await load();
+      setOperationNotice({
+        tone: 'success',
+        title: 'SO 已发布给客户',
+        description: `SO ${soNumberToPublish ?? ''} 已设为客户可见，客户现在可以在 Booking 详情查看和下载。创建 Basic Shipment 后，客户出运列表才会显示。`,
+      });
     } catch (caught) {
-      setError((caught as Error).message);
+      const message = (caught as Error).message;
+      setError(message);
+      setOperationNotice({
+        tone: 'danger',
+        title: 'SO 发布失败',
+        description: message,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const createShipment = async () => {
+    if (!currentSo || currentSo.status !== 'PUBLISHED') return;
+    setBusy(true);
+    setError('');
+    setOperationNotice(null);
+    try {
+      const body = {
+        ...(currentSo.vessel?.trim() ? { vessel: currentSo.vessel.trim() } : {}),
+        ...(currentSo.voyage?.trim() ? { voyage: currentSo.voyage.trim() } : {}),
+        ...(currentSo.eta ? { eta: currentSo.eta } : {}),
+      };
+      const response = await apiFetch(`/api/v1/admin/bookings/${id}/shipments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json()) as { shipmentNo?: string; message?: string };
+      if (!response.ok) throw new Error(payload.message ?? 'Basic Shipment 创建失败。');
+      await load();
+      setOperationNotice({
+        tone: 'success',
+        title: 'Basic Shipment 已创建',
+        description: `${payload.shipmentNo ?? '新的 Shipment'} 已关联到该 Booking，客户现在可以在出运列表查看。`,
+      });
+    } catch (caught) {
+      const message = (caught as Error).message;
+      setError(message);
+      setOperationNotice({
+        tone: 'danger',
+        title: 'Basic Shipment 创建失败',
+        description: message,
+      });
     } finally {
       setBusy(false);
     }
@@ -239,6 +337,7 @@ export default function AdminBookingDetail() {
   if (loading) return <LoadingState rows={8} />;
   if (!b) return <ErrorState description={error || '订舱不存在'} onRetry={() => void load()} />;
   const canManage = hasPermission(user, 'booking.manage');
+  const canCreateShipment = hasPermission(user, 'shipment.create');
   const reviewIssues = b.reviewIssues ?? [];
   const blockingIssues = reviewIssues.filter((issue) => issue.blocking);
   const route = routeDisplay(b);
@@ -264,6 +363,7 @@ export default function AdminBookingDetail() {
     setSoVessel('');
     setSoVoyage('');
     setSoEtd(formatDateInput(b.etd));
+    setSoFieldErrors({});
     setDialog('register-so');
   };
   return (
@@ -309,7 +409,8 @@ export default function AdminBookingDetail() {
           </div>
         }
       />
-      {error ? (
+      {operationNotice ? <OperationNoticeBar notice={operationNotice} /> : null}
+      {error && !operationNotice ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </div>
@@ -569,6 +670,17 @@ export default function AdminBookingDetail() {
                       发布给客户
                     </button>
                   ) : null}
+                  {canCreateShipment && currentSo.status === 'PUBLISHED' && !b.shipments.length ? (
+                    <button
+                      className={`${primary} inline-flex items-center gap-2`}
+                      disabled={busy}
+                      onClick={() => setDialog('create-shipment')}
+                      type="button"
+                    >
+                      <Ship className="h-4 w-4" aria-hidden="true" />
+                      创建 Basic Shipment
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <dl className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -643,7 +755,20 @@ export default function AdminBookingDetail() {
                 internalRemark: remark || undefined,
               });
             if (dialog === 'publish-so' && publishingSoId) void publishSo(publishingSoId);
+            if (dialog === 'create-shipment') void createShipment();
           }}
+          shipmentPreview={
+            currentSo
+              ? {
+                  bookingNo: b.bookingNo,
+                  route: `${b.polCode} → ${b.podCode}`,
+                  carrier: currentSo.carrierCode ?? b.carrierCode ?? '—',
+                  vesselVoyage: `${currentSo.vessel ?? '—'} / ${currentSo.voyage ?? '—'}`,
+                  etd: currentSo.etd ?? b.etd,
+                  eta: currentSo.eta,
+                }
+              : undefined
+          }
         />
       ) : null}
       {dialog === 'register-so' ? (
@@ -657,18 +782,69 @@ export default function AdminBookingDetail() {
           vessel={soVessel}
           voyage={soVoyage}
           etd={soEtd}
-          onClose={() => setDialog(null)}
-          onFile={setSoFile}
-          onSourceName={setSoSourceName}
-          onSourceType={setSoSourceType}
-          onSoNumber={setSoNumber}
-          onVessel={setSoVessel}
-          onVoyage={setSoVoyage}
-          onEtd={setSoEtd}
+          errors={soFieldErrors}
+          onClose={() => {
+            setSoFieldErrors({});
+            setDialog(null);
+          }}
+          onFile={(value) => {
+            setSoFile(value);
+            setSoFieldErrors((current) => ({ ...current, file: undefined }));
+          }}
+          onSourceName={(value) => {
+            setSoSourceName(value);
+            setSoFieldErrors((current) => ({ ...current, sourceName: undefined }));
+          }}
+          onSourceType={(value) => {
+            setSoSourceType(value);
+            setSoFieldErrors((current) => ({ ...current, sourceType: undefined }));
+          }}
+          onSoNumber={(value) => {
+            setSoNumber(value);
+            setSoFieldErrors((current) => ({ ...current, soNumber: undefined }));
+          }}
+          onVessel={(value) => {
+            setSoVessel(value);
+            setSoFieldErrors((current) => ({ ...current, vessel: undefined }));
+          }}
+          onVoyage={(value) => {
+            setSoVoyage(value);
+            setSoFieldErrors((current) => ({ ...current, voyage: undefined }));
+          }}
+          onEtd={(value) => {
+            setSoEtd(value);
+            setSoFieldErrors((current) => ({ ...current, etd: undefined }));
+          }}
           onSubmit={() => void uploadSo()}
         />
       ) : null}
     </div>
+  );
+}
+function OperationNoticeBar({ notice }: { notice: OperationNotice }) {
+  const success = notice.tone === 'success';
+  const Icon = success ? CheckCircle2 : AlertTriangle;
+  return (
+    <section
+      className={`rounded border px-4 py-3 ${
+        success ? 'border-success/20 bg-success/5' : 'border-danger/20 bg-danger/5'
+      }`}
+      role={success ? 'status' : 'alert'}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded ${
+            success ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
+          }`}
+        >
+          <Icon aria-hidden className="size-5" />
+        </span>
+        <div>
+          <div className="text-sm font-semibold">{notice.title}</div>
+          <p className="mt-1 text-sm leading-6 text-muted">{notice.description}</p>
+        </div>
+      </div>
+    </section>
   );
 }
 function Fact({
@@ -777,10 +953,18 @@ function ReviewIssues({ issues, status }: { issues: ReviewIssue[]; status: strin
 function ActionDialog(props: {
   busy: boolean;
   carrierCode: string | null;
-  mode: 'approve' | 'revision' | 'reject' | 'carrier' | 'publish-so';
+  mode: 'approve' | 'revision' | 'reject' | 'carrier' | 'publish-so' | 'create-shipment';
   reasonCode: string;
   reference: string;
   remark: string;
+  shipmentPreview?: {
+    bookingNo: string;
+    route: string;
+    carrier: string;
+    vesselVoyage: string;
+    etd: string | null;
+    eta: string | null;
+  };
   sourceName: string;
   onClose(): void;
   onReasonCode(value: string): void;
@@ -799,7 +983,9 @@ function ActionDialog(props: {
         ? '确认业务拒绝'
         : props.mode === 'carrier'
           ? '提交订舱'
-          : '确认发布 SO';
+          : props.mode === 'publish-so'
+            ? '确认发布 SO'
+            : '确认创建 Basic Shipment';
   const submitLabel =
     props.mode === 'approve'
       ? '确认通过'
@@ -809,7 +995,9 @@ function ActionDialog(props: {
           ? '确认业务拒绝'
           : props.mode === 'carrier'
             ? '确认已提交'
-            : '确认发布';
+            : props.mode === 'publish-so'
+              ? '确认发布'
+              : '确认创建';
   return (
     <div
       aria-labelledby="booking-action-dialog-title"
@@ -855,6 +1043,23 @@ function ActionDialog(props: {
             发布后客户将立即可以查看并下载此 SO。请确认 SO 号、附件和客户可见内容已经核对无误。
           </div>
         ) : null}
+        {props.mode === 'create-shipment' ? (
+          <div className="space-y-3">
+            <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
+              创建后客户将在出运列表看到该 Basic Shipment。请确认 SO 已核对，船期信息可作为当前出运基础信息。
+            </div>
+            {props.shipmentPreview ? (
+              <dl className="grid gap-3 rounded border border-border bg-sidebar p-3 text-sm sm:grid-cols-2">
+                <Fact label="Booking" value={props.shipmentPreview.bookingNo} />
+                <Fact label="航线" value={props.shipmentPreview.route} />
+                <Fact label="Carrier" value={props.shipmentPreview.carrier} />
+                <Fact label="Vessel / Voyage" value={props.shipmentPreview.vesselVoyage} />
+                <Fact label="ETD" value={formatDate(props.shipmentPreview.etd)} />
+                <Fact label="ETA" value={formatDate(props.shipmentPreview.eta)} />
+              </dl>
+            ) : null}
+          </div>
+        ) : null}
         {props.mode === 'reject' ? (
           <div className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
             业务拒绝是终止性动作，请在下方写清无法承接的原因。
@@ -890,14 +1095,14 @@ function ActionDialog(props: {
             </div>
           </div>
         ) : null}
-        {props.mode === 'approve' || props.mode === 'publish-so' ? null : (
+        {['approve', 'publish-so', 'create-shipment'].includes(props.mode) ? null : (
           <label className="block text-sm">
             <span className="mb-1 block font-medium">
               {props.mode === 'carrier'
                 ? '内部备注（选填）'
                 : props.mode === 'reject'
-                  ? '拒绝原因 *'
-                  : '补充说明 *'}
+                  ? <FieldLabel label="拒绝原因" required />
+                  : <FieldLabel label="补充说明" required />}
             </span>
             <textarea
               className={`${input} min-h-24 py-2`}
@@ -939,6 +1144,7 @@ function RegisterSoDialog(props: {
   vessel: string;
   voyage: string;
   etd: string;
+  errors: SoFieldErrors;
   onClose(): void;
   onFile(value: File | null): void;
   onSourceName(value: string): void;
@@ -971,18 +1177,21 @@ function RegisterSoDialog(props: {
             <div className="mt-1 font-semibold">{props.carrierCode ?? '—'}</div>
           </div>
           <label className="block text-sm">
-            <span className="mb-1 block font-medium">SO No. *</span>
+            <span className="mb-1 block font-medium"><FieldLabel label="SO No." required /></span>
             <input
-              className={input}
+              className={inputClass(props.errors.soNumber)}
               maxLength={100}
               value={props.soNumber}
               onChange={(event) => props.onSoNumber(event.target.value)}
             />
+            {props.errors.soNumber ? (
+              <span className="mt-1 block text-xs text-danger">{props.errors.soNumber}</span>
+            ) : null}
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">SO 来源</span>
             <select
-              className={input}
+              className={inputClass(props.errors.sourceType)}
               value={props.sourceType}
               onChange={(event) => props.onSourceType(event.target.value)}
             >
@@ -990,46 +1199,65 @@ function RegisterSoDialog(props: {
               <option value="AGENT">Agent</option>
               <option value="OTHER">其他</option>
             </select>
+            {props.errors.sourceType ? (
+              <span className="mt-1 block text-xs text-danger">{props.errors.sourceType}</span>
+            ) : null}
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">来源名称</span>
             <input
-              className={input}
+              className={inputClass(props.errors.sourceName)}
               maxLength={200}
               value={props.sourceName}
               onChange={(event) => props.onSourceName(event.target.value)}
             />
+            {props.errors.sourceName ? (
+              <span className="mt-1 block text-xs text-danger">{props.errors.sourceName}</span>
+            ) : null}
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">Vessel</span>
             <input
-              className={input}
+              className={inputClass(props.errors.vessel)}
               maxLength={100}
               value={props.vessel}
               onChange={(event) => props.onVessel(event.target.value)}
             />
+            {props.errors.vessel ? (
+              <span className="mt-1 block text-xs text-danger">{props.errors.vessel}</span>
+            ) : null}
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">Voyage</span>
             <input
-              className={input}
+              className={inputClass(props.errors.voyage)}
               maxLength={50}
               value={props.voyage}
               onChange={(event) => props.onVoyage(event.target.value)}
             />
+            {props.errors.voyage ? (
+              <span className="mt-1 block text-xs text-danger">{props.errors.voyage}</span>
+            ) : null}
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">Confirmed / Updated ETD</span>
             <input
-              className={input}
+              className={inputClass(props.errors.etd)}
               type="date"
               value={props.etd}
               onChange={(event) => props.onEtd(event.target.value)}
             />
+            {props.errors.etd ? (
+              <span className="mt-1 block text-xs text-danger">{props.errors.etd}</span>
+            ) : null}
           </label>
           <label className="block sm:col-span-2">
-            <span className="mb-1 block text-sm font-medium">SO 文件 *</span>
-            <span className="flex min-h-20 cursor-pointer flex-col items-center justify-center rounded border border-dashed border-border bg-sidebar px-4 py-4 text-sm hover:border-primary">
+            <span className="mb-1 block text-sm font-medium"><FieldLabel label="SO 文件" required /></span>
+            <span
+              className={`flex min-h-20 cursor-pointer flex-col items-center justify-center rounded border border-dashed bg-sidebar px-4 py-4 text-sm hover:border-primary ${
+                props.errors.file ? 'border-danger ring-1 ring-danger/20' : 'border-border'
+              }`}
+            >
               <span className="font-semibold text-primary">选择文件</span>
               <span className="mt-1 text-xs text-muted">支持 PDF、PNG、JPG，最大 10 MB</span>
               <input
@@ -1043,6 +1271,9 @@ function RegisterSoDialog(props: {
               <div className="mt-2 rounded border border-border px-3 py-2 text-sm">
                 {props.soFile.name} · {formatFileSize(props.soFile.size)}
               </div>
+            ) : null}
+            {props.errors.file ? (
+              <span className="mt-1 block text-xs text-danger">{props.errors.file}</span>
             ) : null}
           </label>
         </div>
@@ -1063,6 +1294,8 @@ function RegisterSoDialog(props: {
   );
 }
 const input = 'h-10 w-full rounded border border-border bg-surface px-3 text-sm';
+const inputClass = (error?: string) =>
+  `${input} ${error ? 'border-danger bg-danger/5 ring-1 ring-danger/20' : ''}`;
 const primary =
   'h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40';
 const secondary = 'h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40';
@@ -1162,10 +1395,42 @@ function revisionReasonLabel(reason: string) {
   return labels[reason] ?? reason;
 }
 
-function formatActionError(payload: { details?: { reviewIssues?: ReviewIssue[] }; message?: string }) {
+function formatActionError(payload: ApiErrorPayload) {
   const blockingIssues = payload.details?.reviewIssues?.filter((issue) => issue.blocking) ?? [];
   if (blockingIssues.length) {
     return `存在 ${blockingIssues.length} 项必须处理的问题，暂时无法审核通过。`;
   }
+  if (payload.code === 'VALIDATION_ERROR') return '请检查弹窗中的字段后重新提交。';
   return payload.message ?? '操作失败。';
+}
+
+function mapSoFieldErrors(payload: ApiErrorPayload): SoFieldErrors {
+  const fieldErrors = payload.details?.fieldErrors;
+  if (!fieldErrors) return {};
+  const labels: Record<string, [keyof SoFieldErrors, string]> = {
+    file: ['file', '请选择 PDF、PNG 或 JPG 格式的 SO 文件。'],
+    soNumber: ['soNumber', '请输入 SO No.'],
+    sourceType: ['sourceType', '请选择有效 SO 来源。'],
+    sourceName: ['sourceName', '来源名称不能超过 200 个字符。'],
+    carrierCode: ['carrierCode', '船司代码不能超过 20 个字符。'],
+    vessel: ['vessel', '船名不能超过 100 个字符。'],
+    voyage: ['voyage', '航次不能超过 50 个字符。'],
+    etd: ['etd', '请输入有效 ETD。'],
+    receivedAt: ['receivedAt', 'SO 接收时间无效，请重新提交。'],
+  };
+  return Object.keys(fieldErrors).reduce<SoFieldErrors>((result, field) => {
+    const mapped = labels[field];
+    if (mapped) result[mapped[0]] = mapped[1];
+    return result;
+  }, {});
+}
+
+function formatSoError(payload: ApiErrorPayload) {
+  const messages: Record<string, string> = {
+    SO_FILE_REQUIRED: '请选择 SO 文件后再保存。',
+    SO_FILE_TYPE_INVALID: 'SO 文件仅支持 PDF、PNG 或 JPG。',
+    VALIDATION_ERROR: '请检查弹窗中的字段后重新保存。',
+    BOOKING_NOT_FOUND: '当前 Booking 状态不允许登记 SO，请刷新后重试。',
+  };
+  return (payload.code && messages[payload.code]) || payload.message || 'SO 内部保存失败。';
 }

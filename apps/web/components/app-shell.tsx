@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Bell,
   Building2,
   ChevronLeft,
   ChevronRight,
@@ -22,6 +21,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { NotificationMenu } from '@/components/notification-menu';
 import { cn } from '@/lib/utils';
 
 export interface ShellNavItem {
@@ -192,7 +192,7 @@ export function AppShell({
                 NF
               </div>
               <div>
-                <div className="text-sm font-semibold">今日待处理 6 项</div>
+                <div className="text-sm font-semibold">工作台</div>
                 <div className="text-xs text-muted">Dashboard</div>
               </div>
             </div>
@@ -212,13 +212,7 @@ export function AppShell({
                 ))}
               </nav>
               <div className="ml-auto flex items-center gap-2">
-                <button
-                  className="grid size-9 place-items-center rounded border border-border bg-surface text-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  type="button"
-                  title="通知"
-                >
-                  <Bell aria-hidden className="size-4" />
-                </button>
+                <NotificationMenu />
                 <div className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium">
                   <Gauge aria-hidden className="size-4 text-primary" />
                   <span className="hidden sm:inline">{auth.user?.displayName}</span>

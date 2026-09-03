@@ -9,9 +9,13 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import type { Shipment } from '@/components/shipment-types';
 import { StatusBadge } from '@/components/status-badge';
-import type { StatusTone } from '@/lib/mock-data';
-import { formatDateTime } from '@/lib/date-time';
 import { hasPermission } from '@/lib/auth';
+import { formatContainerSummary, formatDateTime, formatRouteSummary } from '@/lib/formatters';
+import {
+  shipmentStatusDescription,
+  shipmentStatusLabel,
+  shipmentStatusTone,
+} from '@/lib/shipment-status';
 
 export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const { id } = useParams<{ id: string }>();
@@ -88,13 +92,6 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const confirmAction = async () => {
     if (!shipment || !action || !occurredAt) return;
     const actual = new Date(occurredAt);
-    if (
-      action === 'depart' &&
-      shipment.etd &&
-      actual < new Date(shipment.etd) &&
-      !window.confirm('实际开船时间早于计划 ETD，请确认时间是否正确。')
-    )
-      return;
     const ok = await request(`/${action}`, { occurredAt: actual.toISOString(), remark });
     if (ok) setAction(null);
   };
@@ -120,11 +117,15 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       : shipment.status === 'DEPARTED'
         ? { key: 'arrive' as const, label: '标记已到港' }
         : null;
-  const containerSummary = shipment.booking.containerRequests
-    .map((item) => `${item.quantity} × ${item.containerType}`)
-    .join('，');
+  const containerSummary = formatContainerSummary(shipment.booking.containerRequests);
   const routeNames = shipment.booking.quote?.sourceRate;
   const canManage = mode === 'admin' && hasPermission(user, 'shipment.manage');
+  const actionWarning =
+    action === 'depart' && shipment.etd && occurredAt && new Date(occurredAt) < new Date(shipment.etd)
+      ? '实际开船时间早于计划 ETD，请确认时间是否正确。'
+      : action === 'arrive' && shipment.atd && occurredAt && new Date(occurredAt) < new Date(shipment.atd)
+        ? '实际到港时间早于实际开船时间，请确认时间是否正确。'
+        : '';
 
   return (
     <div className="space-y-5">
@@ -134,7 +135,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       <PageHeader
         eyebrow={shipment.customer.name}
         title={shipment.shipmentNo}
-        description={routeNames ? `${routeNames.polName} → ${routeNames.podName}` : `${shipment.polCode} → ${shipment.podCode}`}
+        description={formatRouteSummary(shipment.polCode, shipment.podCode, routeNames?.polName, routeNames?.podName)}
         actions={
           <StatusBadge tone={shipmentStatusTone(shipment.status)}>
             {shipmentStatusLabel(shipment.status, mode)}
@@ -145,6 +146,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       {notice ? <div className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">{notice}</div> : null}
 
       <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-3">
+        <Fact label="当前状态" value={shipmentStatusDescription(shipment.status, mode)} />
         {routeNames ? <Fact label="航线代码" value={`${shipment.polCode} → ${shipment.podCode}`} /> : null}
         <Fact label="船司 · 船名 / 航次" value={`${shipment.carrierCode ?? '—'} · ${shipment.vessel ?? '待确认'} / ${shipment.voyage ?? '—'}`} />
         <Fact label="ETD / ETA" value={`${dateTime(shipment.etd)} / ${dateTime(shipment.eta)}`} />
@@ -161,7 +163,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">运输进度</h2>
           {canManage && nextAction ? (
-            <button className={primary} disabled={busy} onClick={() => beginAction(nextAction.key)}>{nextAction.label}</button>
+            <button className={primary} disabled={busy} onClick={() => beginAction(nextAction.key)}>{busy ? '处理中...' : nextAction.label}</button>
           ) : null}
         </div>
         <ol className="mt-5 space-y-4 border-l-2 border-border pl-5">
@@ -209,6 +211,11 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
             <h2 className="font-semibold">{action === 'depart' ? '确认已开船' : '确认已到港'}</h2>
             <div className="mt-4 space-y-3">
               <Input label={action === 'depart' ? '实际开船时间 *' : '实际到港时间 *'} type="datetime-local" value={occurredAt} onChange={setOccurredAt} />
+              {actionWarning ? (
+                <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                  {actionWarning}
+                </div>
+              ) : null}
               <Input label="备注（选填）" value={remark} onChange={setRemark} />
             </div>
             <div className="mt-5 flex justify-end gap-2">
@@ -235,15 +242,6 @@ const primary = 'h-9 rounded bg-primary px-4 text-sm font-semibold text-surface 
 const secondary = 'h-9 rounded border border-border bg-surface px-4 text-sm font-semibold disabled:opacity-40';
 const inputClass = 'h-9 w-full rounded border border-border bg-surface px-3 text-sm';
 
-function shipmentStatusLabel(status: string, mode: 'admin' | 'portal') {
-  return ({ PLANNED: mode === 'portal' ? '待开船' : '待开船', DEPARTED: mode === 'portal' ? '运输中' : '已开船', ARRIVED: '已到港', CANCELLED: '已取消' }[status] ?? status);
-}
-function shipmentStatusTone(status: string): StatusTone {
-  if (status === 'ARRIVED') return 'success';
-  if (status === 'CANCELLED') return 'danger';
-  if (status === 'DEPARTED') return 'info';
-  return 'neutral';
-}
 function basicTimeline(shipment: Shipment) {
   const rank = shipment.status === 'ARRIVED' ? 2 : shipment.status === 'DEPARTED' ? 1 : shipment.status === 'CANCELLED' ? -1 : 0;
   return [

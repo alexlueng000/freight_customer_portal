@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma, RoleCode, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
@@ -7,6 +7,7 @@ import type { CreateTrackingEventDto } from './dto/create-tracking-event.dto.js'
 import type { ShipmentActionDto } from './dto/shipment-action.dto.js';
 import type { UpdateShipmentDto } from './dto/update-shipment.dto.js';
 import { ShipmentStateMachine } from './shipment-state-machine.js';
+import { NotificationEventsService } from '../notifications/notification-events.service.js';
 
 const select = {
   id: true,
@@ -42,6 +43,7 @@ export class ShipmentsService {
     private readonly prisma: PrismaService,
     private readonly requestContext: RequestContextService,
     private readonly stateMachine: ShipmentStateMachine,
+    @Optional() private readonly notificationEvents?: NotificationEventsService,
   ) {}
 
   list() {
@@ -226,7 +228,31 @@ export class ShipmentsService {
           afterData: { status: to, occurredAt, remark: dto.remark },
         },
       });
-      return shipment;
+      const shouldNotify = to === ShipmentStatus.DEPARTED || to === ShipmentStatus.ARRIVED;
+      const emailJobs = shouldNotify
+        ? ((await this.notificationEvents?.createCustomerNotifications(tx, {
+            tenantId: context.tenantId,
+            customerCompanyId: current.customerCompanyId,
+            type: to === ShipmentStatus.DEPARTED ? 'SHIPMENT_DEPARTED' : 'SHIPMENT_ARRIVED',
+            payload: {
+              title: to === ShipmentStatus.DEPARTED ? 'Shipment 已开船' : 'Shipment 已到港',
+              description:
+                to === ShipmentStatus.DEPARTED
+                  ? `${shipment.shipmentNo} 已进入运输中。`
+                  : `${shipment.shipmentNo} 已到达目的港。`,
+              shipmentId: shipment.id,
+              shipmentNo: shipment.shipmentNo,
+              polCode: shipment.polCode,
+              podCode: shipment.podCode,
+              occurredAt: occurredAt.toISOString(),
+              href: `/portal/shipments/${shipment.id}`,
+            },
+          })) ?? [])
+        : [];
+      return { shipment, emailJobs };
+    }).then(async (result) => {
+      await this.notificationEvents?.enqueueEmailNotifications(result.emailJobs);
+      return result.shipment;
     });
   }
 

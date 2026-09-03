@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { BookingsModule } from './modules/bookings/bookings.module.js';
 import { PermissionsGuard } from './modules/auth/permissions.guard.js';
 import { CustomersModule } from './modules/customers/customers.module.js';
+import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { RatesModule } from './modules/rates/rates.module.js';
 import { QuotesModule } from './modules/quotes/quotes.module.js';
@@ -32,6 +33,7 @@ import { RequestContextModule } from './shared/request-context/request-context.m
     AuthModule,
     BookingsModule,
     CustomersModule,
+    DashboardModule,
     RatesModule,
     QuotesModule,
     UsersModule,

@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
+import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 
 interface CustomerRate {
   id: string;
@@ -44,6 +45,7 @@ interface RateSearchResponse {
 interface ApiErrorPayload {
   code?: string;
   message?: string;
+  details?: { fieldErrors?: Record<string, string[]> };
 }
 class PortalRateApiError extends Error {
   constructor(
@@ -179,7 +181,7 @@ export default function PortalRatesPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        description="输入航线、离港日期和箱型，查询适用于贵司的销售价格。"
+        description="输入航线、离港日期和箱型，查询适用于贵司的在线参考价。"
         eyebrow="客户门户"
         title="运价查询"
       />
@@ -190,7 +192,7 @@ export default function PortalRatesPage() {
             <p className="mt-1 text-xs text-muted">港口代码建议使用 UN/LOCODE，例如 CNSHA、USLAX。</p>
           </div>
           <p className="rounded-md border border-danger/20 bg-danger/5 px-2.5 py-1.5 text-xs font-medium text-foreground">
-            <span className="mr-1 text-danger" aria-hidden>*</span>为必填项
+            <RequiredLegend>字段为查询前必须填写</RequiredLegend>
           </p>
         </div>
         <form
@@ -238,7 +240,7 @@ export default function PortalRatesPage() {
             <div>
               <h2 className="text-sm font-semibold">查询结果</h2>
               <p className="mt-1 text-xs text-muted">
-                仅展示贵司适用的最终销售价，不含内部采购和供应商信息。
+                仅展示贵司适用的在线参考价，不含内部采购和供应商信息。
               </p>
             </div>
             {criteria && !loading && !error ? (
@@ -279,7 +281,7 @@ export default function PortalRatesPage() {
                       <th className={headerClass}>ETD</th>
                       <th className={headerClass}>航程</th>
                       <th className={headerClass}>箱型</th>
-                      <th className={headerClass}>销售价</th>
+                      <th className={headerClass}>预计总价</th>
                       <th className={headerClass}>有效期</th>
                       <th className={`${headerClass} text-right`}>操作</th>
                     </tr>
@@ -317,7 +319,7 @@ export default function PortalRatesPage() {
                           </span>
                           {rate.charges.length ? (
                             <div className="mt-1 text-xs text-muted">
-                              主运价 {formatMoney(rate.oceanSellAmount, rate.currency)} +{' '}
+                              海运费 {formatMoney(rate.oceanSellAmount, rate.currency)} +{' '}
                               {rate.charges.length} 项附加费
                             </div>
                           ) : null}
@@ -339,7 +341,7 @@ export default function PortalRatesPage() {
                             }}
                             type="button"
                           >
-                            申请报价
+                            获取正式报价
                           </button>
                         </td>
                       </tr>
@@ -428,8 +430,8 @@ function QuoteRequestDialog({
       <section aria-labelledby="quote-request-title" aria-modal="true" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-surface shadow-xl" role="dialog">
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold" id="quote-request-title">确认报价申请</h2>
-            <p className="mt-1 text-sm text-muted">确认箱量和预估费用后提交，由销售审核并发送正式报价。</p>
+            <h2 className="text-lg font-semibold" id="quote-request-title">获取正式报价</h2>
+            <p className="mt-1 text-sm text-muted">确认箱量和预计费用后提交，由销售确认并发送正式报价。</p>
           </div>
           <button aria-label="关闭报价申请" className="grid size-9 place-items-center rounded border border-border" disabled={submitting} onClick={onClose} type="button"><X className="size-4" /></button>
         </div>
@@ -441,7 +443,7 @@ function QuoteRequestDialog({
             <QuoteFact label="有效期至" value={formatDate(rate.expiryDate)} />
           </section>
           <label className="block text-sm">
-            <span className="font-semibold">箱量 <span className="text-danger">*</span></span>
+            <FieldLabel label="箱量" required />
             <span className="mt-1 block text-xs text-muted">本次报价的 {rate.containerType} 集装箱数量</span>
             <div className="mt-2 flex items-center gap-3">
               <input aria-invalid={!validQuantity} className="h-10 w-32 rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger" inputMode="numeric" max={999} min={1} onChange={(event) => onQuantityChange(event.target.value)} required type="number" value={quantity} />
@@ -451,14 +453,14 @@ function QuoteRequestDialog({
           <section className="overflow-hidden rounded-md border border-border">
             <div className="border-b border-border bg-sidebar px-4 py-3 text-sm font-semibold">费用预估</div>
             <div className="divide-y divide-border text-sm">
-              <QuoteEstimateRow amount={validQuantity ? Number(rate.oceanSellAmount) * numericQuantity : null} currency={rate.currency} label="海运费" quantity={validQuantity ? numericQuantity : null} unitPrice={Number(rate.oceanSellAmount)} />
+              <QuoteEstimateRow amount={validQuantity ? Number(rate.oceanSellAmount) * numericQuantity : null} currency={rate.currency} label="海运费" quantity={validQuantity ? numericQuantity : null} unitPrice={Number(rate.oceanSellAmount)} unitLabel={`/${rate.containerType}`} />
               {rate.charges.map((charge) => {
                 const itemQuantity = charge.chargeBasis === 'PER_CONTAINER' ? numericQuantity : 1;
-                return <QuoteEstimateRow amount={validQuantity ? Number(charge.amount) * itemQuantity : null} currency={charge.currency} key={charge.id} label={charge.chargeName} quantity={validQuantity ? itemQuantity : null} unitPrice={Number(charge.amount)} />;
+                return <QuoteEstimateRow amount={validQuantity ? Number(charge.amount) * itemQuantity : null} currency={charge.currency} key={charge.id} label={charge.chargeName} quantity={validQuantity ? itemQuantity : null} unitLabel={chargeUnitLabel(charge)} unitPrice={Number(charge.amount)} />;
               })}
             </div>
             <div className="flex items-center justify-between bg-primary/5 px-4 py-4">
-              <span className="font-semibold">预估总额</span>
+              <span className="font-semibold">预计总额</span>
               <span className="text-lg font-bold text-primary">{estimate === null ? '—' : formatMoney(String(estimate), rate.currency)}</span>
             </div>
           </section>
@@ -469,7 +471,7 @@ function QuoteRequestDialog({
         </div>
         <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
           <button className="h-9 rounded border border-border px-4 text-sm font-semibold" disabled={submitting} onClick={onClose} type="button">取消</button>
-          <button className="h-9 rounded bg-primary px-5 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45" disabled={submitting || !validQuantity} onClick={onSubmit} type="button">{submitting ? '提交中…' : '提交报价申请'}</button>
+          <button className="h-9 rounded bg-primary px-5 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45" disabled={submitting || !validQuantity} onClick={onSubmit} type="button">{submitting ? '提交中…' : '提交销售确认'}</button>
         </div>
       </section>
     </div>
@@ -480,8 +482,8 @@ function QuoteFact({ label, value }: { label: string; value: string }) {
   return <div><div className="text-xs text-muted">{label}</div><div className="mt-1 font-semibold">{value}</div></div>;
 }
 
-function QuoteEstimateRow({ label, quantity, unitPrice, amount, currency }: { label: string; quantity: number | null; unitPrice: number; amount: number | null; currency: string }) {
-  return <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3"><div><div className="font-medium">{label}</div><div className="mt-0.5 text-xs text-muted">{quantity === null ? '请输入有效箱量' : `${quantity} × ${formatMoney(String(unitPrice), currency)}`}</div></div><div className="font-semibold">{amount === null ? '—' : formatMoney(String(amount), currency)}</div></div>;
+function QuoteEstimateRow({ label, quantity, unitPrice, amount, currency, unitLabel }: { label: string; quantity: number | null; unitPrice: number; amount: number | null; currency: string; unitLabel: string }) {
+  return <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3"><div><div className="font-medium">{label}</div><div className="mt-0.5 text-xs text-muted">{quantity === null ? '请输入有效箱量' : `${quantity} × ${formatMoney(String(unitPrice), currency)} ${unitLabel}`}</div></div><div className="font-semibold">{amount === null ? '—' : formatMoney(String(amount), currency)}</div></div>;
 }
 
 function quoteEstimate(rate: CustomerRate, quantity: number) {
@@ -500,10 +502,7 @@ function FormField({
 }) {
   return (
     <label className="block text-sm">
-      <span className="inline-flex items-center gap-1 font-semibold">
-        {label}
-        {required ? <span className="text-base leading-none text-danger" aria-label="必填">*</span> : null}
-      </span>
+      <FieldLabel label={label} required={required} />
       <span className="mt-1.5 block">{children}</span>
       {error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}
     </label>
@@ -518,7 +517,10 @@ async function requestJson<T>(
   const payload = (await response.json().catch(() => undefined)) as T | ApiErrorPayload | undefined;
   if (!response.ok) {
     const error = payload as ApiErrorPayload | undefined;
-    throw new PortalRateApiError(error?.message ?? '运价查询暂时不可用，请稍后重试。', error?.code);
+    const firstFieldError = error?.details?.fieldErrors
+      ? Object.values(error.details.fieldErrors).flat()[0]
+      : undefined;
+    throw new PortalRateApiError(firstFieldError ?? error?.message ?? '运价查询暂时不可用，请稍后重试。', error?.code);
   }
   return payload as T;
 }
@@ -539,6 +541,11 @@ function formatDate(value: string) {
 }
 function formatMoney(value: string, currency: string) {
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
+}
+function chargeUnitLabel(charge: Pick<CustomerRate['charges'][number], 'chargeBasis' | 'containerType'>) {
+  if (charge.chargeBasis === 'PER_BL') return '/B/L';
+  if (charge.chargeBasis === 'PER_SHIPMENT') return '/Shipment';
+  return charge.containerType ? `/${charge.containerType}` : '/Container';
 }
 const inputClass =
   'h-10 w-full rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-danger/10';

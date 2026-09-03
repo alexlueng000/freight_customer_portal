@@ -3,7 +3,7 @@
 > 文档版本：V1.2
 > 日期：2026-09-02
 > 适用范围：Accepted Quote 转 Booking、Booking 提交/审核/确认、SO 上传下载、Shipment 建档
-> 当前结论：V1.1 正常业务主链已由项目负责人确认走通；自动化与技术 Gate 通过，正式签署栏待补姓名
+> 当前结论：V1.1 正常业务主链已由项目负责人确认走通；2026-09-03 已用真实演示单复验到 Basic Shipment 到港，正式签署栏待补姓名
 
 ## 1. 验收目标
 
@@ -135,6 +135,36 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 结果：`□ 通过  □ 失败  □ 阻塞`
 
+### SHIPMENT-UAT-006A 真实演示单闭环复验
+
+复验日期：2026-09-03
+
+复验对象：
+
+- Booking：`BOOK202609000007`
+- Shipment：`SHP202609000001`
+- 客户公司：`深圳市123发展有限公司`
+
+复验路径：
+
+```text
+Booking BOOKED
+→ SO 已发布给客户
+→ 创建 Basic Shipment
+→ 维护船名 / 航次 / ETD / ETA
+→ 标记已开船
+→ 标记已到港
+```
+
+复验结果：
+
+- SO 发布后客户可见，但客户 Shipment 列表必须等 Basic Shipment 创建后才显示，符合 V1.1 “SO 发布”和“Shipment 建档”解耦口径。
+- 后台已完成从 `BOOK202609000007` 创建 `SHP202609000001`。
+- Shipment 状态已走到 `ARRIVED / 已到港`，页面 Timeline 显示 `已订舱 → 已开船 → 已到港`。
+- 本轮人工复验中发现并修正两个 UX 问题：创建 Basic Shipment 增加站内二次确认；Shipment 状态动作不再使用浏览器原生确认框，时间异常提示合并到站内弹窗。
+
+结果：`通过`
+
 ## 7. 自动化与构建门禁
 
 ### TECH-UAT-007
@@ -151,12 +181,13 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 - [x] P0-B4 Booking、黄金路径、Shipment、Invoice 共 6 个 Playwright 场景实跑通过。
 - [x] 新增 Booking/SO action endpoint 已在 Swagger/OpenAPI JSON 中确认可见。
 - [x] 2026-09-02 复验 V1.1 Golden Path 1/1、Basic Shipment 后台/客户侧冒烟 2/2 通过。
+- [x] 2026-09-03 手工复验 `BOOK202609000007 → SHP202609000001`，确认 V1.1 核心闭环已走到 Basic Shipment 到港。
 
 详细执行证据与剩余项见 `P0_B4_REGRESSION_GATE_REPORT_2026-09-02_CN.md`。
 
 ## 8. 验收签署
 
-2026-09-02，项目负责人已在当前任务中确认核心正常闭环人工走通。本表保留姓名栏，供正式归档时补录，不据此虚构签署人。
+2026-09-02，项目负责人已在当前任务中确认核心正常闭环人工走通。2026-09-03，使用 `BOOK202609000007 → SHP202609000001` 复验到 Basic Shipment 到港。本表保留姓名栏，供正式归档时补录，不据此虚构签署人。
 
 | 角色       | 姓名 | 结论                         | 日期 | 备注 |
 | ---------- | ---- | ---------------------------- | ---- | ---- |

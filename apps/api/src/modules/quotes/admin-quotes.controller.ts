@@ -5,6 +5,7 @@ import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { ListQuotesDto } from './dto/list-quotes.dto.js';
 import { QuotesService } from './quotes.service.js';
 import { OverrideQuotePricesDto } from './dto/override-quote-prices.dto.js';
+import { UpdateQuoteReviewDto } from './dto/update-quote-review.dto.js';
 import { QuotePdfQueueService } from './quote-pdf-queue.service.js';
 
 @ApiTags('admin-quotes')
@@ -40,6 +41,18 @@ export class AdminQuotesController {
   @ApiOkResponse({ description: 'Expire an open quote' })
   expire(@Param('id') id: string) {
     return this.quotes.expire(id);
+  }
+  @Post(':id/cancel')
+  @RequirePermissions('quote.manage')
+  @ApiOkResponse({ description: 'Cancel a quote before it is booked' })
+  cancel(@Param('id') id: string) {
+    return this.quotes.cancel(id);
+  }
+  @Patch(':id/review')
+  @RequirePermissions('quote.manage')
+  @ApiOkResponse({ description: 'Update draft quote validity, customer terms, and internal notes' })
+  updateReview(@Param('id') id: string, @Body() dto: UpdateQuoteReviewDto) {
+    return this.quotes.updateReview(id, dto);
   }
   @Patch(':id/prices')
   @RequirePermissions('quote.manage')

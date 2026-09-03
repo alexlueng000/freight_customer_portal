@@ -1,8 +1,8 @@
 'use client';
-import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, Plus } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
@@ -30,10 +30,15 @@ interface QuoteList {
 export default function QuotesPage() {
   const { apiFetch } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const status = searchParams.get('status') ?? '';
   const [page, setPage] = useState(1);
   const [data, setData] = useState<QuoteList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [creatingQuoteId, setCreatingQuoteId] = useState<string | null>(null);
+  const isPendingStatus = status === 'pending';
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -52,6 +57,36 @@ export default function QuotesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  const visibleItems = useMemo(
+    () =>
+      status && data?.items
+        ? data.items.filter((quote) =>
+            isPendingStatus
+              ? ['SENT', 'VIEWED', 'ACCEPTED'].includes(quote.status)
+              : quote.status === status,
+          )
+        : data?.items ?? [],
+    [data?.items, isPendingStatus, status],
+  );
+  const pagination = data?.pagination;
+  const createBooking = async (quote: Quote) => {
+    setCreatingQuoteId(quote.id);
+    setActionError('');
+    try {
+      const response = await apiFetch('/api/v1/bookings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ quoteId: quote.id }),
+      });
+      const payload = (await response.json()) as { id?: string; message?: string };
+      if (!response.ok || !payload.id) throw new Error(payload.message ?? '创建订舱失败。');
+      router.push(`/portal/bookings/${payload.id}`);
+    } catch (caught) {
+      setActionError((caught as { message?: string }).message ?? '创建订舱失败，请刷新后重试。');
+    } finally {
+      setCreatingQuoteId(null);
+    }
+  };
   return (
     <div className="space-y-5">
       <PageHeader
@@ -59,6 +94,11 @@ export default function QuotesPage() {
         title="我的报价"
         description="查看报价申请、销售确认进度及可决策的正式报价。"
       />
+      {actionError ? (
+        <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {actionError}
+        </div>
+      ) : null}
       <section className="overflow-hidden rounded border border-border bg-surface">
         {loading ? (
           <LoadingState rows={6} />
@@ -68,9 +108,12 @@ export default function QuotesPage() {
           <div className="p-4">
             <ErrorState description={error.message} onRetry={() => void load()} />
           </div>
-        ) : !data?.items.length ? (
+        ) : !visibleItems.length ? (
           <div className="p-4">
-            <EmptyState title="暂无报价" description="请先前往运价查询，选择方案提交报价申请。" />
+            <EmptyState
+              title={isPendingStatus || status === 'SENT' ? '当前没有待处理报价' : '还没有 Quote'}
+              description={isPendingStatus || status === 'SENT' ? '待确认或待创建订舱的正式报价会出现在这里。' : '请先前往运价查询，选择方案提交报价申请。'}
+            />
           </div>
         ) : (
           <>
@@ -84,11 +127,11 @@ export default function QuotesPage() {
                     <th className={head}>金额</th>
                     <th className={head}>有效期</th>
                     <th className={head}>状态</th>
-                    <th className={`${head} min-w-28 whitespace-nowrap text-right`}>操作</th>
+                    <th className={`${head} min-w-44 whitespace-nowrap text-right`}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((quote) => {
+                  {visibleItems.map((quote) => {
                     const href = `/portal/quotes/${quote.id}`;
                     return (
                       <tr
@@ -126,16 +169,33 @@ export default function QuotesPage() {
                             {customerQuoteStatusLabel(quote.status)}
                           </StatusBadge>
                         </td>
-                        <td className={`${cell} min-w-28 whitespace-nowrap text-right`}>
-                          <Link
-                            aria-label={`查看报价 ${quote.quoteNo}`}
-                            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                            href={href}
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <Eye aria-hidden className="size-3.5" />
-                            查看
-                          </Link>
+                        <td className={`${cell} min-w-44 whitespace-nowrap text-right`}>
+                          <div className="flex justify-end gap-2">
+                            {quote.status === 'ACCEPTED' ? (
+                              <button
+                                aria-label={`基于报价 ${quote.quoteNo} 创建订舱`}
+                                className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded bg-primary px-3 text-xs font-semibold text-surface transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={creatingQuoteId !== null}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void createBooking(quote);
+                                }}
+                                type="button"
+                              >
+                                <Plus aria-hidden className="size-3.5" />
+                                {creatingQuoteId === quote.id ? '创建中…' : '创建订舱'}
+                              </button>
+                            ) : null}
+                            <Link
+                              aria-label={`查看报价 ${quote.quoteNo}`}
+                              className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                              href={href}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <Eye aria-hidden className="size-3.5" />
+                              查看
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -144,7 +204,7 @@ export default function QuotesPage() {
               </table>
             </div>
             <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted">
-              <span>共 {data.pagination.total} 份</span>
+              <span>共 {pagination?.total ?? visibleItems.length} 份</span>
               <div className="flex items-center gap-2">
                 <button
                   aria-label="上一页"
@@ -155,12 +215,12 @@ export default function QuotesPage() {
                   <ChevronLeft className="size-4" />
                 </button>
                 <span>
-                  第 {page} / {Math.max(1, data.pagination.totalPages)} 页
+                  第 {page} / {Math.max(1, pagination?.totalPages ?? 1)} 页
                 </span>
                 <button
                   aria-label="下一页"
                   className={button}
-                  disabled={page >= data.pagination.totalPages}
+                  disabled={page >= (pagination?.totalPages ?? 1)}
                   onClick={() => setPage((v) => v + 1)}
                 >
                   <ChevronRight className="size-4" />

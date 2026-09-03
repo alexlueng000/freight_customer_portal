@@ -20,6 +20,7 @@ export interface QuotePdfJobData {
     validUntil: string;
     currency: string;
     totalAmount: string;
+    customerTerms: string | null;
     version: number;
     customerName: string;
     items: Array<{

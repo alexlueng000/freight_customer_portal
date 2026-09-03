@@ -1,4 +1,5 @@
 'use client';
+import { AlertTriangle, CheckCircle2, Clock, FileCheck2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -6,6 +7,7 @@ import { useAuth } from '@/components/auth-provider';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
+import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 import { bookingStatusTone, customerBookingStatusLabel } from '@/lib/booking-status';
 
@@ -78,7 +80,15 @@ type FieldErrors = Partial<
 interface ApiErrorPayload {
   code?: string;
   message?: string;
-  details?: { errors?: string[]; missing?: string[] };
+  details?: { errors?: string[]; missing?: string[]; fieldErrors?: Record<string, string[]> };
+}
+class BookingApiError extends Error {
+  constructor(
+    message: string,
+    readonly payload?: ApiErrorPayload,
+  ) {
+    super(message);
+  }
 }
 export default function BookingDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -149,7 +159,7 @@ export default function BookingDetailPage() {
       });
       const shipperPayload = (await shipperResponse.json()) as CustomerShipper & ApiErrorPayload;
       if (!shipperResponse.ok)
-        throw new Error(formatApiError(shipperPayload, '保存常用发货人失败。'));
+        throw new BookingApiError(formatApiError(shipperPayload, '保存常用发货人失败。'), shipperPayload);
       sourceShipperId = shipperPayload.id;
       setShippers((current) => [
         shipperPayload,
@@ -179,7 +189,7 @@ export default function BookingDetailPage() {
       }),
     });
     const payload = (await r.json()) as ApiErrorPayload;
-    if (!r.ok) throw new Error(formatApiError(payload, '保存失败。'));
+    if (!r.ok) throw new BookingApiError(formatApiError(payload, '保存失败。'), payload);
   };
   const save = async () => {
     if (!form) return;
@@ -190,7 +200,9 @@ export default function BookingDetailPage() {
       await saveDraft(form);
       await load();
     } catch (e) {
-      setError((e as { message?: string }).message ?? '保存失败。');
+      const bookingError = toBookingApiError(e);
+      setFieldErrors(mapServerFieldErrors(bookingError.payload));
+      setError(bookingError.message);
     } finally {
       setBusy(false);
     }
@@ -220,7 +232,8 @@ export default function BookingDetailPage() {
         body: JSON.stringify(changes),
       });
       const payload = (await response.json()) as CustomerShipper & ApiErrorPayload;
-      if (!response.ok) throw new Error(formatApiError(payload, '更新常用发货人失败。'));
+      if (!response.ok)
+        throw new BookingApiError(formatApiError(payload, '更新常用发货人失败。'), payload);
       if (payload.status === 'INACTIVE') {
         setShippers((current) => current.filter((item) => item.id !== payload.id));
         change('sourceShipperId', null);
@@ -238,7 +251,9 @@ export default function BookingDetailPage() {
         );
       }
     } catch (caught) {
-      setError((caught as Error).message);
+      const bookingError = toBookingApiError(caught);
+      setFieldErrors(mapServerFieldErrors(bookingError.payload));
+      setError(bookingError.message);
     } finally {
       setBusy(false);
     }
@@ -265,13 +280,15 @@ export default function BookingDetailPage() {
       });
       const p = (await r.json()) as ApiErrorPayload;
       if (!r.ok) {
-        if (p.code === 'BOOKING_INCOMPLETE') setFieldErrors(mapMissingFields(p.details?.missing));
-        throw new Error(formatApiError(p, '操作失败。'));
+        setFieldErrors(mapServerFieldErrors(p));
+        throw new BookingApiError(formatApiError(p, '操作失败。'), p);
       }
       await load();
       return true;
     } catch (e) {
-      setError((e as { message?: string }).message ?? '操作失败。');
+      const bookingError = toBookingApiError(e);
+      setFieldErrors(mapServerFieldErrors(bookingError.payload));
+      setError(bookingError.message);
       return false;
     } finally {
       setBusy(false);
@@ -340,6 +357,7 @@ export default function BookingDetailPage() {
           </div>
         }
       />
+      <BookingProgressStatus booking={booking} />
       {error ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
@@ -391,9 +409,9 @@ export default function BookingDetailPage() {
       </section>
       <section className="space-y-5 rounded border border-border bg-surface p-5">
         <div className="rounded bg-sidebar px-3 py-2 text-sm text-muted">
-          请补充本次订舱所需的货物及联系人信息。标有{' '}
-          <span className="font-bold text-danger">*</span>{' '}
-          的项目为必填项，联系人邮箱和电话至少填写一项。
+          请补充本次订舱所需的货物及联系人信息。
+          <RequiredLegend>字段为提交订舱前必须填写</RequiredLegend>
+          ，联系人邮箱和电话至少填写一项。
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <h2 className="text-sm font-semibold sm:col-span-2">货物信息</h2>
@@ -460,7 +478,9 @@ export default function BookingDetailPage() {
         </div>
         <div className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <h2 className="text-sm font-semibold">发货人 Shipper *</h2>
+            <h2 className="text-sm font-semibold">
+              <FieldLabel label="发货人 Shipper" required />
+            </h2>
             <p className="mt-1 text-sm text-muted">
               可选择常用发货人自动带入，也可以新建本票发货人。
             </p>
@@ -708,6 +728,107 @@ export default function BookingDetailPage() {
     </div>
   );
 }
+function BookingProgressStatus({ booking }: { booking: Booking }) {
+  const config = bookingProgressStatusConfig(booking.status);
+  const Icon = config.icon;
+  return (
+    <section className={`rounded border px-4 py-3 ${config.panelClass}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded ${config.iconClass}`}>
+            <Icon aria-hidden className="size-5" />
+          </span>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge tone={bookingStatusTone(booking.status)}>
+                {customerBookingStatusLabel(booking.status)}
+              </StatusBadge>
+              <span className="text-sm font-semibold">{config.title}</span>
+            </div>
+            <p className="mt-1 text-sm leading-6 text-muted">{config.description}</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:text-right">
+          <Fact label="航线" value={`${booking.polCode} → ${booking.podCode}`} />
+          <Fact label="箱量" value={formatContainerRequests(booking.containerRequests) || '待确认'} />
+        </div>
+      </div>
+    </section>
+  );
+}
+function bookingProgressStatusConfig(status: string) {
+  if (status === 'DRAFT')
+    return {
+      icon: Clock,
+      title: '订舱资料待提交',
+      description: '请补充货物、发货人和联系人信息，确认无误后提交给操作团队。',
+      panelClass: 'border-warning/25 bg-warning/10',
+      iconClass: 'bg-warning/10 text-warning',
+    };
+  if (status === 'REVISION_REQUIRED')
+    return {
+      icon: AlertTriangle,
+      title: '需要补充订舱资料',
+      description: '操作团队已退回补充，请根据状态备注修正后重新提交。',
+      panelClass: 'border-warning/25 bg-warning/10',
+      iconClass: 'bg-warning/10 text-warning',
+    };
+  if (status === 'SUBMITTED')
+    return {
+      icon: CheckCircle2,
+      title: '订舱已发送给操作团队',
+      description: '提交成功。操作团队会审核资料并继续确认订舱安排。',
+      panelClass: 'border-success/20 bg-success/5',
+      iconClass: 'bg-success/10 text-success',
+    };
+  if (status === 'APPROVED')
+    return {
+      icon: FileCheck2,
+      title: '订舱资料已通过审核',
+      description: '操作团队正在向承运方提交订舱，后续会更新 SO 信息。',
+      panelClass: 'border-primary/20 bg-primary/5',
+      iconClass: 'bg-primary/10 text-primary',
+    };
+  if (status === 'BOOKING_SUBMITTED')
+    return {
+      icon: FileCheck2,
+      title: '已提交承运方，等待 SO',
+      description: '订舱已由操作团队提交给承运方，SO 放出后会在本页展示。',
+      panelClass: 'border-primary/20 bg-primary/5',
+      iconClass: 'bg-primary/10 text-primary',
+    };
+  if (status === 'BOOKED')
+    return {
+      icon: CheckCircle2,
+      title: '订舱已完成',
+      description: '订舱已确认，后续可继续查看 SO、Shipment 和出运跟踪。',
+      panelClass: 'border-success/20 bg-success/5',
+      iconClass: 'bg-success/10 text-success',
+    };
+  if (status === 'REJECTED')
+    return {
+      icon: AlertTriangle,
+      title: '订舱已拒绝',
+      description: '该订舱未通过审核，请查看状态备注并联系操作团队。',
+      panelClass: 'border-danger/20 bg-danger/5',
+      iconClass: 'bg-danger/10 text-danger',
+    };
+  if (status === 'CANCELLED')
+    return {
+      icon: AlertTriangle,
+      title: '订舱已取消',
+      description: '该订舱已取消，不会继续进入后续操作流程。',
+      panelClass: 'border-border bg-sidebar',
+      iconClass: 'bg-surface text-muted',
+    };
+  return {
+    icon: FileCheck2,
+    title: '订舱状态已更新',
+    description: '请根据当前状态继续处理后续流程。',
+    panelClass: 'border-border bg-surface',
+    iconClass: 'bg-sidebar text-muted',
+  };
+}
 function Fact({
   label,
   value,
@@ -740,7 +861,7 @@ function Field({
   return (
     <label className={wide ? 'sm:col-span-2' : ''}>
       <span className="mb-1 block text-sm font-medium">
-        {label} {required ? <span className="font-bold text-danger">*</span> : null}
+        <FieldLabel label={label} required={required} />
       </span>
       {children}
       {error ? <span className="mt-1 block text-sm text-danger">{error}</span> : null}
@@ -814,11 +935,53 @@ function mapMissingFields(missing: string[] = []): FieldErrors {
   }, {});
 }
 
+function mapServerFieldErrors(payload?: ApiErrorPayload): FieldErrors {
+  const mapped = mapMissingFields(payload?.details?.missing);
+  const fieldErrors = payload?.details?.fieldErrors;
+  if (!fieldErrors) return mapped;
+  const labels: Record<string, [keyof FieldErrors, string]> = {
+    commodity: ['commodity', '请输入货物品名。'],
+    packageType: ['packageType', '请选择包装类型。'],
+    packages: ['packages', '请输入大于或等于 1 的整数。'],
+    grossWeight: ['grossWeight', '请输入大于 0 的毛重。'],
+    volumeCbm: ['volumeCbm', '体积如填写，必须大于 0。'],
+    cargoReadyDate: ['cargoReadyDate', '请选择有效预计货好日期。'],
+    sourceShipperId: ['shipperName', '请选择当前客户公司的有效发货人。'],
+    shipperName: ['shipperName', '请输入发货人名称。'],
+    shipperAddress: ['shipperAddress', '请输入发货人地址。'],
+    bookingContactName: ['bookingContactName', '请输入订舱联系人。'],
+    bookingContactEmail: ['bookingContact', '请输入有效联系人邮箱。'],
+    bookingContactPhone: ['bookingContact', '联系人电话不能超过 50 个字符。'],
+    bookingContact: ['bookingContact', '联系人邮箱和电话至少填写一项。'],
+    dangerousGoodsInfo: [
+      'dangerousGoodsInfo',
+      '危险品订舱请填写危险品品名、UN No.、IMO Class 和 MSDS 资料状态。',
+    ],
+    specialInstructions: ['dangerousGoodsInfo', '特殊要求不能超过 2000 个字符。'],
+    containerRequests: ['containerRequests', '请至少填写一条箱量需求。'],
+  };
+  for (const field of Object.keys(fieldErrors)) {
+    const normalized = field.replace(/\[(\d+)\]/g, '.$1');
+    const mappedField = labels[normalized] ?? labels[normalized.split('.')[0] ?? ''];
+    if (mappedField) mapped[mappedField[0]] = mappedField[1];
+  }
+  return mapped;
+}
+
 function formatApiError(payload: ApiErrorPayload, fallback: string) {
   if (payload.code === 'BOOKING_INCOMPLETE') return '订舱资料不完整，请检查标红的必填项。';
+  if (payload.code === 'SHIPPER_NOT_IN_CUSTOMER_SCOPE') return '请选择当前客户公司的有效发货人。';
+  if (payload.code === 'BOOKING_GROSS_WEIGHT_INVALID') return '毛重必须大于 0。';
+  if (payload.code === 'BOOKING_VOLUME_CBM_INVALID') return '体积如填写，必须大于 0。';
   const firstValidationError = payload.details?.errors?.[0];
-  if (firstValidationError) return `资料校验失败：${firstValidationError}`;
+  if (firstValidationError) return '资料校验失败，请检查标红字段。';
   return payload.message ?? fallback;
+}
+
+function toBookingApiError(error: unknown): BookingApiError {
+  return error instanceof BookingApiError
+    ? error
+    : new BookingApiError(error instanceof Error ? error.message : '操作失败。');
 }
 
 function formatContainerRequests(items: Container[]) {

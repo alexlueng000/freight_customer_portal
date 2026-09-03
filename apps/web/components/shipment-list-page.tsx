@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { EmptyState } from '@/components/empty-state';
@@ -9,15 +10,17 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import type { Shipment } from '@/components/shipment-types';
 import { StatusBadge } from '@/components/status-badge';
-import type { StatusTone } from '@/lib/mock-data';
+import { formatContainerSummary, formatDate } from '@/lib/formatters';
+import { shipmentStatusLabel, shipmentStatusTone } from '@/lib/shipment-status';
 
 export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
+  const searchParams = useSearchParams();
   const { apiFetch } = useAuth();
   const [items, setItems] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState(searchParams.get('status') ?? '');
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -77,7 +80,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
               'CANCELLED',
             ].map((value) => (
               <option key={value} value={value}>
-                {shipmentStatusLabel(value)}
+                {shipmentStatusLabel(value, mode)}
               </option>
             ))}
           </select>
@@ -91,8 +94,8 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
         ) : visible.length === 0 ? (
           <div className="p-4">
             <EmptyState
-              title="暂无匹配的 Shipment"
-              description="Booking 已登记并发布 SO 后，创建的 Basic Shipment 会显示在这里。"
+              title={status || query ? '没有匹配的 Shipment' : '还没有 Shipment'}
+              description={status || query ? '请调整状态或关键词后重新查看。' : 'Booking 确认并发布 SO 后，系统会创建 Basic Shipment，你可以在这里查看运输进度。'}
             />
           </div>
         ) : (
@@ -132,16 +135,14 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
                       <div className="text-xs text-muted">{item.voyage ?? '—'}</div>
                     </td>
                     <td className={cell}>
-                      {date(item.etd)} / {date(item.eta)}
+                      {formatDate(item.etd, '待确认')} / {formatDate(item.eta, '待确认')}
                     </td>
                     <td className={cell}>
-                      {item.booking.containerRequests
-                        .map((request) => `${request.quantity} × ${request.containerType}`)
-                        .join('，') || '—'}
+                      {formatContainerSummary(item.booking.containerRequests)}
                     </td>
                     <td className={cell}>
                       <StatusBadge tone={shipmentStatusTone(item.status)}>
-                        {shipmentStatusLabel(item.status)}
+                        {shipmentStatusLabel(item.status, mode)}
                       </StatusBadge>
                     </td>
                   </tr>
@@ -154,25 +155,6 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
     </div>
   );
 }
-const date = (value: string | null) => value?.slice(0, 10) ?? '待确认';
 const control = 'h-9 rounded border border-border bg-surface px-3 text-sm sm:min-w-56';
 const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
-
-function shipmentStatusLabel(status: string) {
-  return (
-    {
-      PLANNED: '待开船',
-      DEPARTED: '运输中',
-      ARRIVED: '已到港',
-      CANCELLED: '已取消',
-    }[status] ?? status
-  );
-}
-
-function shipmentStatusTone(status: string): StatusTone {
-  if (status === 'ARRIVED') return 'success';
-  if (status === 'CANCELLED') return 'danger';
-  if (status === 'DEPARTED') return 'info';
-  return 'neutral';
-}

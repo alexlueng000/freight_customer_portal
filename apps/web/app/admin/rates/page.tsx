@@ -3,6 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, Download, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { FieldPath, UseFormSetError } from 'react-hook-form';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
@@ -13,6 +14,7 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { FilterBar } from '@/components/filter-bar';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
+import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 
 type RateStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRED' | 'INACTIVE';
@@ -31,8 +33,8 @@ interface RateImportHeaderCandidate { row: number; depth: 1 | 2; score: number; 
 interface RateImportAnalysis { fileName: string; sheets: Array<{ index: number; name: string; rowCount: number; columnCount: number; mergedCellRanges: number; headerCandidates: RateImportHeaderCandidate[]; sampleRows: Array<{ row: number; values: string[] }> }> }
 interface RateImportPreview { previewToken: string; expiresAt: string; summary: { rateCount: number; priceCount: number; chargeCount: number; errorCount: number; warningCount: number }; rates: Array<{ source: { sheet: string; row: number }; rateNo?: string; polCode?: string; polName?: string; podCode?: string; podName?: string; carrierCode?: string; effectiveDate?: string; expiryDate?: string; currency?: string; status: string; prices: Array<{ containerType: string; costAmount?: string; sellAmount?: string; currency: string }>; charges?: Array<{ chargeCode: string; chargeName: string; chargeBasis: ChargeBasis; containerType?: string; amount: string; currency: string }> }>; issues: Array<{ severity: 'ERROR' | 'WARNING'; code: string; message: string; source: { sheet: string; row: number; column?: number; field?: string } }>; truncated: boolean }
 interface ImportFixDefaults { effectiveDate: string; expiryDate: string; currency: string }
-interface ApiErrorPayload { code?: string; message?: string }
-class RateApiError extends Error { constructor(message: string, readonly code?: string) { super(message); } }
+interface ApiErrorPayload { code?: string; message?: string; details?: { errors?: string[]; fieldErrors?: Record<string, string[]> } }
+class RateApiError extends Error { constructor(message: string, readonly code?: string, readonly details?: ApiErrorPayload['details']) { super(message); } }
 
 const decimal = z.string().trim().regex(/^\d{1,14}(?:\.\d{1,4})?$/, '请输入非负金额，最多 4 位小数');
 const optionalDecimal = z.string().trim().refine((value) => !value || /^\d{1,14}(?:\.\d{1,4})?$/.test(value), '请输入非负金额，最多 4 位小数');
@@ -356,7 +358,7 @@ function humanizeImportJobError(message: string) {
 
 function RateDialog({ apiFetch, rate, onClose, onSaved }: { apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; rate: Rate | null; onClose: () => void; onSaved: () => void }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const { register, control, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<RateFormValues>({ resolver: zodResolver(rateFormSchema), defaultValues: rate ? rateDefaults(rate) : emptyRateDefaults() });
+  const { register, control, handleSubmit, watch, setValue, setError, formState: { errors, isSubmitting } } = useForm<RateFormValues>({ resolver: zodResolver(rateFormSchema), defaultValues: rate ? rateDefaults(rate) : emptyRateDefaults() });
   const prices = useFieldArray({ control, name: 'prices' }); const charges = useFieldArray({ control, name: 'charges' }); const mainCurrency = watch('currency');
   const polCodeField = register('polCode'); const podCodeField = register('podCode'); const carrierCodeField = register('carrierCode'); const currencyField = register('currency');
   const applyPort = (target: 'polName' | 'podName', code: string) => { const port = commonPorts.find((item) => item.code === upper(code)); if (port) setValue(target, port.name, { shouldDirty: true, shouldValidate: true }); };
@@ -364,10 +366,10 @@ function RateDialog({ apiFetch, rate, onClose, onSaved }: { apiFetch: (input: Re
   const submit = handleSubmit(async (values) => {
     setSubmitError(null);
     const payload = { ...values, rateNo: upper(values.rateNo), polCode: upper(values.polCode), podCode: upper(values.podCode), carrierCode: upper(values.carrierCode), currency: upper(values.currency), ...(values.etd ? { etd: new Date(values.etd).toISOString() } : { etd: undefined }), ...(values.transitDays ? { transitDays: Number(values.transitDays) } : { transitDays: undefined }), serviceName: optional(values.serviceName), supplierName: optional(values.supplierName), contractNo: optional(values.contractNo), prices: values.prices.map((price) => ({ ...price, containerType: upper(price.containerType), currency: upper(price.currency), remark: optional(price.remark), ...(price.sellAmount ? {} : { sellAmount: undefined }) })), charges: values.charges.map((charge) => ({ ...charge, chargeCode: upper(charge.chargeCode), chargeName: charge.chargeName.trim(), currency: upper(charge.currency), ...(charge.chargeBasis === 'PER_CONTAINER' ? { containerType: charge.containerType } : { containerType: undefined }) })) };
-    try { await requestJson<Rate>(apiFetch, rate ? `/api/v1/rates/${rate.id}` : '/api/v1/rates', { method: rate ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }); onSaved(); } catch (caught) { setSubmitError(toRateError(caught).message); }
+    try { await requestJson<Rate>(apiFetch, rate ? `/api/v1/rates/${rate.id}` : '/api/v1/rates', { method: rate ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }); onSaved(); } catch (caught) { const error = toRateError(caught); applyRateServerFieldErrors(error.details?.fieldErrors, setError); setSubmitError(localizeRateError(error)); }
   });
   return <div aria-labelledby="rate-dialog-title" aria-modal="true" className="fixed inset-0 z-50 flex items-start justify-end bg-foreground/30" role="dialog"><button aria-label="关闭运价表单" className="absolute inset-0" onClick={onClose} type="button" /><div className="relative h-full w-full max-w-4xl overflow-y-auto border-l border-border bg-surface shadow-xl">
-    <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4"><div><h2 className="text-lg font-semibold" id="rate-dialog-title">{rate ? '编辑运价' : '新建运价'}</h2><p className="mt-1 text-sm text-muted">带 * 的字段为必填项；金额最多保留 4 位小数。</p></div><button aria-label="关闭" className="grid size-9 place-items-center rounded border border-border" onClick={onClose} type="button"><X aria-hidden className="size-4" /></button></div>
+    <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4"><div><h2 className="text-lg font-semibold" id="rate-dialog-title">{rate ? '编辑运价' : '新建运价'}</h2><p className="mt-1 text-sm text-muted"><RequiredLegend>字段为保存运价前必须填写</RequiredLegend>；金额最多保留 4 位小数。</p></div><button aria-label="关闭" className="grid size-9 place-items-center rounded border border-border" onClick={onClose} type="button"><X aria-hidden className="size-4" /></button></div>
     <form className="space-y-6 p-5" onSubmit={(event) => void submit(event)}><RateFormOptionLists />{submitError ? <div className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">{submitError}</div> : null}
       <fieldset className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><legend className="col-span-full text-sm font-semibold">基础信息</legend>
         <FormField error={errors.rateNo?.message} label="运价编号 *"><input {...register('rateNo')} className={inputClass} placeholder="例如 RATE-SHA-LAX-001" /></FormField><FormField error={errors.carrierCode?.message} label="船司代码 *"><input {...carrierCodeField} className={inputClass} list="rate-carrier-options" placeholder="选择或输入船司代码" /></FormField><FormField error={errors.serviceName?.message} label="航线服务"><input {...register('serviceName')} className={inputClass} list="rate-service-options" placeholder="选择或输入服务名称" /></FormField><FormField error={errors.status?.message} label="状态 *"><select {...register('status')} className={inputClass}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
@@ -375,7 +377,7 @@ function RateDialog({ apiFetch, rate, onClose, onSaved }: { apiFetch: (input: Re
         <FormField error={errors.effectiveDate?.message} label="生效日 *"><input {...register('effectiveDate')} className={inputClass} type="date" /></FormField><FormField error={errors.expiryDate?.message} label="失效日 *"><input {...register('expiryDate')} className={inputClass} type="date" /></FormField><FormField error={errors.etd?.message} label="ETD"><input {...register('etd')} className={inputClass} type="datetime-local" /></FormField><FormField error={errors.transitDays?.message} label="航程（天）"><input {...register('transitDays')} className={inputClass} inputMode="numeric" /></FormField>
         <FormField error={errors.supplierName?.message} label="供应方"><input {...register('supplierName')} className={inputClass} placeholder="可选，供应商或代理名称" /></FormField><FormField error={errors.contractNo?.message} label="合约号"><input {...register('contractNo')} className={inputClass} placeholder="可选" /></FormField><FormField error={errors.currency?.message} label="基础币种 *"><select {...currencyField} className={inputClass}>{currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select></FormField>
       </fieldset>
-      <fieldset className="space-y-3 border-t border-border pt-5"><div className="flex items-center justify-between"><legend className="text-sm font-semibold">箱型价格 *</legend><button className={secondaryButton} onClick={() => prices.append({ containerType: '40HQ', costAmount: '', sellAmount: '', currency: mainCurrency || 'USD', remark: '' })} type="button"><Plus className="size-3.5" /> 添加箱型</button></div>{errors.prices?.root?.message ? <p className="text-xs text-danger">{errors.prices.root.message}</p> : null}
+      <fieldset className="space-y-3 border-t border-border pt-5"><div className="flex items-center justify-between"><legend className="text-sm font-semibold"><FieldLabel label="箱型价格" required /></legend><button className={secondaryButton} onClick={() => prices.append({ containerType: '40HQ', costAmount: '', sellAmount: '', currency: mainCurrency || 'USD', remark: '' })} type="button"><Plus className="size-3.5" /> 添加箱型</button></div>{errors.prices?.root?.message ? <p className="text-xs text-danger">{errors.prices.root.message}</p> : null}
         {prices.fields.map((field, index) => <div className="grid gap-3 rounded border border-border bg-background p-3 sm:grid-cols-2 lg:grid-cols-[110px_1fr_1fr_100px_1.4fr_40px]" key={field.id}><FormField error={errors.prices?.[index]?.containerType?.message} label="箱型"><select {...register(`prices.${index}.containerType`)} className={inputClass}>{containerTypes.map((type) => <option key={type}>{type}</option>)}</select></FormField><FormField error={errors.prices?.[index]?.costAmount?.message} label="采购成本"><input {...register(`prices.${index}.costAmount`)} className={inputClass} inputMode="decimal" placeholder="例如 1250.00" /></FormField><FormField error={errors.prices?.[index]?.sellAmount?.message} label="标准售价"><input {...register(`prices.${index}.sellAmount`)} className={inputClass} inputMode="decimal" placeholder="可选" /></FormField><FormField error={errors.prices?.[index]?.currency?.message} label="币种"><select {...register(`prices.${index}.currency`)} className={inputClass}>{currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select></FormField><FormField error={errors.prices?.[index]?.remark?.message} label="备注"><input {...register(`prices.${index}.remark`)} className={inputClass} /></FormField><button aria-label="删除箱型价格" className="mt-6 grid size-10 place-items-center rounded border border-border text-muted hover:text-danger disabled:opacity-30" disabled={prices.fields.length === 1} onClick={() => prices.remove(index)} type="button"><Trash2 className="size-4" /></button></div>)}
       </fieldset>
       <fieldset className="space-y-3 border-t border-border pt-5"><div className="flex items-center justify-between"><legend className="text-sm font-semibold">附加费用</legend><button className={secondaryButton} onClick={() => charges.append({ chargeCode: '', chargeName: '', chargeBasis: 'PER_CONTAINER', containerType: '40HQ', amount: '', currency: mainCurrency || 'USD', isIncluded: false })} type="button"><Plus className="size-3.5" /> 添加费用</button></div>
@@ -388,10 +390,68 @@ function RateDialog({ apiFetch, rate, onClose, onSaved }: { apiFetch: (input: Re
 
 function Pagination({ page, pagination, setPage }: { page: number; pagination: RateListResponse['pagination']; setPage: React.Dispatch<React.SetStateAction<number>> }) { return <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted"><span>共 {pagination.total} 条运价</span><div className="flex items-center gap-2"><button aria-label="上一页" className={pageButtonClass} disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button"><ChevronLeft className="size-4" /></button><span>第 {pagination.page} / {Math.max(1, pagination.totalPages)} 页</span><button aria-label="下一页" className={pageButtonClass} disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} type="button"><ChevronRight className="size-4" /></button></div></div>; }
 function RateFormOptionLists() { return <><datalist id="rate-port-options">{commonPorts.map((port) => <option key={port.code} value={port.code}>{port.name}</option>)}</datalist><datalist id="rate-carrier-options">{carrierOptions.map((carrier) => <option key={carrier.code} value={carrier.code}>{carrier.name}</option>)}</datalist><datalist id="rate-service-options"><option value="Pacific Express" /><option value="Europe Weekly" /><option value="Transpacific" /><option value="Asia Europe" /></datalist><datalist id="rate-charge-options">{chargeOptions.map((charge) => <option key={charge.code} value={charge.code}>{charge.name}</option>)}</datalist></>; }
-function FormField({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) { return <label className="block text-sm"><span className="font-medium">{label}</span><span className="mt-1.5 block">{children}</span>{error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}</label>; }
+function FormField({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) { return <label className="block text-sm"><FieldLabel label={label} /><span className="mt-1.5 block">{children}</span>{error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}</label>; }
 function emptyRateDefaults(): RateFormValues { const today = new Date().toISOString().slice(0, 10); return { rateNo: '', polCode: '', polName: '', podCode: '', podName: '', carrierCode: '', serviceName: '', effectiveDate: today, expiryDate: today, etd: '', transitDays: '', supplierName: '', contractNo: '', currency: 'USD', status: 'DRAFT', prices: [{ containerType: '40HQ', costAmount: '', sellAmount: '', currency: 'USD', remark: '' }], charges: [] }; }
 function rateDefaults(rate: Rate): RateFormValues { return { rateNo: rate.rateNo, polCode: rate.polCode, polName: rate.polName, podCode: rate.podCode, podName: rate.podName, carrierCode: rate.carrierCode, serviceName: rate.serviceName ?? '', effectiveDate: rate.effectiveDate.slice(0, 10), expiryDate: rate.expiryDate.slice(0, 10), etd: rate.etd ? new Date(rate.etd).toISOString().slice(0, 16) : '', transitDays: rate.transitDays?.toString() ?? '', supplierName: rate.supplierName ?? '', contractNo: rate.contractNo ?? '', currency: rate.currency, status: rate.status, prices: rate.prices.map((price) => ({ containerType: price.containerType, costAmount: price.costAmount, sellAmount: price.sellAmount ?? '', currency: price.currency, remark: price.remark ?? '' })), charges: rate.charges.map((charge) => ({ chargeCode: charge.chargeCode, chargeName: charge.chargeName, chargeBasis: charge.chargeBasis, containerType: charge.containerType ?? '', amount: charge.amount, currency: charge.currency, isIncluded: charge.isIncluded })) }; }
-async function requestJson<T>(apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>, input: RequestInfo | URL, init?: RequestInit): Promise<T> { const response = await apiFetch(input, init); const payload = (await response.json().catch(() => undefined)) as T | ApiErrorPayload | undefined; if (!response.ok) { const error = payload as ApiErrorPayload | undefined; throw new RateApiError(error?.message ?? '运价服务暂时不可用，请稍后重试。', error?.code); } return payload as T; }
+async function requestJson<T>(apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>, input: RequestInfo | URL, init?: RequestInit): Promise<T> { const response = await apiFetch(input, init); const payload = (await response.json().catch(() => undefined)) as T | ApiErrorPayload | undefined; if (!response.ok) { const error = payload as ApiErrorPayload | undefined; throw new RateApiError(error?.message ?? '运价服务暂时不可用，请稍后重试。', error?.code, error?.details); } return payload as T; }
+function applyRateServerFieldErrors(fieldErrors: Record<string, string[]> | undefined, setError: UseFormSetError<RateFormValues>) {
+  if (!fieldErrors) return;
+  for (const field of Object.keys(fieldErrors)) {
+    const path = rateFieldPath(field);
+    if (path) setError(path, { type: 'server', message: rateFieldErrorMessage(field) });
+  }
+}
+function rateFieldPath(field: string): FieldPath<RateFormValues> | null {
+  const normalized = field.replace(/\[(\d+)\]/g, '.$1');
+  if (normalized.startsWith('prices.')) return normalized as FieldPath<RateFormValues>;
+  if (normalized.startsWith('charges.')) return normalized as FieldPath<RateFormValues>;
+  if (normalized in rateRootFieldMessages) return normalized as FieldPath<RateFormValues>;
+  return null;
+}
+const rateRootFieldMessages: Partial<Record<keyof RateFormValues, string>> = {
+  rateNo: '请输入有效且未重复的运价编号',
+  polCode: '请输入有效起运港代码',
+  polName: '起运港名称为必填项',
+  podCode: '请输入有效目的港代码',
+  podName: '目的港名称为必填项',
+  carrierCode: '请输入有效船司代码',
+  serviceName: '航线服务不能超过 150 个字符',
+  effectiveDate: '请选择有效生效日',
+  expiryDate: '请选择有效失效日',
+  etd: '请选择有效 ETD',
+  transitDays: '航程必须是 0–365 的整数',
+  supplierName: '供应方不能超过 200 个字符',
+  contractNo: '合约号不能超过 100 个字符',
+  currency: '请选择三位币种代码',
+  status: '请选择有效状态',
+  prices: '至少添加一个有效箱型价格',
+  charges: '请检查附加费用',
+};
+function rateFieldErrorMessage(field: string) {
+  const normalized = field.replace(/\[(\d+)\]/g, '.$1');
+  if (normalized.endsWith('.containerType')) return '请选择有效箱型';
+  if (normalized.endsWith('.costAmount')) return '请输入有效采购成本';
+  if (normalized.endsWith('.sellAmount')) return '请输入有效标准售价';
+  if (normalized.endsWith('.currency')) return '请选择三位币种代码';
+  if (normalized.endsWith('.remark')) return '备注不能超过 500 个字符';
+  if (normalized.endsWith('.chargeCode')) return '请输入有效费用代码';
+  if (normalized.endsWith('.chargeName')) return '请输入费用名称';
+  if (normalized.endsWith('.chargeBasis')) return '请选择计价单位';
+  if (normalized.endsWith('.amount')) return '请输入有效费用金额';
+  return rateRootFieldMessages[normalized as keyof RateFormValues] ?? '请检查该字段';
+}
+function localizeRateError(error: RateApiError): string {
+  const messages: Record<string, string> = {
+    VALIDATION_ERROR: '请检查标红字段后重新提交。',
+    RATE_NUMBER_EXISTS: '运价编号已存在，请更换后重新提交。',
+    INVALID_RATE_VALIDITY: '失效日不能早于生效日。',
+    DUPLICATE_CONTAINER_TYPE: '同一运价不能重复添加相同箱型。',
+    INVALID_RATE_CHARGE: '请检查附加费用的计价单位和箱型。',
+    RATE_NOT_FOUND: '运价不存在或已无法访问。',
+    PERMISSION_DENIED: '你没有维护运价的权限。',
+  };
+  return (error.code && messages[error.code]) || error.message || '保存失败，请稍后重试。';
+}
 function toRateError(error: unknown): RateApiError { return error instanceof RateApiError ? error : new RateApiError(error instanceof Error ? error.message : '运价服务暂时不可用，请稍后重试。'); }
 function upper(value: string) { return value.trim().toUpperCase(); } function optional(value: string) { return value.trim() || undefined; }
 function formatDate(value: string) { return value.slice(0, 10); } function formatMoney(value: string, currency: string) { return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`; }

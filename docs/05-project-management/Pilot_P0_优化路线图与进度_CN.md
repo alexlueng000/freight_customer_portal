@@ -54,7 +54,7 @@ P0-B：Quote → Booking → SO 真实业务流程
 | 6. Booking 客户侧减负 | P0 | Quote 自动继承、联系人/Shipper 复用、最小表单 | 已完成并通过针对性 Playwright |
 | 7. Booking 作业状态 | P0 | 待审核、待订舱、待 SO、已订舱语义统一 | 已完成并通过状态机/数据库测试 |
 | 8. SO 登记与发布 | P0 | 结构化 SO、内部保存、核对后发布、版本追溯 | 已完成并通过可见性/并发/黄金路径测试 |
-| 9. 横向体验与权限 | P1 | 权限按钮、主数据、账号、Dashboard、中文错误 | 待开发 |
+| 9. 横向体验与权限 | P1 | 权限按钮、主数据、账号、Dashboard、中文错误 | 进行中，第一批权限/客户维护/Dashboard 已完成 |
 | 10. 全链路回归 | Gate | 从真实 Excel 重新回归至 Shipment，决定是否恢复后续 UAT | P0-A Excel 导入已通过当前测试；P0-B4 技术 Gate 已通过 |
 
 ## 4. P0-A：真实运价 Excel 导入
@@ -331,6 +331,16 @@ P0 完成后处理：
 7. 统一加载、空状态、成功、失败、权限不足和二次确认体验。
 8. 清理“按钮可点击，调用后才报无权限”的死操作。
 
+2026-09-03 当前进展：
+
+- 登录态已返回数据库有效权限集合，关键页面操作入口已从角色硬编码升级为权限和业务状态共同控制。
+- 客户公司更新、客户详情编辑、客户账号开通入口和用户创建预绑定已完成。
+- 统一字段级 API 错误响应已接入客户、Rate、Booking/SO 等高频表单。
+- 主要表单必填项已统一为“* 必填”徽标，提升客户和后台用户填写时的可扫描性。
+- Notification 基础切片、顶部通知菜单和 Dashboard 聚合 API 已完成第一版。
+- 客户 Dashboard 已显示待处理 Quote、待补资料 Booking、进行中 Shipment、待确认账单和未读通知。
+- Quote 首页待办口径已修复：`SENT/VIEWED` 报价提示确认，`ACCEPTED` 且未转 Booking 的报价提示创建订舱。
+
 ## 7. 全链路回归 Gate
 
 完成 P0/P1 后，不从当前 SO 页面继续，而是从数据入口重新回归：
@@ -366,17 +376,13 @@ P0 完成后处理：
 
 ```text
 8873ec0 Document UAT findings and harden booking flow
+d94460a V1.1 baseline
 ```
 
-### 当前未提交的 P0 工作区
+### 当前 P1 工作区
 
-- 复杂工作簿分析器及 API；
-- OpenXML Namespace Prefix 兼容回退；
-- Mapping Profile DTO、Service、Controller；
-- Mapping Profile Prisma 模型和 migration；
-- 运价导入分析与 Mapping UI；
-- 工作簿分析和租户 Mapping Service 测试；
-- `jszip` 直接依赖及 lockfile 更新。
+- 权限、客户维护、通知、Dashboard、表单字段级错误和必填标识已进入收口提交。
+- 当前批次不扩大 V1.1 主链路范围，不恢复复杂 Tracking、BL 和 Invoice 到 P0。
 
 ### 已执行验证
 
@@ -394,6 +400,8 @@ P0 完成后处理：
 | `git diff --check` | 通过 |
 | 2026-09-01 Rate Import 针对性测试 | `pnpm --filter @freight/api test -- rate-import` 通过：3 个 Suite、14 个 Test |
 | 2026-09-01 TypeScript 检查 | `pnpm --filter @freight/api typecheck`、`pnpm --filter @freight/web typecheck` 通过 |
+| 2026-09-03 Dashboard / Quote 待办 | `pnpm --filter api test -- dashboard.service.spec.ts` 通过：1 个 Suite、4 个 Test |
+| 2026-09-03 当前批次 TypeScript / Lint | API 与 Web typecheck、lint 均通过 |
 
 ### 后续业务项
 

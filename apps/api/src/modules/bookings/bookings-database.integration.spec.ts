@@ -16,8 +16,23 @@ const storage = {
   remove: jest.fn().mockResolvedValue(undefined),
   onModuleDestroy: jest.fn(),
 } as unknown as DocumentStorageService;
-const service = new BookingsService(prisma, context, new BookingStateMachine());
-const bookingSo = new BookingSoService(prisma, context, storage);
+const notificationCalls: CustomerNotificationInput[] = [];
+const notificationEvents = {
+  createCustomerNotifications(_tx: unknown, input: CustomerNotificationInput): Promise<[]> {
+    notificationCalls.push(input);
+    return Promise.resolve([]);
+  },
+  enqueueEmailNotifications(): Promise<void> {
+    return Promise.resolve();
+  },
+};
+const service = new BookingsService(
+  prisma,
+  context,
+  new BookingStateMachine(),
+  notificationEvents as never,
+);
+const bookingSo = new BookingSoService(prisma, context, storage, notificationEvents as never);
 const documents = new DocumentsService(prisma, context, storage);
 const tenantIds: string[] = [];
 let tenantA: string;
@@ -31,6 +46,13 @@ let userB: string;
 let operationA: string;
 let quoteA: string;
 let bookingA: string;
+
+interface CustomerNotificationInput {
+  tenantId: string;
+  customerCompanyId: string;
+  type: string;
+  payload: Record<string, unknown>;
+}
 
 describe('booking database integration', () => {
   beforeAll(async () => {
@@ -255,6 +277,13 @@ describe('booking database integration', () => {
       }),
     );
     expect(revision.status).toBe(BookingStatus.REVISION_REQUIRED);
+    const revisionNotification = lastNotification('BOOKING_NEEDS_UPDATE');
+    expect(revisionNotification).toMatchObject({
+      tenantId: tenantA,
+      customerCompanyId: customerA,
+      payload: { bookingId: bookingA, href: `/portal/bookings/${bookingA}` },
+    });
+    expect(revisionNotification?.payload.bookingNo).toMatch(/^BOOK\d{12}$/);
     await runCustomer(tenantA, userA, customerA, () =>
       service.update(bookingA, { commodity: 'Consumer electronics accessories' }),
     );
@@ -406,6 +435,11 @@ describe('booking database integration', () => {
     });
     const published = await runInternal(() => bookingSo.publish(bookingA, draft.id));
     expect(published).toMatchObject({ status: 'PUBLISHED', version: 1 });
+    expect(lastNotification('SO_PUBLISHED')).toMatchObject({
+      tenantId: tenantA,
+      customerCompanyId: customerA,
+      payload: { bookingId: bookingA, soRecordId: draft.id, href: `/portal/bookings/${bookingA}` },
+    });
     expect((await prisma.booking.findUniqueOrThrow({ where: { id: bookingA } })).status).toBe(
       BookingStatus.BOOKED,
     );
@@ -477,6 +511,15 @@ describe('booking database integration', () => {
       service.createShipment(bookingA, { vessel: 'Demo Vessel', voyage: 'DV001' }),
     );
     expect(shipment.bookingId).toBe(bookingA);
+    expect(lastNotification('SHIPMENT_CREATED')).toMatchObject({
+      tenantId: tenantA,
+      customerCompanyId: customerA,
+      payload: {
+        bookingId: bookingA,
+        shipmentId: shipment.id,
+        href: `/portal/shipments/${shipment.id}`,
+      },
+    });
     const hidden = await prisma.document.create({
       data: {
         tenantId: tenantA,
@@ -545,6 +588,14 @@ function soFile(originalname: string) {
     mimetype: 'application/pdf',
     size: 12,
   } as Express.Multer.File;
+}
+
+function lastNotification(type: string) {
+  for (let index = notificationCalls.length - 1; index >= 0; index -= 1) {
+    const input = notificationCalls[index];
+    if (input?.type === type) return input;
+  }
+  return undefined;
 }
 
 async function createAcceptedQuote(

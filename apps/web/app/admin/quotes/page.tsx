@@ -1,7 +1,8 @@
 'use client';
 import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
@@ -27,6 +28,8 @@ interface QuoteList {
 }
 export default function AdminQuotesPage() {
   const { apiFetch } = useAuth();
+  const searchParams = useSearchParams();
+  const status = searchParams.get('status') ?? '';
   const [page, setPage] = useState(1);
   const [data, setData] = useState<QuoteList | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,6 +48,11 @@ export default function AdminQuotesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  const visibleItems = useMemo(
+    () => (status && data?.items ? data.items.filter((quote) => quote.status === status) : data?.items ?? []),
+    [data?.items, status],
+  );
+  const pagination = data?.pagination;
   return (
     <div className="space-y-5">
       <PageHeader eyebrow="运营后台" title="报价" description="查看客户报价，进入详情核对后再确认发送。" />
@@ -58,9 +66,12 @@ export default function AdminQuotesPage() {
             </div>
           ) : loading ? (
             <LoadingState rows={6} />
-          ) : !data?.items.length ? (
+          ) : !visibleItems.length ? (
             <div className="p-4">
-              <EmptyState title="暂无报价" description="客户提交报价申请后会显示在这里。" />
+              <EmptyState
+                title={status === 'DRAFT' ? '当前没有待销售确认报价' : '暂无报价'}
+                description={status === 'DRAFT' ? '客户提交报价申请后，待审核的 Quote 会显示在这里。' : '客户提交报价申请后会显示在这里。'}
+              />
             </div>
           ) : (
             <>
@@ -78,7 +89,7 @@ export default function AdminQuotesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.items.map((quote) => (
+                    {visibleItems.map((quote) => (
                       <tr className="border-b border-border last:border-0" key={quote.id}>
                         <td className={cell}>
                           <Link
@@ -120,7 +131,7 @@ export default function AdminQuotesPage() {
                 </table>
               </div>
               <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted">
-                <span>共 {data.pagination.total} 份</span>
+                <span>共 {pagination?.total ?? visibleItems.length} 份</span>
                 <div className="flex items-center gap-2">
                   <button
                     className={button}
@@ -130,11 +141,11 @@ export default function AdminQuotesPage() {
                     <ChevronLeft className="size-4" />
                   </button>
                   <span>
-                    第 {page} / {Math.max(1, data.pagination.totalPages)} 页
+                    第 {page} / {Math.max(1, pagination?.totalPages ?? 1)} 页
                   </span>
                   <button
                     className={button}
-                    disabled={page >= data.pagination.totalPages}
+                    disabled={page >= (pagination?.totalPages ?? 1)}
                     onClick={() => setPage((v) => v + 1)}
                   >
                     <ChevronRight className="size-4" />

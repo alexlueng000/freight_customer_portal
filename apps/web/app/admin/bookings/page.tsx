@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { EmptyState } from '@/components/empty-state';
@@ -20,9 +21,10 @@ interface Booking {
   createdAt: string;
 }
 export default function AdminBookingsPage() {
+  const searchParams = useSearchParams();
   const { apiFetch } = useAuth();
   const [items, setItems] = useState<Booking[]>([]);
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState(searchParams.get('status') ?? '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const load = useCallback(async () => {
@@ -82,7 +84,10 @@ export default function AdminBookingsPage() {
           </div>
         ) : !items.length ? (
           <div className="p-4">
-            <EmptyState title="暂无订舱" description="客户从已接受报价创建订舱后会显示在这里。" />
+            <EmptyState
+              title={status ? '当前没有这个状态的订舱' : '当前没有待处理订舱'}
+              description={status ? '请切换状态筛选，或等待新的客户订舱申请。' : '新的客户订舱申请会自动出现在这里。'}
+            />
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -116,7 +121,7 @@ export default function AdminBookingsPage() {
                       {b.commodity ?? '待填写'}
                       <div className="text-xs text-muted">
                         {b.containerRequests
-                          .map((c) => `${c.containerType} × ${c.quantity}`)
+                          .map((c) => `${c.quantity} × ${c.containerType}`)
                           .join(' / ')}
                       </div>
                     </td>

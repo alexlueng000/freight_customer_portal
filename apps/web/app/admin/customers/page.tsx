@@ -13,12 +13,20 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { FilterBar } from '@/components/filter-bar';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
+import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 import { useAuth } from '@/components/auth-provider';
 import { hasPermission } from '@/lib/auth';
 
 type CustomerStatus = 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
 type MarkupType = 'NONE' | 'FIXED' | 'PERCENT';
+type RoleCode =
+  | 'TENANT_ADMIN'
+  | 'SALES'
+  | 'OPERATION'
+  | 'FINANCE'
+  | 'CUSTOMER_ADMIN'
+  | 'CUSTOMER_USER';
 
 interface Customer {
   id: string;
@@ -39,6 +47,17 @@ interface Customer {
 interface CustomerListResponse {
   items: Customer[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+interface SalesUserOption {
+  id: string;
+  displayName: string;
+  email: string;
+  userRoles: Array<{ role: { code: RoleCode } }>;
+}
+
+interface UserListResponse {
+  items: SalesUserOption[];
 }
 
 interface ApiErrorPayload {
@@ -89,6 +108,7 @@ const customerSchema = z
       ),
     defaultMarkupType: z.enum(['NONE', 'FIXED', 'PERCENT']),
     defaultMarkupValue: optionalDecimal,
+    salesOwnerId: z.string(),
     status: z.enum(['ACTIVE', 'INACTIVE', 'BLOCKED']),
   })
   .superRefine((value, context) => {
@@ -147,6 +167,7 @@ export default function CustomersPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [salesUsers, setSalesUsers] = useState<SalesUserOption[]>([]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -179,6 +200,22 @@ export default function CustomersPage() {
   useEffect(() => {
     void loadCustomers();
   }, [loadCustomers, reloadKey]);
+
+  useEffect(() => {
+    if (!hasPermission(user, 'user.read')) return;
+    requestJson<UserListResponse>(
+      apiFetch,
+      '/api/v1/users?page=1&pageSize=100&userType=INTERNAL&status=ACTIVE',
+    )
+      .then((result) =>
+        setSalesUsers(
+          result.items.filter((item) =>
+            item.userRoles.some(({ role }) => role.code === 'SALES'),
+          ),
+        ),
+      )
+      .catch(() => setSalesUsers([]));
+  }, [apiFetch, user]);
 
   const canCreate = hasPermission(user, 'customer.manage');
 
@@ -394,6 +431,7 @@ export default function CustomersPage() {
           apiFetch={apiFetch}
           onClose={() => setCreateOpen(false)}
           onCreated={handleCreated}
+          salesUsers={salesUsers}
         />
       ) : null}
     </div>
@@ -404,10 +442,12 @@ function CreateCustomerDialog({
   apiFetch,
   onClose,
   onCreated,
+  salesUsers,
 }: {
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   onClose: () => void;
   onCreated: () => void;
+  salesUsers: SalesUserOption[];
 }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const {
@@ -426,6 +466,7 @@ function CreateCustomerDialog({
       paymentTermDays: '',
       defaultMarkupType: 'NONE',
       defaultMarkupValue: '',
+      salesOwnerId: '',
       status: 'ACTIVE',
     },
   });
@@ -442,6 +483,7 @@ function CreateCustomerDialog({
       ...(values.paymentTermDays ? { paymentTermDays: Number(values.paymentTermDays) } : {}),
       defaultMarkupType: values.defaultMarkupType,
       ...(values.defaultMarkupValue ? { defaultMarkupValue: values.defaultMarkupValue } : {}),
+      ...(values.salesOwnerId ? { salesOwnerId: values.salesOwnerId } : {}),
       status: values.status,
     };
     try {
@@ -475,7 +517,9 @@ function CreateCustomerDialog({
             <h2 className="text-lg font-semibold" id="create-customer-title">
               新建客户
             </h2>
-            <p className="mt-1 text-sm text-muted">带 * 的字段为必填项，保存后可继续添加联系人。</p>
+            <p className="mt-1 text-sm text-muted">
+              <RequiredLegend>字段为保存客户前必须填写，保存后可继续添加联系人。</RequiredLegend>
+            </p>
           </div>
           <button
             aria-label="关闭"
@@ -522,6 +566,16 @@ function CreateCustomerDialog({
                 <option value="ACTIVE">启用</option>
                 <option value="INACTIVE">停用</option>
                 <option value="BLOCKED">冻结</option>
+              </select>
+            </FormField>
+            <FormField error={errors.salesOwnerId?.message} label="销售负责人">
+              <select {...register('salesOwnerId')} className={inputClass}>
+                <option value="">暂不分配</option>
+                {salesUsers.map((sales) => (
+                  <option key={sales.id} value={sales.id}>
+                    {sales.displayName} ({sales.email})
+                  </option>
+                ))}
               </select>
             </FormField>
           </fieldset>
@@ -600,7 +654,7 @@ function FormField({
 }) {
   return (
     <label className="block text-sm">
-      <span className="font-medium">{label}</span>
+      <FieldLabel label={label} />
       <span className="mt-1.5 block">{children}</span>
       {error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}
     </label>
