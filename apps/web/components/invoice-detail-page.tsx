@@ -8,10 +8,13 @@ import type { Invoice, InvoiceDocument } from '@/components/invoice-types';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { hasPermission } from '@/lib/auth';
 
 export function InvoiceDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const { id } = useParams<{ id: string }>();
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
+  const canManageInvoice = mode === 'admin' && hasPermission(user, 'invoice.manage');
+  const canConfirmInvoice = mode === 'portal' && hasPermission(user, 'invoice.confirm');
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [documents, setDocuments] = useState<InvoiceDocument[]>([]);
   const [file, setFile] = useState<File | null>(null);
@@ -31,8 +34,7 @@ export function InvoiceDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       const documentPayload = (await documentResponse.json()) as InvoiceDocument[] & {
         message?: string;
       };
-      if (!documentResponse.ok)
-        throw new Error(documentPayload.message ?? '账单附件加载失败。');
+      if (!documentResponse.ok) throw new Error(documentPayload.message ?? '账单附件加载失败。');
       setInvoice(payload);
       setDocuments(documentPayload);
     } catch (reason) {
@@ -101,35 +103,34 @@ export function InvoiceDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   if (loading) return <LoadingState rows={7} />;
   if (!invoice)
     return <ErrorState description={error || '账单不存在'} onRetry={() => void load()} />;
-  const actions =
-    mode === 'admin' ? (
-      <div className="flex gap-2">
-        {invoice.status === 'DRAFT' ? (
-          <>
-            <button className={secondary} disabled={busy} onClick={() => void act('void')}>
-              作废
-            </button>
-            <button className={primary} disabled={busy} onClick={() => void act('issue')}>
-              发布账单
-            </button>
-          </>
-        ) : null}
-        {['ISSUED', 'CUSTOMER_CONFIRMED'].includes(invoice.status) ? (
-          <>
-            <button className={secondary} disabled={busy} onClick={() => void act('void')}>
-              作废
-            </button>
-            <button className={primary} disabled={busy} onClick={() => void act('mark-paid')}>
-              标记已收款
-            </button>
-          </>
-        ) : null}
-      </div>
-    ) : invoice.status === 'ISSUED' ? (
-      <button className={primary} disabled={busy} onClick={() => void act('confirm')}>
-        确认账单
-      </button>
-    ) : undefined;
+  const actions = canManageInvoice ? (
+    <div className="flex gap-2">
+      {invoice.status === 'DRAFT' ? (
+        <>
+          <button className={secondary} disabled={busy} onClick={() => void act('void')}>
+            作废
+          </button>
+          <button className={primary} disabled={busy} onClick={() => void act('issue')}>
+            发布账单
+          </button>
+        </>
+      ) : null}
+      {['ISSUED', 'CUSTOMER_CONFIRMED'].includes(invoice.status) ? (
+        <>
+          <button className={secondary} disabled={busy} onClick={() => void act('void')}>
+            作废
+          </button>
+          <button className={primary} disabled={busy} onClick={() => void act('mark-paid')}>
+            标记已收款
+          </button>
+        </>
+      ) : null}
+    </div>
+  ) : canConfirmInvoice && invoice.status === 'ISSUED' ? (
+    <button className={primary} disabled={busy} onClick={() => void act('confirm')}>
+      确认账单
+    </button>
+  ) : undefined;
   return (
     <div className="space-y-5">
       <Link
@@ -216,7 +217,7 @@ export function InvoiceDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
           <h2 className="font-semibold">Invoice 附件</h2>
           <p className="mt-1 text-sm text-muted">客户仅能访问当前账单已授权的有效附件。</p>
         </div>
-        {mode === 'admin' ? (
+        {canManageInvoice ? (
           <div className="flex flex-wrap items-center gap-3">
             <input
               accept="application/pdf,image/png,image/jpeg"

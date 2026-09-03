@@ -1,13 +1,23 @@
 'use client';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { AlertTriangle, ArrowRight, CheckCircle2, Clock, FileCheck2, MapPin, Package, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Clock,
+  FileCheck2,
+  MapPin,
+  Package,
+  X,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { hasPermission } from '@/lib/auth';
 import { customerQuoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Item {
@@ -39,7 +49,10 @@ interface Quote {
 export default function QuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
+  const canAcceptQuote = hasPermission(user, 'quote.accept');
+  const canRejectQuote = hasPermission(user, 'quote.reject');
+  const canCreateBooking = hasPermission(user, 'booking.create');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -159,27 +172,27 @@ export default function QuoteDetailPage() {
                 {downloading ? '生成中…' : '下载 PDF'}
               </button>
             ) : null}
-            {['SENT', 'VIEWED'].includes(quote.status) ? (
-              <>
-                <button
-                  className="h-9 rounded border border-danger/30 px-4 text-sm font-semibold text-danger disabled:opacity-40"
-                  disabled={submitting !== null}
-                  onClick={() => setConfirmingReject(true)}
-                  type="button"
-                >
-                  {submitting === 'reject' ? '处理中…' : '拒绝报价'}
-                </button>
-                <button
-                  className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
-                  disabled={submitting !== null}
-                  onClick={() => setConfirmingAccept(true)}
-                  type="button"
-                >
-                  {submitting === 'accept' ? '处理中…' : '接受报价'}
-                </button>
-              </>
+            {canRejectQuote && ['SENT', 'VIEWED'].includes(quote.status) ? (
+              <button
+                className="h-9 rounded border border-danger/30 px-4 text-sm font-semibold text-danger disabled:opacity-40"
+                disabled={submitting !== null}
+                onClick={() => setConfirmingReject(true)}
+                type="button"
+              >
+                {submitting === 'reject' ? '处理中…' : '拒绝报价'}
+              </button>
             ) : null}
-            {quote.status === 'ACCEPTED' ? (
+            {canAcceptQuote && ['SENT', 'VIEWED'].includes(quote.status) ? (
+              <button
+                className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+                disabled={submitting !== null}
+                onClick={() => setConfirmingAccept(true)}
+                type="button"
+              >
+                {submitting === 'accept' ? '处理中…' : '接受报价'}
+              </button>
+            ) : null}
+            {canCreateBooking && quote.status === 'ACCEPTED' ? (
               <button
                 className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
                 disabled={creatingBooking}
@@ -276,7 +289,7 @@ export default function QuoteDetailPage() {
           </table>
         </div>
       </section>
-      {confirmingAccept ? (
+      {canAcceptQuote && confirmingAccept ? (
         <div
           aria-labelledby="accept-quote-title"
           aria-modal="true"
@@ -312,7 +325,10 @@ export default function QuoteDetailPage() {
               <div className="grid gap-3 rounded border border-success/15 bg-success/5 p-3 sm:grid-cols-2">
                 <Fact label="报价编号" value={quote.quoteNo} />
                 <Fact label="报价总额" value={money(quote.totalAmount, quote.currency)} />
-                <Fact label="航线" value={`${portDisplayName(quote.polCode)} → ${portDisplayName(quote.podCode)}`} />
+                <Fact
+                  label="航线"
+                  value={`${portDisplayName(quote.polCode)} → ${portDisplayName(quote.podCode)}`}
+                />
                 <Fact label="有效期至" value={quote.validUntil.slice(0, 10)} />
                 <Fact label="箱量" value={containerSummary} />
               </div>
@@ -341,7 +357,7 @@ export default function QuoteDetailPage() {
           </div>
         </div>
       ) : null}
-      {confirmingReject ? (
+      {canRejectQuote && confirmingReject ? (
         <div
           aria-labelledby="reject-quote-title"
           aria-modal="true"
@@ -428,7 +444,9 @@ function QuoteDecisionStatus({ quote }: { quote: Quote }) {
     <section className={`rounded border px-4 py-3 ${config.panelClass}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
-          <span className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded ${config.iconClass}`}>
+          <span
+            className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded ${config.iconClass}`}
+          >
             <Icon aria-hidden className="size-5" />
           </span>
           <div>
@@ -630,14 +648,21 @@ function summarizeContainers(items: Item[]) {
     .join(' / ');
 }
 function quoteContainers(items: Item[]) {
-  const pricedContainers = items.filter((item) => item.chargeCode === 'OCEAN_FREIGHT' && item.containerType);
-  const source = pricedContainers.length ? pricedContainers : items.filter((item) => item.containerType);
+  const pricedContainers = items.filter(
+    (item) => item.chargeCode === 'OCEAN_FREIGHT' && item.containerType,
+  );
+  const source = pricedContainers.length
+    ? pricedContainers
+    : items.filter((item) => item.containerType);
   const byType = new Map<string, number>();
   for (const item of source) {
     if (!item.containerType) continue;
     const quantity = Number(item.quantity);
     const current = byType.get(item.containerType) ?? 0;
-    byType.set(item.containerType, pricedContainers.length ? current + quantity : Math.max(current, quantity));
+    byType.set(
+      item.containerType,
+      pricedContainers.length ? current + quantity : Math.max(current, quantity),
+    );
   }
   return [...byType.entries()].map(([containerType, quantity]) => ({ containerType, quantity }));
 }

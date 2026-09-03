@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { canAccessPath } from '@/lib/navigation-permissions';
 
 export function AuthGate({
   area,
@@ -14,7 +15,13 @@ export function AuthGate({
   const { initialized, user } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const allowed = user ? (area === 'portal' ? user.userType === 'CUSTOMER' : user.userType === 'INTERNAL') : false;
+  const correctArea = user
+    ? area === 'portal'
+      ? user.userType === 'CUSTOMER'
+      : user.userType === 'INTERNAL'
+    : false;
+  const hasRoutePermission = user ? canAccessPath(pathname, user.permissions) : false;
+  const allowed = correctArea && hasRoutePermission;
 
   useEffect(() => {
     if (!initialized) return;
@@ -22,8 +29,10 @@ export function AuthGate({
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
       return;
     }
-    if (!allowed) router.replace(user.userType === 'CUSTOMER' ? '/portal' : '/admin');
-  }, [allowed, initialized, pathname, router, user]);
+    if (!correctArea || !hasRoutePermission) {
+      router.replace(user.userType === 'CUSTOMER' ? '/portal' : '/admin');
+    }
+  }, [correctArea, hasRoutePermission, initialized, pathname, router, user]);
 
   if (!initialized || !allowed) {
     return (

@@ -7,6 +7,7 @@ import type { Invoice, InvoiceShipment } from '@/components/invoice-types';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { hasPermission } from '@/lib/auth';
 
 interface DraftLine {
   chargeCode: string;
@@ -15,7 +16,8 @@ interface DraftLine {
   unitPrice: string;
 }
 export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
+  const canManageInvoices = mode === 'admin' && hasPermission(user, 'invoice.manage');
   const [items, setItems] = useState<Invoice[]>([]);
   const [shipments, setShipments] = useState<InvoiceShipment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +41,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
       const payload = (await invoiceResponse.json()) as Invoice[] & { message?: string };
       if (!invoiceResponse.ok) throw new Error(payload.message ?? '账单加载失败。');
       setItems(payload);
-      if (mode === 'admin') {
+      if (canManageInvoices) {
         const shipmentResponse = await apiFetch('/api/v1/shipments');
         const shipmentPayload = (await shipmentResponse.json()) as InvoiceShipment[] & {
           message?: string;
@@ -52,7 +54,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
     } finally {
       setLoading(false);
     }
-  }, [apiFetch, mode]);
+  }, [apiFetch, canManageInvoices, mode]);
   useEffect(() => void load(), [load]);
   const visible = useMemo(
     () => items.filter((item) => !status || item.status === status),
@@ -92,7 +94,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
           {error}
         </div>
       ) : null}
-      {mode === 'admin' ? (
+      {canManageInvoices ? (
         <section className="rounded border border-border bg-surface p-5">
           <h2 className="font-semibold">新建 Draft Invoice</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-4">
@@ -139,9 +141,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
                   onChange={(e) =>
                     setLines(
                       lines.map((item, i) =>
-                        i === index
-                          ? { ...item, chargeCode: e.target.value.toUpperCase() }
-                          : item,
+                        i === index ? { ...item, chargeCode: e.target.value.toUpperCase() } : item,
                       ),
                     )
                   }

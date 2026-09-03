@@ -9,6 +9,7 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
+import { hasPermission } from '@/lib/auth';
 import { bookingStatusTone, customerBookingStatusLabel } from '@/lib/booking-status';
 
 interface Container {
@@ -92,7 +93,9 @@ class BookingApiError extends Error {
 }
 export default function BookingDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
+  const canEditBooking = hasPermission(user, 'booking.create');
+  const canSubmitBooking = hasPermission(user, 'booking.submit');
   const [booking, setBooking] = useState<Booking | null>(null);
   const [form, setForm] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,13 +162,18 @@ export default function BookingDetailPage() {
       });
       const shipperPayload = (await shipperResponse.json()) as CustomerShipper & ApiErrorPayload;
       if (!shipperResponse.ok)
-        throw new BookingApiError(formatApiError(shipperPayload, '保存常用发货人失败。'), shipperPayload);
+        throw new BookingApiError(
+          formatApiError(shipperPayload, '保存常用发货人失败。'),
+          shipperPayload,
+        );
       sourceShipperId = shipperPayload.id;
       setShippers((current) => [
         shipperPayload,
         ...current.filter((item) => item.id !== shipperPayload.id),
       ]);
-      setForm((current) => (current ? { ...current, sourceShipperId: shipperPayload.id } : current));
+      setForm((current) =>
+        current ? { ...current, sourceShipperId: shipperPayload.id } : current,
+      );
       setSaveShipperToAddressBook(false);
     }
     const r = await apiFetch(`/api/v1/bookings/${id}`, {
@@ -325,7 +333,7 @@ export default function BookingDetailPage() {
   if (loading) return <LoadingState rows={8} />;
   if (!booking || !form)
     return <ErrorState description={error || '订舱不存在'} onRetry={() => void load()} />;
-  const editable = ['DRAFT', 'REVISION_REQUIRED'].includes(booking.status);
+  const editable = canEditBooking && ['DRAFT', 'REVISION_REQUIRED'].includes(booking.status);
   return (
     <div className="space-y-5">
       <Link className="text-sm text-primary hover:underline" href="/portal/bookings">
@@ -339,17 +347,26 @@ export default function BookingDetailPage() {
           <div className="flex gap-2">
             {editable ? (
               <>
-                <button className={secondary} disabled={busy} onClick={() => void action('cancel')}>
-                  删除草稿
-                </button>
+                {canSubmitBooking ? (
+                  <button
+                    className={secondary}
+                    disabled={busy}
+                    onClick={() => void action('cancel')}
+                  >
+                    删除草稿
+                  </button>
+                ) : null}
                 <button className={secondary} disabled={busy} onClick={() => void save()}>
                   保存草稿
                 </button>
-                <button className={primary} disabled={busy} onClick={openSubmitConfirmation}>
-                  提交订舱
-                </button>
+                {canSubmitBooking ? (
+                  <button className={primary} disabled={busy} onClick={openSubmitConfirmation}>
+                    提交订舱
+                  </button>
+                ) : null}
               </>
-            ) : ['SUBMITTED', 'APPROVED', 'BOOKING_SUBMITTED'].includes(booking.status) ? (
+            ) : canSubmitBooking &&
+              ['SUBMITTED', 'APPROVED', 'BOOKING_SUBMITTED'].includes(booking.status) ? (
               <button className={secondary} disabled={busy} onClick={() => void action('cancel')}>
                 取消订舱
               </button>
@@ -549,7 +566,9 @@ export default function BookingDetailPage() {
               </button>
               <button
                 className={secondary}
-                disabled={busy || shippers.find((item) => item.id === form.sourceShipperId)?.isDefault}
+                disabled={
+                  busy || shippers.find((item) => item.id === form.sourceShipperId)?.isDefault
+                }
                 onClick={() => void updateSelectedShipper({ isDefault: true })}
                 type="button"
               >
@@ -611,8 +630,8 @@ export default function BookingDetailPage() {
             <div className="rounded border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
               <p className="font-semibold">危险品订舱需要额外审核。</p>
               <p className="mt-1 text-xs">
-                请在特殊要求中填写危险品品名、UN No.、IMO Class 和 MSDS 资料状态。当前
-                V1 尚未提供独立 MSDS 上传字段，提交后操作员将进一步确认危险品资料。
+                请在特殊要求中填写危险品品名、UN No.、IMO Class 和 MSDS 资料状态。当前 V1
+                尚未提供独立 MSDS 上传字段，提交后操作员将进一步确认危险品资料。
               </p>
               {fieldErrors.dangerousGoodsInfo ? (
                 <p className="mt-2 text-sm text-danger">{fieldErrors.dangerousGoodsInfo}</p>
@@ -671,7 +690,7 @@ export default function BookingDetailPage() {
           </div>
         </section>
       )}
-      {confirmingSubmit ? (
+      {canSubmitBooking && confirmingSubmit ? (
         <div
           aria-labelledby="submit-booking-title"
           aria-modal="true"
@@ -735,7 +754,9 @@ function BookingProgressStatus({ booking }: { booking: Booking }) {
     <section className={`rounded border px-4 py-3 ${config.panelClass}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
-          <span className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded ${config.iconClass}`}>
+          <span
+            className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded ${config.iconClass}`}
+          >
             <Icon aria-hidden className="size-5" />
           </span>
           <div>
@@ -750,7 +771,10 @@ function BookingProgressStatus({ booking }: { booking: Booking }) {
         </div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:text-right">
           <Fact label="航线" value={`${booking.polCode} → ${booking.podCode}`} />
-          <Fact label="箱量" value={formatContainerRequests(booking.containerRequests) || '待确认'} />
+          <Fact
+            label="箱量"
+            value={formatContainerRequests(booking.containerRequests) || '待确认'}
+          />
         </div>
       </div>
     </section>

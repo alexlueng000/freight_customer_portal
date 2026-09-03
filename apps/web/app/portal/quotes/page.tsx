@@ -9,6 +9,7 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { hasPermission } from '@/lib/auth';
 import { customerQuoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Quote {
@@ -28,7 +29,8 @@ interface QuoteList {
   pagination: { page: number; total: number; totalPages: number };
 }
 export default function QuotesPage() {
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
+  const canCreateBooking = hasPermission(user, 'booking.create');
   const router = useRouter();
   const searchParams = useSearchParams();
   const status = searchParams.get('status') ?? '';
@@ -65,7 +67,7 @@ export default function QuotesPage() {
               ? ['SENT', 'VIEWED', 'ACCEPTED'].includes(quote.status)
               : quote.status === status,
           )
-        : data?.items ?? [],
+        : (data?.items ?? []),
     [data?.items, isPendingStatus, status],
   );
   const pagination = data?.pagination;
@@ -112,7 +114,11 @@ export default function QuotesPage() {
           <div className="p-4">
             <EmptyState
               title={isPendingStatus || status === 'SENT' ? '当前没有待处理报价' : '还没有 Quote'}
-              description={isPendingStatus || status === 'SENT' ? '待确认或待创建订舱的正式报价会出现在这里。' : '请先前往运价查询，选择方案提交报价申请。'}
+              description={
+                isPendingStatus || status === 'SENT'
+                  ? '待确认或待创建订舱的正式报价会出现在这里。'
+                  : '请先前往运价查询，选择方案提交报价申请。'
+              }
             />
           </div>
         ) : (
@@ -171,7 +177,7 @@ export default function QuotesPage() {
                         </td>
                         <td className={`${cell} min-w-44 whitespace-nowrap text-right`}>
                           <div className="flex justify-end gap-2">
-                            {quote.status === 'ACCEPTED' ? (
+                            {canCreateBooking && quote.status === 'ACCEPTED' ? (
                               <button
                                 aria-label={`基于报价 ${quote.quoteNo} 创建订舱`}
                                 className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded bg-primary px-3 text-xs font-semibold text-surface transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"

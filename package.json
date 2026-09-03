@@ -11,6 +11,7 @@
     "test": "turbo run test",
     "test:e2e": "playwright test",
     "test:e2e:invoice": "playwright test e2e/invoice.spec.ts",
+    "test:e2e:permissions": "playwright test e2e/role-permissions.spec.ts",
     "test:e2e:golden": "playwright test e2e/golden-path.spec.ts",
     "test:e2e:shipment": "playwright test e2e/shipment.spec.ts",
     "test:e2e:install": "playwright install chromium",

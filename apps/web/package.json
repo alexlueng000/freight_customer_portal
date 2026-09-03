@@ -8,7 +8,7 @@
     "dev": "next dev -p 3000",
     "lint": "node ../../node_modules/eslint/bin/eslint.js app components lib --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"process.exit(0)\""
+    "test": "node --experimental-strip-types --test lib/*.test.ts"
   },
   "dependencies": {
     "@freight/types": "workspace:*",

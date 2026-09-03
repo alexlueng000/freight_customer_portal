@@ -12,6 +12,7 @@ import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { FieldLabel, RequiredLegend } from '@/components/required-mark';
+import { hasPermission } from '@/lib/auth';
 
 interface CustomerRate {
   id: string;
@@ -89,7 +90,8 @@ const searchSchema = z
 type SearchValues = z.infer<typeof searchSchema>;
 
 export default function PortalRatesPage() {
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
+  const canCreateQuote = hasPermission(user, 'quote.create');
   const router = useRouter();
   const defaults = defaultDates();
   const {
@@ -189,7 +191,9 @@ export default function PortalRatesPage() {
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">查询条件</h2>
-            <p className="mt-1 text-xs text-muted">港口代码建议使用 UN/LOCODE，例如 CNSHA、USLAX。</p>
+            <p className="mt-1 text-xs text-muted">
+              港口代码建议使用 UN/LOCODE，例如 CNSHA、USLAX。
+            </p>
           </div>
           <p className="rounded-md border border-danger/20 bg-danger/5 px-2.5 py-1.5 text-xs font-medium text-foreground">
             <RequiredLegend>字段为查询前必须填写</RequiredLegend>
@@ -200,19 +204,48 @@ export default function PortalRatesPage() {
           onSubmit={(event) => void submit(event)}
         >
           <FormField error={errors.polCode?.message} label="起运港 POL" required>
-            <input {...register('polCode')} aria-invalid={Boolean(errors.polCode)} className={inputClass} placeholder="CNSHA" required />
+            <input
+              {...register('polCode')}
+              aria-invalid={Boolean(errors.polCode)}
+              className={inputClass}
+              placeholder="CNSHA"
+              required
+            />
           </FormField>
           <FormField error={errors.podCode?.message} label="目的港 POD" required>
-            <input {...register('podCode')} aria-invalid={Boolean(errors.podCode)} className={inputClass} placeholder="USLAX" required />
+            <input
+              {...register('podCode')}
+              aria-invalid={Boolean(errors.podCode)}
+              className={inputClass}
+              placeholder="USLAX"
+              required
+            />
           </FormField>
           <FormField error={errors.etdFrom?.message} label="最早离港日" required>
-            <input {...register('etdFrom')} aria-invalid={Boolean(errors.etdFrom)} className={inputClass} required type="date" />
+            <input
+              {...register('etdFrom')}
+              aria-invalid={Boolean(errors.etdFrom)}
+              className={inputClass}
+              required
+              type="date"
+            />
           </FormField>
           <FormField error={errors.etdTo?.message} label="最晚离港日" required>
-            <input {...register('etdTo')} aria-invalid={Boolean(errors.etdTo)} className={inputClass} required type="date" />
+            <input
+              {...register('etdTo')}
+              aria-invalid={Boolean(errors.etdTo)}
+              className={inputClass}
+              required
+              type="date"
+            />
           </FormField>
           <FormField error={errors.containerType?.message} label="箱型" required>
-            <select {...register('containerType')} aria-invalid={Boolean(errors.containerType)} className={inputClass} required>
+            <select
+              {...register('containerType')}
+              aria-invalid={Boolean(errors.containerType)}
+              className={inputClass}
+              required
+            >
               {['20GP', '40GP', '40HQ', '45HQ'].map((type) => (
                 <option key={type}>{type}</option>
               ))}
@@ -283,7 +316,9 @@ export default function PortalRatesPage() {
                       <th className={headerClass}>箱型</th>
                       <th className={headerClass}>预计总价</th>
                       <th className={headerClass}>有效期</th>
-                      <th className={`${headerClass} text-right`}>操作</th>
+                      {canCreateQuote ? (
+                        <th className={`${headerClass} text-right`}>操作</th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -330,20 +365,22 @@ export default function PortalRatesPage() {
                             至 {formatDate(rate.expiryDate)}
                           </div>
                         </td>
-                        <td className={`${cellClass} text-right`}>
-                          <button
-                            className="h-8 rounded bg-primary px-3 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
-                            disabled={creatingRateId !== null}
-                            onClick={() => {
-                              setSelectedRate(rate);
-                              setQuoteQuantity('1');
-                              setQuoteRequestError('');
-                            }}
-                            type="button"
-                          >
-                            获取正式报价
-                          </button>
-                        </td>
+                        {canCreateQuote ? (
+                          <td className={`${cellClass} text-right`}>
+                            <button
+                              className="h-8 rounded bg-primary px-3 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
+                              disabled={creatingRateId !== null}
+                              onClick={() => {
+                                setSelectedRate(rate);
+                                setQuoteQuantity('1');
+                                setQuoteRequestError('');
+                              }}
+                              type="button"
+                            >
+                              获取正式报价
+                            </button>
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
                   </tbody>
@@ -379,7 +416,7 @@ export default function PortalRatesPage() {
           )}
         </section>
       )}
-      {selectedRate ? (
+      {canCreateQuote && selectedRate ? (
         <QuoteRequestDialog
           error={quoteRequestError}
           quantity={quoteQuantity}
@@ -423,17 +460,38 @@ function QuoteRequestDialog({
   onSubmit: () => void;
 }) {
   const numericQuantity = Number(quantity);
-  const validQuantity = Number.isInteger(numericQuantity) && numericQuantity >= 1 && numericQuantity <= 999;
+  const validQuantity =
+    Number.isInteger(numericQuantity) && numericQuantity >= 1 && numericQuantity <= 999;
   const estimate = validQuantity ? quoteEstimate(rate, numericQuantity) : null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4" role="presentation">
-      <section aria-labelledby="quote-request-title" aria-modal="true" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-surface shadow-xl" role="dialog">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
+      role="presentation"
+    >
+      <section
+        aria-labelledby="quote-request-title"
+        aria-modal="true"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-surface shadow-xl"
+        role="dialog"
+      >
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold" id="quote-request-title">获取正式报价</h2>
-            <p className="mt-1 text-sm text-muted">确认箱量和预计费用后提交，由销售确认并发送正式报价。</p>
+            <h2 className="text-lg font-semibold" id="quote-request-title">
+              获取正式报价
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              确认箱量和预计费用后提交，由销售确认并发送正式报价。
+            </p>
           </div>
-          <button aria-label="关闭报价申请" className="grid size-9 place-items-center rounded border border-border" disabled={submitting} onClick={onClose} type="button"><X className="size-4" /></button>
+          <button
+            aria-label="关闭报价申请"
+            className="grid size-9 place-items-center rounded border border-border"
+            disabled={submitting}
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
         </div>
         <div className="space-y-5 p-5">
           <section className="grid gap-4 rounded-md border border-border bg-sidebar/50 p-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -444,34 +502,86 @@ function QuoteRequestDialog({
           </section>
           <label className="block text-sm">
             <FieldLabel label="箱量" required />
-            <span className="mt-1 block text-xs text-muted">本次报价的 {rate.containerType} 集装箱数量</span>
+            <span className="mt-1 block text-xs text-muted">
+              本次报价的 {rate.containerType} 集装箱数量
+            </span>
             <div className="mt-2 flex items-center gap-3">
-              <input aria-invalid={!validQuantity} className="h-10 w-32 rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger" inputMode="numeric" max={999} min={1} onChange={(event) => onQuantityChange(event.target.value)} required type="number" value={quantity} />
+              <input
+                aria-invalid={!validQuantity}
+                className="h-10 w-32 rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger"
+                inputMode="numeric"
+                max={999}
+                min={1}
+                onChange={(event) => onQuantityChange(event.target.value)}
+                required
+                type="number"
+                value={quantity}
+              />
               <span className="text-sm font-medium">× {rate.containerType}</span>
             </div>
           </label>
           <section className="overflow-hidden rounded-md border border-border">
-            <div className="border-b border-border bg-sidebar px-4 py-3 text-sm font-semibold">费用预估</div>
+            <div className="border-b border-border bg-sidebar px-4 py-3 text-sm font-semibold">
+              费用预估
+            </div>
             <div className="divide-y divide-border text-sm">
-              <QuoteEstimateRow amount={validQuantity ? Number(rate.oceanSellAmount) * numericQuantity : null} currency={rate.currency} label="海运费" quantity={validQuantity ? numericQuantity : null} unitPrice={Number(rate.oceanSellAmount)} unitLabel={`/${rate.containerType}`} />
+              <QuoteEstimateRow
+                amount={validQuantity ? Number(rate.oceanSellAmount) * numericQuantity : null}
+                currency={rate.currency}
+                label="海运费"
+                quantity={validQuantity ? numericQuantity : null}
+                unitPrice={Number(rate.oceanSellAmount)}
+                unitLabel={`/${rate.containerType}`}
+              />
               {rate.charges.map((charge) => {
                 const itemQuantity = charge.chargeBasis === 'PER_CONTAINER' ? numericQuantity : 1;
-                return <QuoteEstimateRow amount={validQuantity ? Number(charge.amount) * itemQuantity : null} currency={charge.currency} key={charge.id} label={charge.chargeName} quantity={validQuantity ? itemQuantity : null} unitLabel={chargeUnitLabel(charge)} unitPrice={Number(charge.amount)} />;
+                return (
+                  <QuoteEstimateRow
+                    amount={validQuantity ? Number(charge.amount) * itemQuantity : null}
+                    currency={charge.currency}
+                    key={charge.id}
+                    label={charge.chargeName}
+                    quantity={validQuantity ? itemQuantity : null}
+                    unitLabel={chargeUnitLabel(charge)}
+                    unitPrice={Number(charge.amount)}
+                  />
+                );
               })}
             </div>
             <div className="flex items-center justify-between bg-primary/5 px-4 py-4">
               <span className="font-semibold">预计总额</span>
-              <span className="text-lg font-bold text-primary">{estimate === null ? '—' : formatMoney(String(estimate), rate.currency)}</span>
+              <span className="text-lg font-bold text-primary">
+                {estimate === null ? '—' : formatMoney(String(estimate), rate.currency)}
+              </span>
             </div>
           </section>
           <div className="rounded-md border border-warning/25 bg-warning/10 px-4 py-3 text-sm text-foreground">
-            提交后将生成“待销售确认”的报价草稿。销售可审核或调整价格；正式发送后，你才能接受、拒绝或下载正式报价 PDF。
+            提交后将生成“待销售确认”的报价草稿。销售可审核或调整价格；正式发送后，你才能接受、拒绝或下载正式报价
+            PDF。
           </div>
-          {error ? <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
+          {error ? (
+            <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+              {error}
+            </div>
+          ) : null}
         </div>
         <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
-          <button className="h-9 rounded border border-border px-4 text-sm font-semibold" disabled={submitting} onClick={onClose} type="button">取消</button>
-          <button className="h-9 rounded bg-primary px-5 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45" disabled={submitting || !validQuantity} onClick={onSubmit} type="button">{submitting ? '提交中…' : '提交销售确认'}</button>
+          <button
+            className="h-9 rounded border border-border px-4 text-sm font-semibold"
+            disabled={submitting}
+            onClick={onClose}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="h-9 rounded bg-primary px-5 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={submitting || !validQuantity}
+            onClick={onSubmit}
+            type="button"
+          >
+            {submitting ? '提交中…' : '提交销售确认'}
+          </button>
         </div>
       </section>
     </div>
@@ -479,15 +589,52 @@ function QuoteRequestDialog({
 }
 
 function QuoteFact({ label, value }: { label: string; value: string }) {
-  return <div><div className="text-xs text-muted">{label}</div><div className="mt-1 font-semibold">{value}</div></div>;
+  return (
+    <div>
+      <div className="text-xs text-muted">{label}</div>
+      <div className="mt-1 font-semibold">{value}</div>
+    </div>
+  );
 }
 
-function QuoteEstimateRow({ label, quantity, unitPrice, amount, currency, unitLabel }: { label: string; quantity: number | null; unitPrice: number; amount: number | null; currency: string; unitLabel: string }) {
-  return <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3"><div><div className="font-medium">{label}</div><div className="mt-0.5 text-xs text-muted">{quantity === null ? '请输入有效箱量' : `${quantity} × ${formatMoney(String(unitPrice), currency)} ${unitLabel}`}</div></div><div className="font-semibold">{amount === null ? '—' : formatMoney(String(amount), currency)}</div></div>;
+function QuoteEstimateRow({
+  label,
+  quantity,
+  unitPrice,
+  amount,
+  currency,
+  unitLabel,
+}: {
+  label: string;
+  quantity: number | null;
+  unitPrice: number;
+  amount: number | null;
+  currency: string;
+  unitLabel: string;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
+      <div>
+        <div className="font-medium">{label}</div>
+        <div className="mt-0.5 text-xs text-muted">
+          {quantity === null
+            ? '请输入有效箱量'
+            : `${quantity} × ${formatMoney(String(unitPrice), currency)} ${unitLabel}`}
+        </div>
+      </div>
+      <div className="font-semibold">
+        {amount === null ? '—' : formatMoney(String(amount), currency)}
+      </div>
+    </div>
+  );
 }
 
 function quoteEstimate(rate: CustomerRate, quantity: number) {
-  return rate.charges.reduce((total, charge) => total + Number(charge.amount) * (charge.chargeBasis === 'PER_CONTAINER' ? quantity : 1), Number(rate.oceanSellAmount) * quantity);
+  return rate.charges.reduce(
+    (total, charge) =>
+      total + Number(charge.amount) * (charge.chargeBasis === 'PER_CONTAINER' ? quantity : 1),
+    Number(rate.oceanSellAmount) * quantity,
+  );
 }
 function FormField({
   label,
@@ -520,7 +667,10 @@ async function requestJson<T>(
     const firstFieldError = error?.details?.fieldErrors
       ? Object.values(error.details.fieldErrors).flat()[0]
       : undefined;
-    throw new PortalRateApiError(firstFieldError ?? error?.message ?? '运价查询暂时不可用，请稍后重试。', error?.code);
+    throw new PortalRateApiError(
+      firstFieldError ?? error?.message ?? '运价查询暂时不可用，请稍后重试。',
+      error?.code,
+    );
   }
   return payload as T;
 }
@@ -542,7 +692,9 @@ function formatDate(value: string) {
 function formatMoney(value: string, currency: string) {
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
 }
-function chargeUnitLabel(charge: Pick<CustomerRate['charges'][number], 'chargeBasis' | 'containerType'>) {
+function chargeUnitLabel(
+  charge: Pick<CustomerRate['charges'][number], 'chargeBasis' | 'containerType'>,
+) {
   if (charge.chargeBasis === 'PER_BL') return '/B/L';
   if (charge.chargeBasis === 'PER_SHIPMENT') return '/Shipment';
   return charge.containerType ? `/${charge.containerType}` : '/Container';

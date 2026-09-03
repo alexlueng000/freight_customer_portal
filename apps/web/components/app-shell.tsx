@@ -22,12 +22,14 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { NotificationMenu } from '@/components/notification-menu';
+import { filterNavigationGroups, navigationPermissions } from '@/lib/navigation-permissions';
 import { cn } from '@/lib/utils';
 
 export interface ShellNavItem {
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  requiredPermissions?: readonly string[];
 }
 
 export interface ShellNavGroup {
@@ -40,24 +42,69 @@ export const portalNavGroups: ShellNavGroup[] = [
   {
     label: '商务',
     items: [
-      { label: '运价', href: '/portal/rates', icon: Search },
-      { label: '报价', href: '/portal/quotes', icon: FileText },
-      { label: '订舱', href: '/portal/bookings', icon: PackageCheck },
+      {
+        label: '运价',
+        href: '/portal/rates',
+        icon: Search,
+        requiredPermissions: navigationPermissions['/portal/rates'],
+      },
+      {
+        label: '报价',
+        href: '/portal/quotes',
+        icon: FileText,
+        requiredPermissions: navigationPermissions['/portal/quotes'],
+      },
+      {
+        label: '订舱',
+        href: '/portal/bookings',
+        icon: PackageCheck,
+        requiredPermissions: navigationPermissions['/portal/bookings'],
+      },
     ],
   },
   {
     label: '履约',
     items: [
-      { label: '出运', href: '/portal/shipments', icon: Ship },
-      { label: '单证', href: '/portal/documents', icon: FileArchive },
+      {
+        label: '出运',
+        href: '/portal/shipments',
+        icon: Ship,
+        requiredPermissions: navigationPermissions['/portal/shipments'],
+      },
+      {
+        label: '单证',
+        href: '/portal/documents',
+        icon: FileArchive,
+        requiredPermissions: navigationPermissions['/portal/documents'],
+      },
     ],
   },
-  { label: '财务', items: [{ label: '账单', href: '/portal/billing', icon: ReceiptText }] },
+  {
+    label: '财务',
+    items: [
+      {
+        label: '账单',
+        href: '/portal/billing',
+        icon: ReceiptText,
+        requiredPermissions: navigationPermissions['/portal/billing'],
+      },
+    ],
+  },
   {
     label: '账户',
     items: [
-      { label: '公司资料', href: '/portal/company', icon: Building2 },
-      { label: '用户', href: '/portal/users', icon: Users },
+      {
+        label: '公司资料',
+        href: '/portal/company',
+        icon: Building2,
+        requiredPermissions: navigationPermissions['/portal/company'],
+      },
+      {
+        label: '用户',
+        href: '/portal/users',
+        icon: Users,
+        requiredPermissions: navigationPermissions['/portal/users'],
+      },
     ],
   },
 ];
@@ -67,26 +114,81 @@ export const adminNavGroups: ShellNavGroup[] = [
   {
     label: '商务',
     items: [
-      { label: '客户', href: '/admin/customers', icon: Building2 },
-      { label: '运价', href: '/admin/rates', icon: Search },
-      { label: '报价', href: '/admin/quotes', icon: FileText },
+      {
+        label: '客户',
+        href: '/admin/customers',
+        icon: Building2,
+        requiredPermissions: navigationPermissions['/admin/customers'],
+      },
+      {
+        label: '运价',
+        href: '/admin/rates',
+        icon: Search,
+        requiredPermissions: navigationPermissions['/admin/rates'],
+      },
+      {
+        label: '报价',
+        href: '/admin/quotes',
+        icon: FileText,
+        requiredPermissions: navigationPermissions['/admin/quotes'],
+      },
     ],
   },
   {
     label: '操作',
     items: [
-      { label: '订舱', href: '/admin/bookings', icon: PackageCheck },
-      { label: '出运', href: '/admin/shipments', icon: Ship },
-      { label: '单证', href: '/admin/documents', icon: FileArchive },
+      {
+        label: '订舱',
+        href: '/admin/bookings',
+        icon: PackageCheck,
+        requiredPermissions: navigationPermissions['/admin/bookings'],
+      },
+      {
+        label: '出运',
+        href: '/admin/shipments',
+        icon: Ship,
+        requiredPermissions: navigationPermissions['/admin/shipments'],
+      },
+      {
+        label: '单证',
+        href: '/admin/documents',
+        icon: FileArchive,
+        requiredPermissions: navigationPermissions['/admin/documents'],
+      },
     ],
   },
-  { label: '财务', items: [{ label: '发票', href: '/admin/invoices', icon: ReceiptText }] },
+  {
+    label: '财务',
+    items: [
+      {
+        label: '发票',
+        href: '/admin/invoices',
+        icon: ReceiptText,
+        requiredPermissions: navigationPermissions['/admin/invoices'],
+      },
+    ],
+  },
   {
     label: '管理',
     items: [
-      { label: '用户', href: '/admin/users', icon: Users },
-      { label: '审计日志', href: '/admin/audit-logs', icon: History },
-      { label: '设置', href: '/admin/settings', icon: Settings },
+      {
+        label: '用户',
+        href: '/admin/users',
+        icon: Users,
+        requiredPermissions: navigationPermissions['/admin/users'],
+      },
+      {
+        label: '审计日志',
+        href: '/admin/audit-logs',
+        icon: History,
+        requiredPermissions: navigationPermissions['/admin/audit-logs'],
+      },
+      {
+        label: '设置',
+        href: '/admin/settings',
+        icon: Settings,
+        requiredPermissions: navigationPermissions['/admin/settings'],
+      },
     ],
   },
 ];
@@ -104,7 +206,8 @@ export function AppShell({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const navItems = navGroups.flatMap((group) => group.items);
+  const visibleNavGroups = filterNavigationGroups(navGroups, auth.user?.permissions ?? []);
+  const navItems = visibleNavGroups.flatMap((group) => group.items);
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -130,7 +233,7 @@ export function AppShell({
           </div>
         </div>
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
-          {navGroups.map((group) => (
+          {visibleNavGroups.map((group) => (
             <div key={group.label}>
               <div
                 className={cn(
