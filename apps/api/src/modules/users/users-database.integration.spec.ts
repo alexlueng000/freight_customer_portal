@@ -21,6 +21,8 @@ let customerBId: string;
 let tenantBUserEmail: string;
 let tenantBUserId: string;
 let internalUserId: string;
+let customerAdminId: string;
+let customerPeerId: string;
 
 describe('users database integration', () => {
   beforeAll(async () => {
@@ -64,6 +66,38 @@ describe('users database integration', () => {
           displayName: 'Actor',
           userType: UserType.INTERNAL,
           status: UserStatus.ACTIVE,
+        },
+      })
+    ).id;
+    const customerAdminRole = await prisma.role.findUniqueOrThrow({
+      where: { tenantId_code: { tenantId: tenantAId, code: RoleCode.CUSTOMER_ADMIN } },
+      select: { id: true },
+    });
+    customerAdminId = (
+      await prisma.user.create({
+        data: {
+          tenantId: tenantAId,
+          customerCompanyId: customerAId,
+          email: `customer-admin-${runId}@example.test`,
+          passwordHash: 'not-used',
+          displayName: 'Customer Admin',
+          userType: UserType.CUSTOMER,
+          status: UserStatus.ACTIVE,
+          userRoles: { create: { roleId: customerAdminRole.id } },
+        },
+      })
+    ).id;
+    customerPeerId = (
+      await prisma.user.create({
+        data: {
+          tenantId: tenantAId,
+          customerCompanyId: customerAId,
+          email: `customer-peer-${runId}@example.test`,
+          passwordHash: 'not-used',
+          displayName: 'Customer Peer',
+          userType: UserType.CUSTOMER,
+          status: UserStatus.ACTIVE,
+          userRoles: { create: { roleId: customerAdminRole.id } },
         },
       })
     ).id;
@@ -155,9 +189,53 @@ describe('users database integration', () => {
 
   it('lists only users from the authenticated tenant without password hashes', async () => {
     const result = await runAs(() => users.list({ page: 1, pageSize: 100 }));
-    expect(result.items.length).toBe(3);
+    expect(result.items.length).toBeGreaterThanOrEqual(3);
     expect(result.items.every((user) => !('passwordHash' in user))).toBe(true);
     expect(result.items.some((user) => user.email === tenantBUserEmail)).toBe(false);
+  });
+
+  it('lets customer admins manage only users in their own customer company', async () => {
+    const listed = await runAsCustomerAdmin(() =>
+      users.listPortalUsers({ page: 1, pageSize: 100, customerCompanyId: customerBId }),
+    );
+    expect(listed.items.every((user) => user.customerCompanyId === customerAId)).toBe(true);
+    expect(listed.items.every((user) => user.userType === UserType.CUSTOMER)).toBe(true);
+    expect(listed.items.some((user) => user.id === actorId)).toBe(false);
+
+    const created = await runAsCustomerAdmin(() =>
+      users.createPortalUser({
+        email: `portal-created-${runId}@example.test`,
+        displayName: 'Portal Created',
+        initialPassword: 'InitialPassword!2026',
+        userType: UserType.INTERNAL,
+        roleCode: RoleCode.CUSTOMER_USER,
+        customerCompanyId: customerBId,
+        status: UserStatus.ACTIVE,
+      }),
+    );
+    expect(created).toMatchObject({
+      userType: UserType.CUSTOMER,
+      customerCompanyId: customerAId,
+    });
+    expect(created.userRoles[0]?.role.code).toBe(RoleCode.CUSTOMER_USER);
+
+    const updated = await runAsCustomerAdmin(() =>
+      users.updatePortalUser(customerPeerId, {
+        roleCode: RoleCode.CUSTOMER_USER,
+        status: UserStatus.DISABLED,
+      }),
+    );
+    expect(updated.status).toBe(UserStatus.DISABLED);
+    expect(updated.userRoles[0]?.role.code).toBe(RoleCode.CUSTOMER_USER);
+
+    await expect(
+      runAsCustomerAdmin(() => users.updatePortalUser(actorId, { status: UserStatus.DISABLED })),
+    ).rejects.toMatchObject({ response: { code: 'USER_NOT_FOUND' } });
+    await expect(
+      runAsCustomerAdmin(() =>
+        users.updatePortalUser(customerAdminId, { roleCode: RoleCode.CUSTOMER_USER }),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'CUSTOMER_ADMIN_SELF_CHANGE_REJECTED' } });
   });
 
   it('updates status and role atomically and records before/after audit data', async () => {
@@ -199,6 +277,19 @@ describe('users database integration', () => {
 function runAs<T>(callback: () => Promise<T>): Promise<T> {
   return context.run(
     { requestId: `users-${runId}`, tenantId: tenantAId, userId: actorId, roles: [] },
+    callback,
+  );
+}
+
+function runAsCustomerAdmin<T>(callback: () => Promise<T>): Promise<T> {
+  return context.run(
+    {
+      requestId: `customer-users-${runId}`,
+      tenantId: tenantAId,
+      userId: customerAdminId,
+      customerCompanyId: customerAId,
+      roles: [RoleCode.CUSTOMER_ADMIN],
+    },
     callback,
   );
 }

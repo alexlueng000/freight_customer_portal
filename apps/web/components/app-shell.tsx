@@ -289,7 +289,7 @@ export function AppShell({
 
       <div className={cn(collapsed ? 'md:pl-20' : 'md:pl-64')}>
         <header className="sticky top-0 z-20 border-b border-border bg-surface">
-          <div className="flex min-h-16 flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+          <div className="flex min-h-16 items-center justify-between gap-3 px-4 py-3 lg:px-6">
             <div className="flex items-center gap-3">
               <div className="grid size-9 place-items-center rounded bg-primary text-sm font-semibold text-surface md:hidden">
                 NF
@@ -299,42 +299,49 @@ export function AppShell({
                 <div className="text-xs text-muted">Dashboard</div>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <nav className="flex gap-1 overflow-x-auto md:hidden">
-                {navItems.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      'whitespace-nowrap rounded border border-border px-3 py-1.5 text-xs font-medium text-muted',
-                      item.href === pathname && 'border-primary/30 bg-primary/10 text-primary',
-                    )}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
-              </nav>
-              <div className="ml-auto flex items-center gap-2">
-                <NotificationMenu />
-                <div className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium">
-                  <Gauge aria-hidden className="size-4 text-primary" />
-                  <span className="hidden sm:inline">{auth.user?.displayName}</span>
-                </div>
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium text-muted hover:bg-sidebar hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={loggingOut}
-                  onClick={() => void handleLogout()}
-                  type="button"
-                >
-                  <LogOut aria-hidden className="size-4" />
-                  <span>{loggingOut ? '退出中' : '退出登录'}</span>
-                </button>
+            <div className="ml-auto flex items-center gap-2">
+              <NotificationMenu />
+              <div className="inline-flex h-9 min-w-9 items-center justify-center gap-2 rounded border border-border bg-surface px-2 text-sm font-medium sm:px-3">
+                <Gauge aria-hidden className="size-4 shrink-0 text-primary" />
+                <span className="hidden max-w-32 truncate sm:inline">{auth.user?.displayName}</span>
               </div>
+              <button
+                aria-label={loggingOut ? '退出中' : '退出登录'}
+                className="inline-flex h-9 min-w-9 items-center justify-center gap-2 rounded border border-border bg-surface px-2 text-sm font-medium text-muted hover:bg-sidebar hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60 sm:px-3"
+                disabled={loggingOut}
+                onClick={() => void handleLogout()}
+                type="button"
+              >
+                <LogOut aria-hidden className="size-4 shrink-0" />
+                <span className="hidden sm:inline">{loggingOut ? '退出中' : '退出登录'}</span>
+              </button>
             </div>
           </div>
         </header>
-        <main className="px-4 py-5 lg:px-6">{children}</main>
+        <main className="px-4 pb-24 pt-5 lg:px-6 md:pb-5">{children}</main>
       </div>
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] md:hidden">
+        <div className="flex gap-1 overflow-x-auto">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = item.href === pathname;
+            return (
+              <Link
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'flex min-w-[64px] flex-1 flex-col items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium text-muted active:bg-sidebar',
+                  active && 'bg-primary/10 text-primary',
+                )}
+                href={item.href}
+                key={item.href}
+              >
+                <Icon aria-hidden className="size-4" />
+                <span className="whitespace-nowrap">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }

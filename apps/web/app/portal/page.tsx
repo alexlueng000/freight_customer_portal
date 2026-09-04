@@ -114,9 +114,21 @@ export default function PortalPage() {
     unreadNotifications: 0,
   };
   const stats = [
-    { label: '待处理 Quote', value: statsData.pendingQuotes, href: '/portal/quotes?status=pending' },
-    { label: '待处理 Booking', value: statsData.actionBookings, href: '/portal/bookings?status=REVISION_REQUIRED' },
-    { label: '进行中 Shipment', value: statsData.activeShipments, href: '/portal/shipments?status=DEPARTED' },
+    {
+      label: '待处理 Quote',
+      value: statsData.pendingQuotes,
+      href: '/portal/quotes?status=pending',
+    },
+    {
+      label: '待处理 Booking',
+      value: statsData.actionBookings,
+      href: '/portal/bookings?status=REVISION_REQUIRED',
+    },
+    {
+      label: '进行中 Shipment',
+      value: statsData.activeShipments,
+      href: '/portal/shipments?status=DEPARTED',
+    },
     { label: '待确认账单', value: statsData.issuedInvoices, href: '/portal/billing' },
   ];
 
@@ -127,7 +139,10 @@ export default function PortalPage() {
         eyebrow="客户门户"
         title="仪表盘"
         actions={
-          <Link className="inline-flex h-9 items-center rounded bg-primary px-4 text-sm font-semibold text-surface hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/20" href="/portal/rates">
+          <Link
+            className="inline-flex h-9 items-center rounded bg-primary px-4 text-sm font-semibold text-surface hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            href="/portal/rates"
+          >
             查询运价
           </Link>
         }
@@ -141,7 +156,11 @@ export default function PortalPage() {
         <>
           <section className="grid gap-3 xl:grid-cols-4">
             {stats.map((stat) => (
-              <Link className="block min-h-24 rounded border border-border bg-surface p-4 transition hover:border-primary/30 hover:bg-sidebar" href={stat.href} key={stat.label}>
+              <Link
+                className="block min-h-24 rounded border border-border bg-surface p-4 transition hover:border-primary/30 hover:bg-sidebar"
+                href={stat.href}
+                key={stat.label}
+              >
                 <p className="text-xs font-medium text-muted">{stat.label}</p>
                 <div className="mt-3 text-2xl font-semibold">{stat.value}</div>
               </Link>
@@ -154,39 +173,73 @@ export default function PortalPage() {
                 <h2 className="text-sm font-semibold">近期 Shipment</h2>
               </div>
               {activeShipments.length ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[680px] text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                        <th className={head}>Shipment</th>
-                        <th className={head}>航线</th>
-                        <th className={head}>ETA</th>
-                        <th className={head}>状态</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeShipments.slice(0, 8).map((shipment) => (
-                        <tr className="border-b border-border" key={shipment.id}>
-                          <td className={cell}>
-                            <Link className="font-semibold text-primary hover:underline" href={`/portal/shipments/${shipment.id}`}>
-                              {shipment.shipmentNo}
-                            </Link>
-                          </td>
-                          <td className={cell}>{shipment.polCode} → {shipment.podCode}</td>
-                          <td className={cell}>{formatDate(shipment.eta, '待确认')}</td>
-                          <td className={cell}>
-                            <StatusBadge tone={shipmentStatusTone(shipment.status)}>
-                              {shipmentStatusLabel(shipment.status, 'portal')}
-                            </StatusBadge>
-                          </td>
+                <>
+                  <div className="divide-y divide-border md:hidden">
+                    {activeShipments.slice(0, 8).map((shipment) => (
+                      <Link
+                        className="block px-4 py-3 active:bg-sidebar"
+                        href={`/portal/shipments/${shipment.id}`}
+                        key={shipment.id}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-primary">{shipment.shipmentNo}</div>
+                            <div className="mt-1 text-sm">
+                              {shipment.polCode} → {shipment.podCode}
+                            </div>
+                            <div className="mt-1 text-xs text-muted">
+                              ETA {formatDate(shipment.eta, '待确认')}
+                            </div>
+                          </div>
+                          <StatusBadge tone={shipmentStatusTone(shipment.status)}>
+                            {shipmentStatusLabel(shipment.status, 'portal')}
+                          </StatusBadge>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full min-w-[680px] text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-sidebar text-xs text-muted">
+                          <th className={head}>Shipment</th>
+                          <th className={head}>航线</th>
+                          <th className={head}>ETA</th>
+                          <th className={head}>状态</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {activeShipments.slice(0, 8).map((shipment) => (
+                          <tr className="border-b border-border" key={shipment.id}>
+                            <td className={cell}>
+                              <Link
+                                className="font-semibold text-primary hover:underline"
+                                href={`/portal/shipments/${shipment.id}`}
+                              >
+                                {shipment.shipmentNo}
+                              </Link>
+                            </td>
+                            <td className={cell}>
+                              {shipment.polCode} → {shipment.podCode}
+                            </td>
+                            <td className={cell}>{formatDate(shipment.eta, '待确认')}</td>
+                            <td className={cell}>
+                              <StatusBadge tone={shipmentStatusTone(shipment.status)}>
+                                {shipmentStatusLabel(shipment.status, 'portal')}
+                              </StatusBadge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               ) : (
                 <div className="p-4">
-                  <EmptyState title="当前没有进行中的 Shipment" description="SO 发布并创建 Shipment 后，运输状态会显示在这里。" />
+                  <EmptyState
+                    title="当前没有进行中的 Shipment"
+                    description="SO 发布并创建 Shipment 后，运输状态会显示在这里。"
+                  />
                 </div>
               )}
             </div>
@@ -199,7 +252,11 @@ export default function PortalPage() {
                 {actions.length ? (
                   <div className="divide-y divide-border">
                     {actions.map((action) => (
-                      <Link className="block px-4 py-3 transition hover:bg-sidebar" href={action.href} key={action.id}>
+                      <Link
+                        className="block px-4 py-3 transition hover:bg-sidebar"
+                        href={action.href}
+                        key={action.id}
+                      >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{action.title}</p>
@@ -212,7 +269,10 @@ export default function PortalPage() {
                   </div>
                 ) : (
                   <div className="p-4">
-                    <EmptyState title="当前没有待处理事项" description="待确认或待创建订舱的 Quote、需要补充的 Booking 和待确认账单会集中显示在这里。" />
+                    <EmptyState
+                      title="当前没有待处理事项"
+                      description="待确认或待创建订舱的 Quote、需要补充的 Booking 和待确认账单会集中显示在这里。"
+                    />
                   </div>
                 )}
               </div>
@@ -224,15 +284,24 @@ export default function PortalPage() {
                 {unread.length ? (
                   <div className="divide-y divide-border">
                     {unread.slice(0, 5).map((item) => (
-                      <Link className="block px-4 py-3 transition hover:bg-sidebar" href={item.payload.href ?? '/portal'} key={item.id}>
+                      <Link
+                        className="block px-4 py-3 transition hover:bg-sidebar"
+                        href={item.payload.href ?? '/portal'}
+                        key={item.id}
+                      >
                         <p className="text-sm font-medium">{item.payload.title ?? item.type}</p>
-                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">{item.payload.description ?? '有一条新的业务通知。'}</p>
+                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">
+                          {item.payload.description ?? '有一条新的业务通知。'}
+                        </p>
                       </Link>
                     ))}
                   </div>
                 ) : (
                   <div className="p-4">
-                    <EmptyState title="当前没有未读通知" description="SO 发布、Shipment 更新和 Booking 补充提醒会显示在这里。" />
+                    <EmptyState
+                      title="当前没有未读通知"
+                      description="SO 发布、Shipment 更新和 Booking 补充提醒会显示在这里。"
+                    />
                   </div>
                 )}
               </div>

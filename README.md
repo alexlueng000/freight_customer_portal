@@ -1,11 +1,21 @@
 # Freight Customer Portal
 
 Freight Customer Portal SaaS V1 is a multi-tenant customer portal for small and
-mid-sized freight forwarders. The V1 product chain is:
+mid-sized freight forwarders. The original V1 product chain is:
 
 ```text
 Rate -> Quote -> Booking -> Shipment -> Tracking / Document -> Invoice
 ```
+
+The current V1.1 pilot baseline intentionally narrows the P0 flow to:
+
+```text
+Rate -> Quote -> Booking -> SO -> Basic Shipment
+```
+
+Invoice/Billing, BL documents, containers, and detailed tracking remain in the
+codebase as historical/backlog capabilities, but they are not part of the V1.1
+P0 pilot scope.
 
 ## Stack
 
@@ -82,26 +92,29 @@ the response; the rotating refresh token is stored in an HttpOnly cookie.
 
 ## Current Scope
 
-The repository currently implements the persisted and authorized V1 vertical
-slice through Invoice/Billing:
+The repository currently implements the persisted and authorized V1.1 pilot
+baseline through Basic Shipment:
 
 - multi-tenant authentication, users, roles, permissions, and audit logging;
 - customers and contacts;
 - Rate CRUD, Excel import, customer search, and controlled pricing;
 - Quote lifecycle, PDF generation, acceptance, and Quote-to-Booking conversion;
-- Booking review, SO release, Shipment, Container, TrackingEvent, and BL documents;
-- Invoice/InvoiceLine creation, versioned attachment, issue, customer confirmation, void, and manual paid status;
-- customer and internal pages backed by real APIs for the modules above.
+- Booking review, SO registration/release, and Basic Shipment creation/status;
+- real API-backed customer and internal pages for Rate, Quote, Booking, SO,
+  Shipment, Invoice/Billing, Dashboard, Customer, User, and Notification flows.
 
-Notifications, tenant branding, complete dashboard/document hubs, the full
-browser golden path, production hardening, and business UAT remain open. See
-[development progress](docs/05-project-management/DEVELOPMENT_PROGRESS.md) and
-[current risks](docs/05-project-management/CURRENT_RISKS.md) for the authoritative status.
+Notification and Dashboard first passes are implemented. Tenant branding,
+complete document/audit/settings hubs, production hardening, and final business
+UAT sign-off remain open. See
+[development progress](docs/05-project-management/DEVELOPMENT_PROGRESS.md),
+[project status](docs/05-project-management/Project_Development_Progress_CN.md),
+and [current risks](docs/05-project-management/CURRENT_RISKS.md) for the
+authoritative status.
 
 ## Browser E2E
 
-Install the pinned Chromium runtime once, then run all current Shipment and
-Invoice/Billing smoke paths against a local demo environment:
+Install the pinned Chromium runtime once, then run the current V1.1 golden path
+and smoke paths against a local demo environment:
 
 ```bash
 pnpm test:e2e:install
@@ -127,7 +140,10 @@ pnpm build
 pnpm test:e2e
 ```
 
-The latest verified baseline is 22 Prisma migrations, 19 API test suites with
-65 tests, 3 Worker suites with 5 tests, and 5 Chromium E2E tests. Database tests
-require `DATABASE_URL`; browser tests additionally require the demo credentials
-shown above through environment variables.
+The latest documented full regression baseline is dated 2026-09-04: 32 Prisma
+migrations in the repository, API 24 suites / 111 tests, Worker 5 suites / 14
+tests, full-workspace lint/typecheck/build passing, and 3 six-role permission
+Playwright scenarios passing. The V1.1 golden path was reset to
+Rate -> Quote -> Booking -> SO -> Basic Shipment. Database tests require
+`DATABASE_URL`; browser tests additionally require the demo credentials shown
+above through environment variables.

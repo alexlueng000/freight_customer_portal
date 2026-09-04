@@ -43,19 +43,19 @@ P0-B：Quote → Booking → SO 真实业务流程
 
 ## 3. 阶段路线图
 
-| 阶段 | 优先级 | 目标 | 当前状态 |
-| --- | --- | --- | --- |
-| 0. 冻结与基线 | P0 | 暂停后续 UAT，固定真实样本、问题清单和自动化测试基线 | 进行中 |
-| 1. 复杂 Excel 分析 | P0 | 多 Sheet、偏移/双层表头、合并单元格、字段建议 | 已完成第一版 |
-| 2. Mapping Profile | P0 | 人工修正映射并按租户/供应商保存复用 | 已完成基础能力 |
-| 3. 标准化预览与校验 | P0 | 展示标准化 Rate、Price、Charge 和全部 Error/Warning | 已完成第一版 |
-| 4. 确认与事务导入 | P0 | 用户确认后异步、幂等、整批事务写入 | 已完成第一版及本地环境集成验证 |
-| 5. V2 宽表和附加费 | P0 | 推荐宽表、横向箱型、附加费 Sheet、旧模板兼容 | V2 下载模板已完成；附加费解析待开发 |
-| 6. Booking 客户侧减负 | P0 | Quote 自动继承、联系人/Shipper 复用、最小表单 | 已完成并通过针对性 Playwright |
-| 7. Booking 作业状态 | P0 | 待审核、待订舱、待 SO、已订舱语义统一 | 已完成并通过状态机/数据库测试 |
-| 8. SO 登记与发布 | P0 | 结构化 SO、内部保存、核对后发布、版本追溯 | 已完成并通过可见性/并发/黄金路径测试 |
-| 9. 横向体验与权限 | P1 | 权限按钮、主数据、账号、Dashboard、中文错误 | 进行中，菜单、路由和第一批业务操作权限已完成 |
-| 10. 全链路回归 | Gate | 从真实 Excel 重新回归至 Shipment，决定是否恢复后续 UAT | P0-A Excel 导入已通过当前测试；P0-B4 技术 Gate 已通过 |
+| 阶段                  | 优先级 | 目标                                                   | 当前状态                                              |
+| --------------------- | ------ | ------------------------------------------------------ | ----------------------------------------------------- |
+| 0. 冻结与基线         | P0     | 暂停后续 UAT，固定真实样本、问题清单和自动化测试基线   | 进行中                                                |
+| 1. 复杂 Excel 分析    | P0     | 多 Sheet、偏移/双层表头、合并单元格、字段建议          | 已完成第一版                                          |
+| 2. Mapping Profile    | P0     | 人工修正映射并按租户/供应商保存复用                    | 已完成基础能力                                        |
+| 3. 标准化预览与校验   | P0     | 展示标准化 Rate、Price、Charge 和全部 Error/Warning    | 已完成第一版                                          |
+| 4. 确认与事务导入     | P0     | 用户确认后异步、幂等、整批事务写入                     | 已完成第一版及本地环境集成验证                        |
+| 5. V2 宽表和附加费    | P0     | 推荐宽表、横向箱型、附加费 Sheet、旧模板兼容           | V2 下载模板已完成；附加费解析待开发                   |
+| 6. Booking 客户侧减负 | P0     | Quote 自动继承、联系人/Shipper 复用、最小表单          | 已完成并通过针对性 Playwright                         |
+| 7. Booking 作业状态   | P0     | 待审核、待订舱、待 SO、已订舱语义统一                  | 已完成并通过状态机/数据库测试                         |
+| 8. SO 登记与发布      | P0     | 结构化 SO、内部保存、核对后发布、版本追溯              | 已完成并通过可见性/并发/黄金路径测试                  |
+| 9. 横向体验与权限     | P1     | 权限按钮、主数据、账号、Dashboard、中文错误            | 进行中，菜单、路由和第一批业务操作权限已完成          |
+| 10. 全链路回归        | Gate   | 从真实 Excel 重新回归至 Shipment，决定是否恢复后续 UAT | P0-A Excel 导入已通过当前测试；P0-B4 技术 Gate 已通过 |
 
 ## 4. P0-A：真实运价 Excel 导入
 
@@ -394,7 +394,7 @@ P0 完成后处理：
 2. 完成 CSP、HSTS、CSRF、登录限流和通用请求限流配置。
 3. 补齐文件类型、大小、客户可见性和下载授权测试。
 4. 统一加载、空状态、错误、成功、二次确认和只读状态。
-5. 完成移动端导航和关键业务表格适配。
+5. 第一轮移动端导航和客户门户关键业务表格适配已完成；后续补 375px/390px 视觉回归。
 6. 完善 API 请求关联 ID、结构化日志、队列失败和依赖健康监控。
 7. 从 Rate 导入开始重新执行完整 Golden Path 和关键负向回归。
 
@@ -449,25 +449,25 @@ d94460a V1.1 baseline
 
 ### 已执行验证
 
-| 检查 | 结果 |
-| --- | --- |
-| Prisma schema validate | 通过，使用本地占位 `DATABASE_URL`，未连接数据库 |
-| Prisma Client generate | 通过 |
-| API lint | 通过 |
-| API typecheck | 通过 |
-| Web lint | 通过 |
-| Web typecheck | 通过 |
-| API build | 通过 |
-| 针对性测试 | API 4 个 Suite、17 个 Test；Worker 1 个 Suite、2 个 Test 通过 |
-| 真实 Excel 回放 | 7 个 Sheet 全部读取成功 |
-| `git diff --check` | 通过 |
-| 2026-09-01 Rate Import 针对性测试 | `pnpm --filter @freight/api test -- rate-import` 通过：3 个 Suite、14 个 Test |
-| 2026-09-01 TypeScript 检查 | `pnpm --filter @freight/api typecheck`、`pnpm --filter @freight/web typecheck` 通过 |
-| 2026-09-03 Dashboard / Quote 待办 | `pnpm --filter api test -- dashboard.service.spec.ts` 通过：1 个 Suite、4 个 Test |
-| 2026-09-03 当前批次 TypeScript / Lint | API 与 Web typecheck、lint 均通过 |
-| 2026-09-04 RBAC 单元测试 | Web 4 个权限策略测试通过 |
-| 2026-09-04 六角色权限 E2E | 3 个 Playwright 场景通过：导航矩阵、只读操作、API `403` |
-| 2026-09-04 全量回归 | API 24 个 Suite / 111 个 Test、Worker 5 个 Suite / 14 个 Test、全仓库 lint/typecheck/build 通过 |
+| 检查                                  | 结果                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Prisma schema validate                | 通过，使用本地占位 `DATABASE_URL`，未连接数据库                                                 |
+| Prisma Client generate                | 通过                                                                                            |
+| API lint                              | 通过                                                                                            |
+| API typecheck                         | 通过                                                                                            |
+| Web lint                              | 通过                                                                                            |
+| Web typecheck                         | 通过                                                                                            |
+| API build                             | 通过                                                                                            |
+| 针对性测试                            | API 4 个 Suite、17 个 Test；Worker 1 个 Suite、2 个 Test 通过                                   |
+| 真实 Excel 回放                       | 7 个 Sheet 全部读取成功                                                                         |
+| `git diff --check`                    | 通过                                                                                            |
+| 2026-09-01 Rate Import 针对性测试     | `pnpm --filter @freight/api test -- rate-import` 通过：3 个 Suite、14 个 Test                   |
+| 2026-09-01 TypeScript 检查            | `pnpm --filter @freight/api typecheck`、`pnpm --filter @freight/web typecheck` 通过             |
+| 2026-09-03 Dashboard / Quote 待办     | `pnpm --filter api test -- dashboard.service.spec.ts` 通过：1 个 Suite、4 个 Test               |
+| 2026-09-03 当前批次 TypeScript / Lint | API 与 Web typecheck、lint 均通过                                                               |
+| 2026-09-04 RBAC 单元测试              | Web 4 个权限策略测试通过                                                                        |
+| 2026-09-04 六角色权限 E2E             | 3 个 Playwright 场景通过：导航矩阵、只读操作、API `403`                                         |
+| 2026-09-04 全量回归                   | API 24 个 Suite / 111 个 Test、Worker 5 个 Suite / 14 个 Test、全仓库 lint/typecheck/build 通过 |
 
 ### 后续业务项
 
@@ -492,13 +492,14 @@ d94460a V1.1 baseline
 
 ## 10. 下一步执行顺序
 
-1. 完成 `CUSTOMER_ADMIN` 管理本公司用户的 API、页面、审计和公司级隔离测试。
-2. 将无权限路由从静默跳转优化为明确的权限不足页面，并保留安全返回入口。
-3. 将六角色导航、按钮和 API 权限矩阵纳入 CI，继续补齐允许/拒绝配对用例。
-4. 补齐审计日志、单证中心、设置、公司资料和客户用户管理占位页面。
-5. 收口角色化 Dashboard 的卡片、待办和快捷入口权限。
-6. 继续完成港口/船司别名、附加费 Sheet、多币种校验和多价单元格人工确认。
-7. 持续运行完整 lint、typecheck、test、权限 Playwright 和 Golden Path。
+1. [x] 完成 `CUSTOMER_ADMIN` 管理本公司用户的 API、页面、审计和公司级隔离测试。
+2. [ ] 将无权限路由从静默跳转优化为明确的权限不足页面，并保留安全返回入口。
+3. [ ] 将六角色导航、按钮和 API 权限矩阵纳入 CI，继续补齐允许/拒绝配对用例。
+4. [ ] 补齐审计日志、单证中心、设置和公司资料占位页面。
+5. [ ] 收口角色化 Dashboard 的卡片、待办和快捷入口权限。
+6. [ ] 继续完成港口/船司别名、附加费 Sheet、多币种校验和多价单元格人工确认。
+7. [ ] 邮件通知生产化待办：SMTP/邮件服务商 Delivery Adapter、邮件模板、外部访问 Base URL/Deep Link 配置、失败追踪和幂等重试回归。
+8. [ ] 持续运行完整 lint、typecheck、test、权限 Playwright 和 Golden Path。
 
 ## 11. 关联文档
 

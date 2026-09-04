@@ -305,7 +305,70 @@ export default function PortalRatesPage() {
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
+              <div className="divide-y divide-border md:hidden">
+                {items.map((rate) => (
+                  <article className="space-y-3 px-4 py-4" key={rate.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-foreground">
+                          {rate.polCode} → {rate.podCode}
+                        </div>
+                        <div className="mt-1 text-xs text-muted">
+                          {rate.polName} → {rate.podName}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-base font-semibold text-primary">
+                          {formatMoney(rate.sellAmount, rate.currency)}
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted">{rate.containerType}</div>
+                      </div>
+                    </div>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-muted">船司 / 服务</dt>
+                        <dd className="mt-0.5 font-medium">
+                          {rate.carrierCode} · {rate.serviceName ?? '标准服务'}
+                        </dd>
+                      </div>
+                      <div className="text-right">
+                        <dt className="text-xs text-muted">ETD / 航程</dt>
+                        <dd className="mt-0.5 font-medium">
+                          {rate.etd ? formatDate(rate.etd) : '待确认'} ·{' '}
+                          {rate.transitDays === null ? '—' : `${rate.transitDays} 天`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted">有效期</dt>
+                        <dd className="mt-0.5 font-medium">
+                          {formatDate(rate.effectiveDate)} 至 {formatDate(rate.expiryDate)}
+                        </dd>
+                      </div>
+                      {rate.charges.length ? (
+                        <div className="text-right">
+                          <dt className="text-xs text-muted">附加费</dt>
+                          <dd className="mt-0.5 font-medium">{rate.charges.length} 项</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                    {canCreateQuote ? (
+                      <button
+                        className="h-11 w-full rounded bg-primary px-3 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
+                        disabled={creatingRateId !== null}
+                        onClick={() => {
+                          setSelectedRate(rate);
+                          setQuoteQuantity('1');
+                          setQuoteRequestError('');
+                        }}
+                        type="button"
+                      >
+                        获取正式报价
+                      </button>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border bg-sidebar text-xs text-muted">

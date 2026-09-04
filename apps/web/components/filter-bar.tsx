@@ -25,17 +25,17 @@ export function FilterBar({
           className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
         />
         <input
-          className="h-9 w-full rounded border border-border bg-surface pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+          className="h-11 w-full rounded border border-border bg-surface pl-9 pr-3 text-base outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 sm:h-9 sm:text-sm"
           onChange={(event) => onSearchChange?.(event.target.value)}
           placeholder={placeholder}
           type="search"
           value={searchValue}
         />
       </label>
-      <div className="flex flex-wrap gap-2">
+      <div className="grid gap-2 sm:flex sm:flex-wrap">
         {children}
         <button
-          className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium text-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium text-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 sm:h-9"
           onClick={onClear}
           type="button"
         >

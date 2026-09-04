@@ -316,6 +316,25 @@
 - 客户 Quote 列表的待办筛选已统一识别 `SENT / VIEWED / ACCEPTED`，其中 `ACCEPTED` Quote 会继续显示“创建订舱”动作。
 - 客户首页待办空状态文案已补充待确认 Quote 和待创建订舱 Quote，减少“列表有动作但首页无待办”的理解断层。
 
+### 2.27 P1 客户管理员本公司用户管理
+
+- 新增客户门户用户接口 `GET /api/v1/portal/users`、`POST /api/v1/portal/users`、`PATCH /api/v1/portal/users/:id`。
+- 客户门户用户接口使用 `customer_user.read` / `customer_user.manage` 权限，并始终从登录上下文读取 `customerCompanyId`，不信任浏览器传入的客户公司 ID。
+- 客户管理员只能查看、创建和更新本公司客户用户；不能管理内部用户、跨客户公司用户或分配内部角色。
+- 新建客户用户会自动绑定到当前客户公司，继续沿用密码哈希、租户内邮箱唯一性、角色校验和 `USER_CREATED` 审计。
+- 更新客户用户继续写入 `USER_UPDATED` 审计，并增加客户管理员自我角色/状态变更保护，避免误把自己降权或停用。
+- 新增 `/portal/users` 真实页面，替换原客户门户用户占位页，支持本公司成员列表、搜索、状态筛选、分页、新建成员和角色/状态管理。
+- `README.md` 已对齐 V1.1 当前范围，将 P0 主链明确为 `Rate → Quote → Booking → SO → Basic Shipment`。
+- 原误命名 `TODO_2026-09-02_CN.md` 已整理为运价导入 P0-A 验收报告，移动到测试验收目录。
+
+### 2.28 P1 移动端客户门户体验优化
+
+- 移动端 AppShell 已从顶部横向长导航调整为底部固定导航，顶部保留当前上下文、通知、账号和退出操作。
+- 页面主体在移动端预留底部导航安全距离，避免底部操作或列表内容被导航遮挡。
+- 共享 `DataTable` 在 `md` 以下新增卡片式兜底展示，桌面端继续保留高密度表格。
+- 客户门户 Rate 查询结果、Quote 列表、Booking 列表、Shipment 列表和门户首页近期 Shipment 已增加移动端业务摘要卡片，减少手机横向滚动。
+- 搜索栏和筛选条提升了移动端输入高度与触控面积；移动端输入控件字体不低于 16px，避免 iOS 聚焦时自动缩放。
+
 ## 3. 已完成验证
 
 > 2026-09-03 本轮 P1 验证：API / Web TypeScript 与 ESLint 通过；Auth、Customer 数据库集成测试通过，共 2 个测试套件、9 个测试。浏览器回归覆盖管理员客户编辑、中文字段提示、保存与清空、加价切换、客户账号入口预绑定，以及 Operation 权限负向场景，均已通过。
@@ -323,6 +342,10 @@
 > 2026-09-03 通知与 Dashboard 批次验证：API / Web / Worker TypeScript 与 ESLint 通过；Booking/SO 数据库集成测试 4 suites、15 tests 通过；Dashboard 数据库集成测试 1 suite、4 tests 通过；Worker 邮件通知测试 1 suite、2 tests 通过；`git diff --check` 通过。
 
 > 2026-09-03 客户首页 Quote 待办与表单标识验证：`pnpm --filter api test -- dashboard.service.spec.ts` 通过，1 suite、4 tests；`pnpm --filter api typecheck`、`pnpm --filter web typecheck`、`pnpm --filter api lint`、`pnpm --filter web lint` 均通过。
+
+> 2026-09-04 客户管理员本公司用户管理验证：`pnpm --filter @freight/api test -- users-database.integration.spec.ts` 通过，1 suite、6 tests；`pnpm --filter @freight/api typecheck`、`pnpm --filter @freight/web typecheck`、`pnpm --filter @freight/api lint`、`pnpm --filter @freight/web lint` 均通过。
+
+> 2026-09-04 移动端客户门户体验优化验证：`pnpm --filter @freight/web typecheck`、`pnpm --filter @freight/web lint` 均通过；尚未执行移动端 Playwright 视觉回归。
 
 > 2026-09-03 V1.1 手工闭环复验：真实演示单 `BOOK202609000007 → SHP202609000001` 已完成 SO 发布、Basic Shipment 创建、开船和到港。复验中修正创建 Basic Shipment 缺少二次确认、Shipment 状态动作使用浏览器原生确认框两个体验问题。V1.1 主链路进入收口状态，下一阶段重点转向用户体验、通知和操作型 Dashboard。
 
@@ -352,14 +375,16 @@
 
 ## 4. 当前未完成事项与风险
 
-- 通用 Documents 等页面仍有模拟数据或占位内容；Rate、Quote、Booking、SO、Shipment、Invoice/Billing 和 Dashboard 已接入真实 API。Dashboard 当前为第一版服务端聚合，后续需继续做角色化细分、浏览器回归和更完整的异常/空状态打磨。
+- 通用 Documents、Settings、Audit Logs 和客户公司资料等页面仍有模拟数据或占位内容；Rate、Quote、Booking、SO、Shipment、Invoice/Billing、Dashboard 和客户门户用户管理已接入真实 API。Dashboard 当前为第一版服务端聚合，后续需继续做角色化细分、浏览器回归和更完整的异常/空状态打磨。
 - 通用 permission decorator / guard 已实现，但完整权限矩阵和其他业务模块的敏感操作权限仍需逐模块落地。
 - 前端仍缺少组件测试；Playwright 已覆盖 Shipment、Invoice 冒烟及完整核心黄金路径。
+- 客户门户移动端已完成第一轮结构优化，但仍缺少 375px/390px 视口下的 Playwright 视觉和主链路回归。
 - 忘记密码和重置密码尚未实现。
 - 登录失败审计、账号锁定策略、CSP 和更完整的 Security Headers 尚未完成。
 - `RateCharge` V1 规则已确认并实现；仍需在 Rate UAT 中用真实费用样本复核。
 - Quote 发送邮件通知按批准路线图属于 M5 Notifications，本阶段不提前建立完整通知域。
 - Notification 已接通 Invoice、SO、Booking 补资料和 Basic Shipment 关键事件与本地 log transport；真实 SMTP/邮件服务商、完整通知中心和 Quote Ready 通知仍未完成。客户 Dashboard 已通过聚合接口展示待处理 Quote，但尚未发送 Quote Ready 通知。
+- 邮件通知生产化暂不急：后续待办为新增 SMTP/邮件服务商 Delivery Adapter、环境变量、邮件模板、外部访问 Base URL/Deep Link 配置、发送失败追踪和幂等重试回归。
 - 历史 V1.0 中 Invoice 附件、越权拒绝安全日志及完整黄金路径 Playwright 已完成；V1.1 正常业务主链已验收并通过提交 `d94460a` 与标签 `v1.1.0-baseline` 封板。
 - 仓库 `build` 脚本已使用 `.next-build` 隔离生产构建；自定义 Next.js 构建命令仍应显式设置独立 `NEXT_DIST_DIR`。
 - Shipment 后端、前端和冒烟 E2E 已按 V1.1 Basic Shipment 口径更新；Prisma Client、数据库迁移和 Playwright 基线回归均已完成。
@@ -369,7 +394,7 @@
 
 V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线已完成业务验收并封板。2026-09-03 已用真实演示单 `BOOK202609000007 → SHP202609000001` 复验到 Basic Shipment 到港。当前优先级从功能闭环转向试点用户体验、通知和操作型 Dashboard；Invoice、完整 BL、复杂 Tracking 进入 Backlog。
 
-2026-09-03 收口说明：核心闭环与第一批 P1 优化已完成；同日已开始第二批字段级错误优化并完成 Rate 手工表单及 Booking/SO 表单接入。2026-09-04 起重点做人工探索性测试、关键动作体验打磨、通知与 Dashboard，不扩大 V1.1 P0 范围。
+2026-09-03 收口说明：核心闭环与第一批 P1 优化已完成；同日已开始第二批字段级错误优化并完成 Rate 手工表单及 Booking/SO 表单接入。2026-09-04 起重点做人工探索性测试、关键动作体验打磨、通知、Dashboard 和客户侧账号管理，不扩大 V1.1 P0 范围。
 
 ### 5.1 Rate 业务 UAT
 
@@ -424,6 +449,7 @@ V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线�
 - [x] 建立 Notification 持久化、租户约束、站内列表/已读 API 和 BullMQ 邮件任务基线。
 - [x] Invoice 发布事件生成站内与邮件 Notification message log。
 - [ ] 接入批准的生产邮件传输并验证重试、失败恢复和投递日志。
+- [ ] 生产化邮件通知：补 SMTP/邮件服务商 Delivery Adapter、邮件模板、外部访问 Base URL/Deep Link 配置和失败追踪。
 - [x] 优先接入 SO Published、Shipment Created、Shipment Departed 和 Shipment Arrived 的客户通知及 Deep Link。
 - [x] 接入 Booking Needs Update 业务协同通知事件。
 - [x] 完成顶部通知入口、未读状态和点击已读；完整通知中心页面待后续补充。

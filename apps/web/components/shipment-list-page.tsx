@@ -73,12 +73,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
             onChange={(event) => setStatus(event.target.value)}
           >
             <option value="">全部状态</option>
-            {[
-              'PLANNED',
-              'DEPARTED',
-              'ARRIVED',
-              'CANCELLED',
-            ].map((value) => (
+            {['PLANNED', 'DEPARTED', 'ARRIVED', 'CANCELLED'].map((value) => (
               <option key={value} value={value}>
                 {shipmentStatusLabel(value, mode)}
               </option>
@@ -95,61 +90,117 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
           <div className="p-4">
             <EmptyState
               title={status || query ? '没有匹配的 Shipment' : '还没有 Shipment'}
-              description={status || query ? '请调整状态或关键词后重新查看。' : 'Booking 确认并发布 SO 后，系统会创建 Basic Shipment，你可以在这里查看运输进度。'}
+              description={
+                status || query
+                  ? '请调整状态或关键词后重新查看。'
+                  : 'Booking 确认并发布 SO 后，系统会创建 Basic Shipment，你可以在这里查看运输进度。'
+              }
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                  <th className={head}>Shipment</th>
-                  <th className={head}>客户 / Booking</th>
-                  <th className={head}>航线</th>
-                  <th className={head}>船名航次</th>
-                  <th className={head}>ETD / ETA</th>
-                  <th className={head}>柜量</th>
-                  <th className={head}>状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((item) => (
-                  <tr className="border-b border-border" key={item.id}>
-                    <td className={cell}>
-                      <Link
-                        className="font-semibold text-primary hover:underline"
-                        href={`/${mode}/shipments/${item.id}`}
-                      >
-                        {item.shipmentNo}
-                      </Link>
-                    </td>
-                    <td className={cell}>
-                      {item.customer.name}
-                      <div className="text-xs text-muted">{item.booking.bookingNo}</div>
-                    </td>
-                    <td className={cell}>
-                      {item.polCode} → {item.podCode}
-                    </td>
-                    <td className={cell}>
-                      {item.vessel ?? '待确认'}
-                      <div className="text-xs text-muted">{item.voyage ?? '—'}</div>
-                    </td>
-                    <td className={cell}>
-                      {formatDate(item.etd, '待确认')} / {formatDate(item.eta, '待确认')}
-                    </td>
-                    <td className={cell}>
-                      {formatContainerSummary(item.booking.containerRequests)}
-                    </td>
-                    <td className={cell}>
-                      <StatusBadge tone={shipmentStatusTone(item.status)}>
-                        {shipmentStatusLabel(item.status, mode)}
-                      </StatusBadge>
-                    </td>
+          <>
+            <div className="divide-y divide-border md:hidden">
+              {visible.map((item) => (
+                <Link
+                  className="block space-y-3 px-4 py-4 active:bg-sidebar"
+                  href={`/${mode}/shipments/${item.id}`}
+                  key={item.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-primary">{item.shipmentNo}</div>
+                      <div className="mt-1 text-sm text-foreground">
+                        {item.polCode} → {item.podCode}
+                      </div>
+                    </div>
+                    <StatusBadge tone={shipmentStatusTone(item.status)}>
+                      {shipmentStatusLabel(item.status, mode)}
+                    </StatusBadge>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                      <dt className="text-xs text-muted">
+                        {mode === 'admin' ? '客户 / Booking' : 'Booking'}
+                      </dt>
+                      <dd className="mt-0.5 font-medium">
+                        {mode === 'admin' ? `${item.customer.name} · ` : ''}
+                        {item.booking.bookingNo}
+                      </dd>
+                    </div>
+                    <div className="text-right">
+                      <dt className="text-xs text-muted">柜量</dt>
+                      <dd className="mt-0.5 font-medium">
+                        {formatContainerSummary(item.booking.containerRequests)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted">船名航次</dt>
+                      <dd className="mt-0.5 font-medium">
+                        {item.vessel ?? '待确认'} {item.voyage ?? ''}
+                      </dd>
+                    </div>
+                    <div className="text-right">
+                      <dt className="text-xs text-muted">ETD / ETA</dt>
+                      <dd className="mt-0.5 font-medium">
+                        {formatDate(item.etd, '待确认')} / {formatDate(item.eta, '待确认')}
+                      </dd>
+                    </div>
+                  </dl>
+                </Link>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[920px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-sidebar text-xs text-muted">
+                    <th className={head}>Shipment</th>
+                    <th className={head}>客户 / Booking</th>
+                    <th className={head}>航线</th>
+                    <th className={head}>船名航次</th>
+                    <th className={head}>ETD / ETA</th>
+                    <th className={head}>柜量</th>
+                    <th className={head}>状态</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {visible.map((item) => (
+                    <tr className="border-b border-border" key={item.id}>
+                      <td className={cell}>
+                        <Link
+                          className="font-semibold text-primary hover:underline"
+                          href={`/${mode}/shipments/${item.id}`}
+                        >
+                          {item.shipmentNo}
+                        </Link>
+                      </td>
+                      <td className={cell}>
+                        {item.customer.name}
+                        <div className="text-xs text-muted">{item.booking.bookingNo}</div>
+                      </td>
+                      <td className={cell}>
+                        {item.polCode} → {item.podCode}
+                      </td>
+                      <td className={cell}>
+                        {item.vessel ?? '待确认'}
+                        <div className="text-xs text-muted">{item.voyage ?? '—'}</div>
+                      </td>
+                      <td className={cell}>
+                        {formatDate(item.etd, '待确认')} / {formatDate(item.eta, '待确认')}
+                      </td>
+                      <td className={cell}>
+                        {formatContainerSummary(item.booking.containerRequests)}
+                      </td>
+                      <td className={cell}>
+                        <StatusBadge tone={shipmentStatusTone(item.status)}>
+                          {shipmentStatusLabel(item.status, mode)}
+                        </StatusBadge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
     </div>

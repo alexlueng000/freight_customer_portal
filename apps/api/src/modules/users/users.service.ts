@@ -44,11 +44,101 @@ export class UsersService {
 
   async list(query: ListUsersDto) {
     const context = this.requestContext.requireAuthenticated();
-    const where: Prisma.UserWhereInput = {
+    return this.listWithScope(query, { tenantId: context.tenantId });
+  }
+
+  async listPortalUsers(query: ListUsersDto) {
+    const context = this.requestContext.requireAuthenticated();
+    if (!context.customerCompanyId) {
+      throw new BadRequestException({
+        code: 'CUSTOMER_CONTEXT_REQUIRED',
+        message: 'Customer user management requires a customer company context',
+      });
+    }
+    return this.listWithScope(query, {
       tenantId: context.tenantId,
-      ...(query.userType ? { userType: query.userType } : {}),
+      customerCompanyId: context.customerCompanyId,
+      userType: UserType.CUSTOMER,
+    });
+  }
+
+  async createPortalUser(dto: CreateUserDto) {
+    const context = this.requestContext.requireAuthenticated();
+    if (!context.customerCompanyId) {
+      throw new BadRequestException({
+        code: 'CUSTOMER_CONTEXT_REQUIRED',
+        message: 'Customer user management requires a customer company context',
+      });
+    }
+    return this.create({
+      ...dto,
+      userType: UserType.CUSTOMER,
+      customerCompanyId: context.customerCompanyId,
+    });
+  }
+
+  async updatePortalUser(id: string, dto: UpdateUserDto) {
+    const context = this.requestContext.requireAuthenticated();
+    if (!context.customerCompanyId) {
+      throw new BadRequestException({
+        code: 'CUSTOMER_CONTEXT_REQUIRED',
+        message: 'Customer user management requires a customer company context',
+      });
+    }
+    if (dto.roleCode && !customerRoles.has(dto.roleCode)) {
+      throw new BadRequestException({
+        code: 'INVALID_USER_ROLE',
+        message: 'Customer admins can only assign customer roles',
+      });
+    }
+    const existing = await this.prisma.user.findFirst({
+      where: {
+        id,
+        tenantId: context.tenantId,
+        userType: UserType.CUSTOMER,
+        customerCompanyId: context.customerCompanyId,
+      },
+      select: userSelect,
+    });
+    if (!existing) {
+      throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
+    }
+    const currentRole = existing.userRoles[0]?.role.code;
+    const nextRole = dto.roleCode ?? currentRole;
+    const nextStatus = dto.status ?? existing.status;
+    if (
+      id === context.userId &&
+      (nextRole !== RoleCode.CUSTOMER_ADMIN || nextStatus !== existing.status)
+    ) {
+      throw new BadRequestException({
+        code: 'CUSTOMER_ADMIN_SELF_CHANGE_REJECTED',
+        message: 'Customer admins cannot change their own role or account status',
+      });
+    }
+    return this.updateScoped(id, dto, {
+      tenantId: context.tenantId,
+      userType: UserType.CUSTOMER,
+      customerCompanyId: context.customerCompanyId,
+    });
+  }
+
+  private async listWithScope(
+    query: ListUsersDto,
+    scope: { tenantId: string; customerCompanyId?: string; userType?: UserType },
+  ) {
+    const where: Prisma.UserWhereInput = {
+      tenantId: scope.tenantId,
+      ...(scope.userType
+        ? { userType: scope.userType }
+        : query.userType
+          ? { userType: query.userType }
+          : {}),
       ...(query.status ? { status: query.status } : {}),
-      ...(query.customerCompanyId ? { customerCompanyId: query.customerCompanyId } : {}),
+      ...(scope.customerCompanyId
+        ? { customerCompanyId: scope.customerCompanyId }
+        : query.customerCompanyId
+          ? { customerCompanyId: query.customerCompanyId }
+          : {}),
       ...(query.search
         ? {
             OR: [
@@ -144,6 +234,15 @@ export class UsersService {
 
   async update(id: string, dto: UpdateUserDto) {
     const context = this.requestContext.requireAuthenticated();
+    return this.updateScoped(id, dto, { tenantId: context.tenantId });
+  }
+
+  private async updateScoped(
+    id: string,
+    dto: UpdateUserDto,
+    scope: { tenantId: string; customerCompanyId?: string; userType?: UserType },
+  ) {
+    const context = this.requestContext.requireAuthenticated();
     if (dto.roleCode === undefined && dto.status === undefined) {
       throw new BadRequestException({
         code: 'USER_UPDATE_REQUIRED',
@@ -151,7 +250,12 @@ export class UsersService {
       });
     }
     const existing = await this.prisma.user.findFirst({
-      where: { id, tenantId: context.tenantId },
+      where: {
+        id,
+        tenantId: scope.tenantId,
+        ...(scope.customerCompanyId ? { customerCompanyId: scope.customerCompanyId } : {}),
+        ...(scope.userType ? { userType: scope.userType } : {}),
+      },
       select: userSelect,
     });
     if (!existing) {

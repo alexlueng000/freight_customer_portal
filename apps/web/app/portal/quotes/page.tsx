@@ -123,7 +123,70 @@ export default function QuotesPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-border md:hidden">
+              {visibleItems.map((quote) => {
+                const href = `/portal/quotes/${quote.id}`;
+                return (
+                  <article className="space-y-3 px-4 py-4" key={quote.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link className="font-semibold text-primary hover:underline" href={href}>
+                          {quote.quoteNo}
+                        </Link>
+                        <div className="mt-1 text-sm text-foreground">
+                          {quote.polCode} → {quote.podCode}
+                        </div>
+                      </div>
+                      <StatusBadge tone={quoteStatusTone(quote.status)}>
+                        {customerQuoteStatusLabel(quote.status)}
+                      </StatusBadge>
+                    </div>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-muted">船司 / ETD</dt>
+                        <dd className="mt-0.5 font-medium">
+                          {quote.carrierCode ?? '待确认'} ·{' '}
+                          {quote.etd ? quote.etd.slice(0, 10) : '待确认'}
+                        </dd>
+                      </div>
+                      <div className="text-right">
+                        <dt className="text-xs text-muted">金额</dt>
+                        <dd className="mt-0.5 font-semibold text-primary">
+                          {money(quote.totalAmount, quote.currency)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted">有效期</dt>
+                        <dd className="mt-0.5 font-medium">{quote.validUntil.slice(0, 10)}</dd>
+                      </div>
+                    </dl>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Link
+                        aria-label={`查看报价 ${quote.quoteNo}`}
+                        className="inline-flex h-11 items-center justify-center gap-1.5 rounded border border-border bg-surface px-3 text-sm font-medium text-foreground"
+                        href={href}
+                      >
+                        <Eye aria-hidden className="size-4" />
+                        查看
+                      </Link>
+                      {canCreateBooking && quote.status === 'ACCEPTED' ? (
+                        <button
+                          aria-label={`基于报价 ${quote.quoteNo} 创建订舱`}
+                          className="inline-flex h-11 items-center justify-center gap-1.5 rounded bg-primary px-3 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={creatingQuoteId !== null}
+                          onClick={() => void createBooking(quote)}
+                          type="button"
+                        >
+                          <Plus aria-hidden className="size-4" />
+                          {creatingQuoteId === quote.id ? '创建中…' : '创建订舱'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[850px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-border bg-sidebar text-xs text-muted">
