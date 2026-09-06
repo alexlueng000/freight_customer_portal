@@ -41,6 +41,15 @@ interface Quote {
   validUntil: string;
   currency: string;
   totalAmount: string;
+  pickupAddress: string | null;
+  deliveryAddress: string | null;
+  requestedServices: string[];
+  cargoItems: Array<{
+    id: string;
+    commodity: string;
+    grossWeightKg: string;
+    specialRequirements: string | null;
+  }>;
   customerTerms: string | null;
   sentAt: string | null;
   version: number;
@@ -233,6 +242,34 @@ export default function QuoteDetailPage() {
         <Fact label="船司" value={quote.carrierCode ?? '—'} />
         <Fact label="ETD" value={quote.etd?.slice(0, 10) ?? '船期待确认'} />
         <Fact label="有效期至" value={quote.validUntil.slice(0, 10)} />
+      </section>
+      <section className="rounded border border-border bg-surface p-4">
+        <h2 className="text-sm font-semibold">本次运输需求</h2>
+        <div className="mt-4 grid gap-4 border-b border-border pb-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Fact
+            label="委托服务"
+            value={
+              quote.requestedServices.length
+                ? quote.requestedServices.map(requestedServiceLabel).join('、')
+                : '仅港到港海运'
+            }
+          />
+          <Fact label="发货地" value={quote.pickupAddress ?? '—'} />
+          <Fact label="收货地" value={quote.deliveryAddress ?? '—'} />
+        </div>
+        <div className="divide-y divide-border">
+          {quote.cargoItems.length ? (
+            quote.cargoItems.map((item, index) => (
+              <div className="grid gap-4 py-4 sm:grid-cols-3" key={item.id}>
+                <Fact label={`货物 ${index + 1}`} value={item.commodity} />
+                <Fact label="毛重" value={`${Number(item.grossWeightKg).toLocaleString()} kg`} />
+                <Fact label="特殊要求" value={item.specialRequirements ?? '无'} />
+              </div>
+            ))
+          ) : (
+            <p className="pt-4 text-sm text-muted">历史报价未填写货物明细。</p>
+          )}
+        </div>
       </section>
       {quote.customerTerms?.trim() ? (
         <section className="rounded border border-border bg-surface p-4">
@@ -435,6 +472,19 @@ export default function QuoteDetailPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function requestedServiceLabel(code: string) {
+  return (
+    (
+      {
+        ORIGIN_LOGISTICS: '头程物流',
+        ORIGIN_CUSTOMS_CLEARANCE: '始发国清关',
+        DESTINATION_CUSTOMS_CLEARANCE: '目的国清关',
+        DESTINATION_LOGISTICS: '尾程物流',
+      } as Record<string, string>
+    )[code] ?? code
   );
 }
 function QuoteDecisionStatus({ quote }: { quote: Quote }) {

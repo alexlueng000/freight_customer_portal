@@ -27,6 +27,9 @@ const publicQuoteSelect = {
   currency: true,
   subtotal: true,
   totalAmount: true,
+  pickupAddress: true,
+  deliveryAddress: true,
+  requestedServices: true,
   customerTerms: true,
   sentAt: true,
   acceptedAt: true,
@@ -52,6 +55,14 @@ export class QuotesService {
 
   async create(dto: CreateQuoteDto) {
     const context = this.requireCustomerContext();
+    if (dto.requestedServices.includes('ORIGIN_LOGISTICS') && !dto.pickupAddress?.trim())
+      throw this.fieldError('QUOTE_REQUEST_INVALID', '报价需求信息不完整。', {
+        pickupAddress: ['勾选头程物流后，请填写发货地。'],
+      });
+    if (dto.requestedServices.includes('DESTINATION_LOGISTICS') && !dto.deliveryAddress?.trim())
+      throw this.fieldError('QUOTE_REQUEST_INVALID', '报价需求信息不完整。', {
+        deliveryAddress: ['勾选尾程物流后，请填写收货地。'],
+      });
     const customer = await this.prisma.customerCompany.findFirst({
       where: { id: context.customerCompanyId, tenantId: context.tenantId },
       select: {
@@ -126,7 +137,9 @@ export class QuotesService {
     const eligibleCharges = rate.charges.filter((charge) => charge.currency === price.currency);
     const oceanFreightAmount = sellAmount.mul(containerQuantity);
     const chargeSnapshots = eligibleCharges.map((charge) => {
-      const quantity = new Prisma.Decimal(charge.chargeBasis === 'PER_CONTAINER' ? dto.quantity : 1);
+      const quantity = new Prisma.Decimal(
+        charge.chargeBasis === 'PER_CONTAINER' ? dto.quantity : 1,
+      );
       return { ...charge, quantity, totalAmount: charge.amount.mul(quantity) };
     });
     const totalAmount = chargeSnapshots.reduce(
@@ -160,8 +173,20 @@ export class QuotesService {
           currency: price.currency,
           subtotal: totalAmount,
           totalAmount,
+          pickupAddress: dto.pickupAddress?.trim() || null,
+          deliveryAddress: dto.deliveryAddress?.trim() || null,
+          requestedServices: [...new Set(dto.requestedServices)],
           createdById: context.userId,
           updatedById: context.userId,
+          cargoItems: {
+            create: dto.cargoItems.map((item, index) => ({
+              tenantId: context.tenantId,
+              commodity: item.commodity.trim(),
+              grossWeightKg: new Prisma.Decimal(item.grossWeightKg),
+              specialRequirements: item.specialRequirements?.trim() || null,
+              sortOrder: index,
+            })),
+          },
           items: {
             create: [
               {
@@ -210,6 +235,12 @@ export class QuotesService {
             totalAmount: totalAmount.toString(),
             chargeCount: eligibleCharges.length,
             currency: price.currency,
+            cargoItemCount: dto.cargoItems.length,
+            cargoItems: dto.cargoItems.map((item) => ({
+              commodity: item.commodity.trim(),
+              grossWeightKg: String(item.grossWeightKg),
+            })),
+            requestedServices: dto.requestedServices,
           },
         },
       });
@@ -265,6 +296,16 @@ export class QuotesService {
           },
           orderBy: { sortOrder: 'asc' },
         },
+        cargoItems: {
+          select: {
+            id: true,
+            commodity: true,
+            grossWeightKg: true,
+            specialRequirements: true,
+            sortOrder: true,
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
     if (!quote)
@@ -277,11 +318,7 @@ export class QuotesService {
   }
   async reject(id: string, dto: RejectQuoteDto = {}) {
     const reason = dto.reason?.trim();
-    return this.customerDecision(
-      id,
-      QuoteStatus.REJECTED,
-      reason ? { reason } : {},
-    );
+    return this.customerDecision(id, QuoteStatus.REJECTED, reason ? { reason } : {});
   }
 
   async listInternal(query: ListQuotesDto) {
@@ -343,6 +380,16 @@ export class QuotesService {
             amount: true,
             currency: true,
             costAmount: true,
+            sortOrder: true,
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
+        cargoItems: {
+          select: {
+            id: true,
+            commodity: true,
+            grossWeightKg: true,
+            specialRequirements: true,
             sortOrder: true,
           },
           orderBy: { sortOrder: 'asc' },
@@ -483,7 +530,9 @@ export class QuotesService {
         ...(dto.customerTerms === undefined
           ? {}
           : { customerTerms: dto.customerTerms.trim() || null }),
-        ...(dto.internalNote === undefined ? {} : { internalNote: dto.internalNote.trim() || null }),
+        ...(dto.internalNote === undefined
+          ? {}
+          : { internalNote: dto.internalNote.trim() || null }),
       };
       await tx.quote.update({ where: { id }, data });
       await tx.auditLog.create({
@@ -531,11 +580,9 @@ export class QuotesService {
         requested.size !== dto.items.length ||
         [...requested.keys()].some((itemId) => !quote.items.some((item) => item.id === itemId))
       )
-        throw this.fieldError(
-          'INVALID_QUOTE_ITEM',
-          '改价明细与当前报价不匹配，请刷新后重试。',
-          { items: ['每个改价费用项必须属于当前报价。'] },
-        );
+        throw this.fieldError('INVALID_QUOTE_ITEM', '改价明细与当前报价不匹配，请刷新后重试。', {
+          items: ['每个改价费用项必须属于当前报价。'],
+        });
       const beforeItems = quote.items.map((item) => ({
         id: item.id,
         unitPrice: item.unitPrice.toString(),

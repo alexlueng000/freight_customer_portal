@@ -200,6 +200,7 @@ model Tenant {
   rateImportJobs         RateImportJob[]
   rateImportMappings     RateImportMappingProfile[]
   quotes                 Quote[]
+  quoteCargoItems        QuoteCargoItem[]
   bookings               Booking[]
   shipments              Shipment[]
   containers             Container[]
@@ -594,6 +595,9 @@ model Quote {
   currency            String      @db.VarChar(3)
   subtotal            Decimal     @db.Decimal(18, 4)
   totalAmount         Decimal     @db.Decimal(18, 4)
+  pickupAddress       String?     @db.VarChar(1000)
+  deliveryAddress     String?     @db.VarChar(1000)
+  requestedServices   String[]    @default([])
   customerTerms       String?     @db.VarChar(2000)
   internalNote        String?     @db.VarChar(2000)
   sentAt              DateTime?   @db.Timestamptz(3)
@@ -609,13 +613,14 @@ model Quote {
   createdAt           DateTime    @default(now()) @db.Timestamptz(3)
   updatedAt           DateTime    @updatedAt @db.Timestamptz(3)
 
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  customer          CustomerCompany @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
-  salesOwner        User?           @relation("QuoteSalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
-  sentBy            User?           @relation("QuoteSentBy", fields: [sentById], references: [id], onDelete: SetNull)
-  priceOverriddenBy User?           @relation("QuotePriceOverrideBy", fields: [priceOverriddenById], references: [id], onDelete: SetNull)
-  sourceRate        Rate?           @relation(fields: [sourceRateId], references: [id], onDelete: SetNull)
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  customer          CustomerCompany  @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
+  salesOwner        User?            @relation("QuoteSalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
+  sentBy            User?            @relation("QuoteSentBy", fields: [sentById], references: [id], onDelete: SetNull)
+  priceOverriddenBy User?            @relation("QuotePriceOverrideBy", fields: [priceOverriddenById], references: [id], onDelete: SetNull)
+  sourceRate        Rate?            @relation(fields: [sourceRateId], references: [id], onDelete: SetNull)
   items             QuoteItem[]
+  cargoItems        QuoteCargoItem[]
   bookings          Booking[]
 
   @@unique([tenantId, quoteNo])
@@ -626,21 +631,37 @@ model Quote {
   @@index([tenantId, priceOverriddenById])
 }
 
+model QuoteCargoItem {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  quoteId             String
+  commodity           String   @db.VarChar(500)
+  grossWeightKg       Decimal  @db.Decimal(18, 3)
+  specialRequirements String?  @db.VarChar(2000)
+  sortOrder           Int      @default(0)
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  quote  Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, quoteId, sortOrder])
+}
+
 model QuoteItem {
-  id                String   @id @default(cuid())
+  id                String       @id @default(cuid())
   tenantId          String
   quoteId           String
-  chargeCode        String   @db.VarChar(30)
-  chargeName        String   @db.VarChar(150)
+  chargeCode        String       @db.VarChar(30)
+  chargeName        String       @db.VarChar(150)
   chargeBasis       ChargeBasis?
-  containerType     String?  @db.VarChar(20)
-  quantity          Decimal  @default(1) @db.Decimal(18, 4)
-  unitPrice         Decimal  @db.Decimal(18, 4)
-  originalUnitPrice Decimal? @db.Decimal(18, 4)
-  amount            Decimal  @db.Decimal(18, 4)
-  currency          String   @db.VarChar(3)
-  costAmount        Decimal? @db.Decimal(18, 4)
-  sortOrder         Int      @default(0)
+  containerType     String?      @db.VarChar(20)
+  quantity          Decimal      @default(1) @db.Decimal(18, 4)
+  unitPrice         Decimal      @db.Decimal(18, 4)
+  originalUnitPrice Decimal?     @db.Decimal(18, 4)
+  amount            Decimal      @db.Decimal(18, 4)
+  currency          String       @db.VarChar(3)
+  costAmount        Decimal?     @db.Decimal(18, 4)
+  sortOrder         Int          @default(0)
 
   quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 

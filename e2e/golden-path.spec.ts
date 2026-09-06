@@ -90,7 +90,13 @@ test.describe('V1.1 Rate to Basic Shipment golden path', () => {
     const quote = await apiJson<{ id: string; quoteNo: string }>(
       await request.post(`${apiBase}/quotes`, {
         headers: bearer(customerToken),
-        data: { rateId: rate.id, containerType: '40HQ', quantity: 2 },
+        data: {
+          rateId: rate.id,
+          containerType: '40HQ',
+          quantity: 2,
+          cargoItems: [{ commodity: 'Furniture', grossWeightKg: 18000 }],
+          requestedServices: [],
+        },
       }),
       'create quote',
     );

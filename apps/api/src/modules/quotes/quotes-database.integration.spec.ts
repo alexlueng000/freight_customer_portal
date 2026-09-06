@@ -32,6 +32,15 @@ let tenantA: string,
   internalUser: string,
   rateA: string;
 let quoteId: string;
+const cargoRequest = {
+  cargoItems: [
+    { commodity: 'Furniture', grossWeightKg: 18000, specialRequirements: 'Keep dry' },
+    { commodity: 'Garments', grossWeightKg: 2500 },
+  ],
+  pickupAddress: 'Shanghai, China',
+  deliveryAddress: 'Los Angeles, USA',
+  requestedServices: ['ORIGIN_LOGISTICS', 'DESTINATION_LOGISTICS'],
+};
 
 describe('quote database integration', () => {
   beforeAll(async () => {
@@ -166,7 +175,7 @@ describe('quote database integration', () => {
 
   it('creates immutable cost and sell snapshots while hiding cost from customer reads', async () => {
     const created = await runAs(tenantA, userA, customerA, () =>
-      service.create({ rateId: rateA, containerType: '40HQ', quantity: 2 }),
+      service.create({ rateId: rateA, containerType: '40HQ', quantity: 2, ...cargoRequest }),
     );
     expect(created.quoteNo).toMatch(/^QT\d{12}$/);
     quoteId = created.id;
@@ -187,6 +196,14 @@ describe('quote database integration', () => {
     ]);
     expect(detail.items.map((item) => item.amount.toString())).toEqual(['2600', '20', '80']);
     expect(detail.totalAmount.toString()).toBe('2700');
+    expect(detail).toMatchObject({
+      pickupAddress: 'Shanghai, China',
+      requestedServices: ['ORIGIN_LOGISTICS', 'DESTINATION_LOGISTICS'],
+      cargoItems: [
+        { commodity: 'Furniture', specialRequirements: 'Keep dry' },
+        { commodity: 'Garments', specialRequirements: null },
+      ],
+    });
     expect(JSON.stringify(detail)).not.toContain('costAmount');
     expect(JSON.stringify(detail)).not.toContain('supplierName');
     expect(JSON.stringify(detail)).not.toContain('contractNo');
@@ -204,12 +221,12 @@ describe('quote database integration', () => {
     ).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
     await expect(
       runAs(tenantB, userB, customerB, () =>
-        service.create({ rateId: rateA, containerType: '40HQ', quantity: 1 }),
+        service.create({ rateId: rateA, containerType: '40HQ', quantity: 1, ...cargoRequest }),
       ),
     ).rejects.toMatchObject({ response: { code: 'RATE_NOT_AVAILABLE' } });
     try {
       await runAs(tenantA, userA, customerA, () =>
-        service.create({ rateId: rateA, containerType: '20GP', quantity: 1 }),
+        service.create({ rateId: rateA, containerType: '20GP', quantity: 1, ...cargoRequest }),
       );
       throw new Error('Expected rate price validation to fail');
     } catch (caught) {
@@ -305,7 +322,7 @@ describe('quote database integration', () => {
   });
   it('expires overdue quotes before a customer can accept them', async () => {
     const created = await runAs(tenantA, userA, customerA, () =>
-      service.create({ rateId: rateA, containerType: '40HQ', quantity: 1 }),
+      service.create({ rateId: rateA, containerType: '40HQ', quantity: 1, ...cargoRequest }),
     );
     await runInternal(() => service.send(created.id));
     await prisma.quote.update({ where: { id: created.id }, data: { validUntil: day(-1) } });
@@ -361,8 +378,10 @@ function errorResponse(error: unknown): {
   details?: { fieldErrors?: Record<string, string[]> };
 } {
   return (
-    error as {
-      response?: { code?: string; details?: { fieldErrors?: Record<string, string[]> } };
-    }
-  ).response ?? {};
+    (
+      error as {
+        response?: { code?: string; details?: { fieldErrors?: Record<string, string[]> } };
+      }
+    ).response ?? {}
+  );
 }

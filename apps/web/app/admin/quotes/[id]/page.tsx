@@ -36,6 +36,15 @@ interface Quote {
   validUntil: string;
   currency: string;
   totalAmount: string;
+  pickupAddress: string | null;
+  deliveryAddress: string | null;
+  requestedServices: string[];
+  cargoItems: Array<{
+    id: string;
+    commodity: string;
+    grossWeightKg: string;
+    specialRequirements: string | null;
+  }>;
   customerTerms: string | null;
   internalNote: string | null;
   sentAt: string | null;
@@ -269,6 +278,7 @@ export default function AdminQuoteDetailPage() {
         }
       />
       <RouteSummary podCode={quote.podCode} polCode={quote.polCode} quoteItems={quote.items} />
+      <QuoteRequestSummary quote={quote} />
       {error ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
@@ -430,11 +440,7 @@ export default function AdminQuoteDetailPage() {
           title="Rate 来源与发送记录"
         />
         <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
-          <SourceFact
-            emphasis
-            label="来源 Rate"
-            value={quote.sourceRate?.rateNo ?? '—'}
-          />
+          <SourceFact emphasis label="来源 Rate" value={quote.sourceRate?.rateNo ?? '—'} />
           <SourceFact label="Service" value={quote.sourceRate?.serviceName ?? '—'} />
           <SourceFact label="Supplier" value={quote.sourceRate?.supplierName ?? '—'} />
           <SourceFact label="Contract" value={quote.sourceRate?.contractNo ?? '—'} />
@@ -524,9 +530,7 @@ export default function AdminQuoteDetailPage() {
               <h2 className="text-base font-semibold" id="send-quote-title">
                 确认并发送客户
               </h2>
-              <p className="mt-1 text-sm text-muted">
-                发送后客户可下载 PDF、接受或拒绝报价。
-              </p>
+              <p className="mt-1 text-sm text-muted">发送后客户可下载 PDF、接受或拒绝报价。</p>
             </div>
             <div className="space-y-3 px-5 py-4 text-sm">
               <Fact label="报价编号" value={quote.quoteNo} />
@@ -561,6 +565,57 @@ export default function AdminQuoteDetailPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function QuoteRequestSummary({ quote }: { quote: Quote }) {
+  return (
+    <section className="rounded border border-border bg-surface">
+      <div className="border-b border-border px-4 py-3">
+        <h2 className="text-sm font-semibold">客户运输需求</h2>
+        <p className="mt-1 text-xs text-muted">
+          客户提交报价申请时填写，供销售核价和确认服务范围。
+        </p>
+      </div>
+      <div className="grid gap-4 border-b border-border p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Fact label="发货地" value={quote.pickupAddress ?? '—'} />
+        <Fact label="收货地" value={quote.deliveryAddress ?? '—'} />
+        <Fact
+          label="委托服务"
+          value={
+            quote.requestedServices.length
+              ? quote.requestedServices.map(requestedServiceLabel).join('、')
+              : '仅港到港海运'
+          }
+        />
+      </div>
+      <div className="divide-y divide-border">
+        {quote.cargoItems.length ? (
+          quote.cargoItems.map((item, index) => (
+            <div className="grid gap-4 p-4 sm:grid-cols-3" key={item.id}>
+              <Fact label={`货物 ${index + 1}`} value={item.commodity} />
+              <Fact label="毛重" value={`${Number(item.grossWeightKg).toLocaleString()} kg`} />
+              <Fact label="特殊要求" value={item.specialRequirements ?? '无'} />
+            </div>
+          ))
+        ) : (
+          <p className="p-4 text-sm text-muted">历史报价未填写货物明细。</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function requestedServiceLabel(code: string) {
+  return (
+    (
+      {
+        ORIGIN_LOGISTICS: '头程物流',
+        ORIGIN_CUSTOMS_CLEARANCE: '始发国清关',
+        DESTINATION_CUSTOMS_CLEARANCE: '目的国清关',
+        DESTINATION_LOGISTICS: '尾程物流',
+      } as Record<string, string>
+    )[code] ?? code
   );
 }
 function Fact({
@@ -832,7 +887,10 @@ function summarizeContainers(items: Item[]) {
     .join(' / ');
 }
 function summarizePricing(items: Item[]) {
-  const summaries = new Map<string, { currency: string; cost: number; sell: number; profit: number }>();
+  const summaries = new Map<
+    string,
+    { currency: string; cost: number; sell: number; profit: number }
+  >();
   for (const item of items) {
     const summary = summaries.get(item.currency) ?? {
       currency: item.currency,

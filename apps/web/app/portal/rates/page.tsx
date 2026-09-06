@@ -1,9 +1,9 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
@@ -48,6 +48,83 @@ interface ApiErrorPayload {
   message?: string;
   details?: { fieldErrors?: Record<string, string[]> };
 }
+const requestedServiceOptions = [
+  { code: 'ORIGIN_LOGISTICS', label: '头程物流' },
+  { code: 'ORIGIN_CUSTOMS_CLEARANCE', label: '始发国清关' },
+  { code: 'DESTINATION_CUSTOMS_CLEARANCE', label: '目的国清关' },
+  { code: 'DESTINATION_LOGISTICS', label: '尾程物流' },
+] as const;
+type RequestedServiceCode = (typeof requestedServiceOptions)[number]['code'];
+interface QuoteRequestValues {
+  quantity: string;
+  cargoItems: Array<{
+    clientId: string;
+    commodity: string;
+    grossWeightKg: string;
+    specialRequirements: string;
+  }>;
+  pickupAddress: string;
+  deliveryAddress: string;
+  requestedServices: RequestedServiceCode[];
+}
+let nextCargoItemId = 1;
+function newCargoItem(): QuoteRequestValues['cargoItems'][number] {
+  return {
+    clientId: `cargo-${nextCargoItemId++}`,
+    commodity: '',
+    grossWeightKg: '',
+    specialRequirements: '',
+  };
+}
+const quoteRequestSchema = z
+  .object({
+    quantity: z.string().refine((value) => {
+      const quantity = Number(value);
+      return Number.isInteger(quantity) && quantity >= 1 && quantity <= 999;
+    }, '箱量必须是 1–999 之间的整数。'),
+    cargoItems: z
+      .array(
+        z.object({
+          clientId: z.string(),
+          commodity: z
+            .string()
+            .trim()
+            .min(1, '请填写货物品名。')
+            .max(500, '货物品名不能超过 500 字。'),
+          grossWeightKg: z.string().refine((value) => {
+            const weight = Number(value);
+            return Number.isFinite(weight) && weight > 0 && weight <= 999999999;
+          }, '请输入大于 0 的毛重。'),
+          specialRequirements: z.string().trim().max(2000, '特殊要求不能超过 2000 字。'),
+        }),
+      )
+      .min(1, '请至少添加一种货物。')
+      .max(50, '一次报价最多添加 50 种货物。'),
+    pickupAddress: z.string().trim().max(1000, '发货地不能超过 1000 字。'),
+    deliveryAddress: z.string().trim().max(1000, '收货地不能超过 1000 字。'),
+    requestedServices: z.array(
+      z.enum([
+        'ORIGIN_LOGISTICS',
+        'ORIGIN_CUSTOMS_CLEARANCE',
+        'DESTINATION_CUSTOMS_CLEARANCE',
+        'DESTINATION_LOGISTICS',
+      ]),
+    ),
+  })
+  .superRefine((value, context) => {
+    if (value.requestedServices.includes('ORIGIN_LOGISTICS') && !value.pickupAddress)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['pickupAddress'],
+        message: '勾选头程物流后，请填写发货地。',
+      });
+    if (value.requestedServices.includes('DESTINATION_LOGISTICS') && !value.deliveryAddress)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['deliveryAddress'],
+        message: '勾选尾程物流后，请填写收货地。',
+      });
+  });
 class PortalRateApiError extends Error {
   constructor(
     message: string,
@@ -123,16 +200,27 @@ export default function PortalRatesPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [creatingRateId, setCreatingRateId] = useState<string | null>(null);
   const [selectedRate, setSelectedRate] = useState<CustomerRate | null>(null);
-  const [quoteQuantity, setQuoteQuantity] = useState('1');
   const [quoteRequestError, setQuoteRequestError] = useState('');
-  const createQuote = async (rate: CustomerRate, quantity: number) => {
+  const createQuote = async (rate: CustomerRate, values: QuoteRequestValues) => {
     setCreatingRateId(rate.id);
     setQuoteRequestError('');
     try {
       const quote = await requestJson<{ id: string }>(apiFetch, '/api/v1/quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rateId: rate.id, containerType: rate.containerType, quantity }),
+        body: JSON.stringify({
+          rateId: rate.id,
+          containerType: rate.containerType,
+          quantity: Number(values.quantity),
+          cargoItems: values.cargoItems.map((item) => ({
+            commodity: item.commodity.trim(),
+            grossWeightKg: Number(item.grossWeightKg),
+            specialRequirements: item.specialRequirements.trim() || undefined,
+          })),
+          pickupAddress: values.pickupAddress.trim() || undefined,
+          deliveryAddress: values.deliveryAddress.trim() || undefined,
+          requestedServices: values.requestedServices,
+        }),
       });
       router.push(`/portal/quotes/${quote.id}`);
     } catch (caught) {
@@ -357,7 +445,6 @@ export default function PortalRatesPage() {
                         disabled={creatingRateId !== null}
                         onClick={() => {
                           setSelectedRate(rate);
-                          setQuoteQuantity('1');
                           setQuoteRequestError('');
                         }}
                         type="button"
@@ -435,7 +522,6 @@ export default function PortalRatesPage() {
                               disabled={creatingRateId !== null}
                               onClick={() => {
                                 setSelectedRate(rate);
-                                setQuoteQuantity('1');
                                 setQuoteRequestError('');
                               }}
                               type="button"
@@ -482,7 +568,6 @@ export default function PortalRatesPage() {
       {canCreateQuote && selectedRate ? (
         <QuoteRequestDialog
           error={quoteRequestError}
-          quantity={quoteQuantity}
           rate={selectedRate}
           submitting={creatingRateId === selectedRate.id}
           onClose={() => {
@@ -490,15 +575,7 @@ export default function PortalRatesPage() {
             setSelectedRate(null);
             setQuoteRequestError('');
           }}
-          onQuantityChange={setQuoteQuantity}
-          onSubmit={() => {
-            const quantity = Number(quoteQuantity);
-            if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
-              setQuoteRequestError('箱量必须是 1–999 之间的整数。');
-              return;
-            }
-            void createQuote(selectedRate, quantity);
-          }}
+          onSubmit={(values) => void createQuote(selectedRate, values)}
         />
       ) : null}
     </div>
@@ -507,25 +584,73 @@ export default function PortalRatesPage() {
 
 function QuoteRequestDialog({
   rate,
-  quantity,
   error,
   submitting,
-  onQuantityChange,
   onClose,
   onSubmit,
 }: {
   rate: CustomerRate;
-  quantity: string;
   error: string;
   submitting: boolean;
-  onQuantityChange: (value: string) => void;
   onClose: () => void;
-  onSubmit: () => void;
+  onSubmit: (values: QuoteRequestValues) => void;
 }) {
-  const numericQuantity = Number(quantity);
+  const [values, setValues] = useState<QuoteRequestValues>({
+    quantity: '1',
+    cargoItems: [newCargoItem()],
+    pickupAddress: '',
+    deliveryAddress: '',
+    requestedServices: [],
+  });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const numericQuantity = Number(values.quantity);
   const validQuantity =
     Number.isInteger(numericQuantity) && numericQuantity >= 1 && numericQuantity <= 999;
   const estimate = validQuantity ? quoteEstimate(rate, numericQuantity) : null;
+  const submit = () => {
+    const result = quoteRequestSchema.safeParse(values);
+    if (!result.success) {
+      setFieldErrors(
+        Object.fromEntries(
+          result.error.issues.map((issue) => [issue.path.join('.'), issue.message]),
+        ),
+      );
+      return;
+    }
+    setFieldErrors({});
+    onSubmit(result.data);
+  };
+  const update = <K extends keyof QuoteRequestValues>(key: K, value: QuoteRequestValues[K]) => {
+    setValues((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => ({ ...current, [key]: '' }));
+  };
+  const updateCargoItem = (
+    index: number,
+    field: 'commodity' | 'grossWeightKg' | 'specialRequirements',
+    value: string,
+  ) => {
+    setValues((current) => ({
+      ...current,
+      cargoItems: current.cargoItems.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, [field]: value } : item,
+      ),
+    }));
+    setFieldErrors((current) => ({ ...current, [`cargoItems.${index}.${field}`]: '' }));
+  };
+  const addCargoItem = () =>
+    setValues((current) =>
+      current.cargoItems.length >= 50
+        ? current
+        : { ...current, cargoItems: [...current.cargoItems, newCargoItem()] },
+    );
+  const removeCargoItem = (index: number) => {
+    if (values.cargoItems.length === 1) return;
+    setValues((current) => ({
+      ...current,
+      cargoItems: current.cargoItems.filter((_, itemIndex) => itemIndex !== index),
+    }));
+    setFieldErrors({});
+  };
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
@@ -534,7 +659,7 @@ function QuoteRequestDialog({
       <section
         aria-labelledby="quote-request-title"
         aria-modal="true"
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-surface shadow-xl"
+        className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-border bg-surface shadow-xl"
         role="dialog"
       >
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4">
@@ -543,7 +668,7 @@ function QuoteRequestDialog({
               获取正式报价
             </h2>
             <p className="mt-1 text-sm text-muted">
-              确认箱量和预计费用后提交，由销售确认并发送正式报价。
+              填写本次货物与委托服务，销售将据此确认并发送正式报价。
             </p>
           </div>
           <button
@@ -570,19 +695,175 @@ function QuoteRequestDialog({
             </span>
             <div className="mt-2 flex items-center gap-3">
               <input
-                aria-invalid={!validQuantity}
+                aria-invalid={Boolean(fieldErrors.quantity)}
                 className="h-10 w-32 rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger"
                 inputMode="numeric"
                 max={999}
                 min={1}
-                onChange={(event) => onQuantityChange(event.target.value)}
+                onChange={(event) => update('quantity', event.target.value)}
                 required
                 type="number"
-                value={quantity}
+                value={values.quantity}
               />
               <span className="text-sm font-medium">× {rate.containerType}</span>
             </div>
+            {fieldErrors.quantity ? (
+              <span className="mt-1 block text-xs text-danger">{fieldErrors.quantity}</span>
+            ) : null}
           </label>
+          <section className="space-y-4 rounded-md border border-border p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">货物信息</h3>
+                <p className="mt-1 text-xs text-muted">
+                  可添加多种货物，销售会分别核对货物属性、重量和操作要求。
+                </p>
+              </div>
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded border border-primary/30 px-3 text-sm font-semibold text-primary hover:bg-primary/5 disabled:opacity-40"
+                disabled={submitting || values.cargoItems.length >= 50}
+                onClick={addCargoItem}
+                type="button"
+              >
+                <Plus aria-hidden className="size-4" /> 添加货物
+              </button>
+            </div>
+            {fieldErrors.cargoItems ? (
+              <p className="text-xs text-danger">{fieldErrors.cargoItems}</p>
+            ) : null}
+            <div className="space-y-4">
+              {values.cargoItems.map((item, index) => (
+                <article
+                  className="rounded border border-border bg-sidebar/30 p-4"
+                  key={item.clientId}
+                >
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-semibold">货物 {index + 1}</h4>
+                    <button
+                      aria-label={`删除货物 ${index + 1}`}
+                      className="inline-flex h-8 items-center gap-1.5 rounded px-2 text-xs font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-35"
+                      disabled={submitting || values.cargoItems.length === 1}
+                      onClick={() => removeCargoItem(index)}
+                      title={values.cargoItems.length === 1 ? '至少保留一种货物' : '删除此货物'}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden className="size-3.5" /> 删除
+                    </button>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <QuoteRequestField
+                      error={fieldErrors[`cargoItems.${index}.commodity`]}
+                      label="货物品名"
+                      required
+                    >
+                      <input
+                        className={inputClass}
+                        maxLength={500}
+                        onChange={(event) =>
+                          updateCargoItem(index, 'commodity', event.target.value)
+                        }
+                        placeholder="例如：家具、服装、机械配件"
+                        value={item.commodity}
+                      />
+                    </QuoteRequestField>
+                    <QuoteRequestField
+                      error={fieldErrors[`cargoItems.${index}.grossWeightKg`]}
+                      label="毛重（kg）"
+                      required
+                    >
+                      <input
+                        className={inputClass}
+                        inputMode="decimal"
+                        min="0.001"
+                        onChange={(event) =>
+                          updateCargoItem(index, 'grossWeightKg', event.target.value)
+                        }
+                        placeholder="例如：18000"
+                        step="0.001"
+                        type="number"
+                        value={item.grossWeightKg}
+                      />
+                    </QuoteRequestField>
+                  </div>
+                  <div className="mt-4">
+                    <QuoteRequestField
+                      error={fieldErrors[`cargoItems.${index}.specialRequirements`]}
+                      label="特殊要求（选填）"
+                    >
+                      <textarea
+                        className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                        maxLength={2000}
+                        onChange={(event) =>
+                          updateCargoItem(index, 'specialRequirements', event.target.value)
+                        }
+                        placeholder="例如：超长超重、温控、危险品资料状态、指定操作时间等"
+                        value={item.specialRequirements}
+                      />
+                    </QuoteRequestField>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+          <section className="space-y-4 rounded-md border border-border p-4">
+            <div>
+              <h3 className="text-sm font-semibold">需要货代办理的服务</h3>
+              <p className="mt-1 text-xs text-muted">
+                按实际需要多选；未勾选的服务不会默认计入本次需求。
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {requestedServiceOptions.map((option) => (
+                <label
+                  className="flex cursor-pointer items-center gap-3 rounded border border-border px-3 py-3 text-sm hover:bg-sidebar/60"
+                  key={option.code}
+                >
+                  <input
+                    checked={values.requestedServices.includes(option.code)}
+                    className="size-4 accent-primary"
+                    onChange={(event) =>
+                      update(
+                        'requestedServices',
+                        event.target.checked
+                          ? [...values.requestedServices, option.code]
+                          : values.requestedServices.filter((code) => code !== option.code),
+                      )
+                    }
+                    type="checkbox"
+                  />
+                  <span className="font-medium">{option.label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <QuoteRequestField
+                error={fieldErrors.pickupAddress}
+                label={`发货地${values.requestedServices.includes('ORIGIN_LOGISTICS') ? '' : '（选填）'}`}
+                required={values.requestedServices.includes('ORIGIN_LOGISTICS')}
+              >
+                <textarea
+                  className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  maxLength={1000}
+                  onChange={(event) => update('pickupAddress', event.target.value)}
+                  placeholder="城市 / 区域及详细提货地址"
+                  value={values.pickupAddress}
+                />
+              </QuoteRequestField>
+              <QuoteRequestField
+                error={fieldErrors.deliveryAddress}
+                label={`收货地${values.requestedServices.includes('DESTINATION_LOGISTICS') ? '' : '（选填）'}`}
+                required={values.requestedServices.includes('DESTINATION_LOGISTICS')}
+              >
+                <textarea
+                  className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  maxLength={1000}
+                  onChange={(event) => update('deliveryAddress', event.target.value)}
+                  placeholder="城市 / 区域及详细送货地址"
+                  value={values.deliveryAddress}
+                />
+              </QuoteRequestField>
+            </div>
+          </section>
           <section className="overflow-hidden rounded-md border border-border">
             <div className="border-b border-border bg-sidebar px-4 py-3 text-sm font-semibold">
               费用预估
@@ -640,7 +921,7 @@ function QuoteRequestDialog({
           <button
             className="h-9 rounded bg-primary px-5 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
             disabled={submitting || !validQuantity}
-            onClick={onSubmit}
+            onClick={submit}
             type="button"
           >
             {submitting ? '提交中…' : '提交销售确认'}
@@ -648,6 +929,26 @@ function QuoteRequestDialog({
         </div>
       </section>
     </div>
+  );
+}
+
+function QuoteRequestField({
+  label,
+  required = false,
+  error,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block text-sm">
+      <FieldLabel label={label} required={required} />
+      <div className="mt-2">{children}</div>
+      {error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}
+    </label>
   );
 }
 
