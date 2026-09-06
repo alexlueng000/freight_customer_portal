@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   canAccessPath,
   filterNavigationGroups,
+  isNavigationItemActive,
   navigationPermissions,
   requiredPermissionsForPath,
 } from './navigation-permissions.ts';
@@ -47,4 +48,17 @@ void test('applies a navigation permission to nested routes', () => {
 void test('keeps dashboard and unknown routes unrestricted by navigation policy', () => {
   assert.equal(canAccessPath('/admin', []), true);
   assert.equal(canAccessPath('/admin/future-module', []), true);
+});
+
+void test('marks a navigation item active on its page and nested detail pages', () => {
+  assert.equal(isNavigationItemActive('/admin/customers', '/admin/customers'), true);
+  assert.equal(isNavigationItemActive('/admin/customers/customer-id', '/admin/customers'), true);
+  assert.equal(isNavigationItemActive('/portal/quotes/quote-id', '/portal/quotes'), true);
+});
+
+void test('does not let a dashboard item match every route in its area', () => {
+  assert.equal(isNavigationItemActive('/admin', '/admin'), true);
+  assert.equal(isNavigationItemActive('/admin/customers', '/admin'), false);
+  assert.equal(isNavigationItemActive('/portal/bookings', '/portal'), false);
+  assert.equal(isNavigationItemActive('/admin/rates', '/admin/quotes'), false);
 });

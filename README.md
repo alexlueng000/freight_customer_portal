@@ -45,6 +45,14 @@ docker          Container build files
 docker compose up -d postgres redis minio
 ```
 
+Docker Compose uses the DaoCloud mirror by default for faster image pulls in
+mainland China. To use Docker Hub directly, set the following values in `.env`:
+
+```dotenv
+DOCKER_HUB_LIBRARY_PREFIX=docker.io/library/
+DOCKER_HUB_PREFIX=docker.io/
+```
+
 If port `5432` is already in use, set `POSTGRES_PORT` and use the same port in
 `DATABASE_URL` before starting Docker Compose.
 

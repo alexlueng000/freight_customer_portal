@@ -139,18 +139,18 @@ const searchSchema = z
     polCode: z
       .string()
       .trim()
-      .min(3, '请输入起运港代码')
       .max(10)
-      .regex(/^[A-Za-z0-9]+$/, '仅支持字母和数字'),
+      .refine((value) => !value || value.length >= 3, '起运港代码至少 3 位')
+      .refine((value) => !value || /^[A-Za-z0-9]+$/.test(value), '仅支持字母和数字'),
     podCode: z
       .string()
       .trim()
-      .min(3, '请输入目的港代码')
       .max(10)
-      .regex(/^[A-Za-z0-9]+$/, '仅支持字母和数字'),
+      .refine((value) => !value || value.length >= 3, '目的港代码至少 3 位')
+      .refine((value) => !value || /^[A-Za-z0-9]+$/.test(value), '仅支持字母和数字'),
     etdFrom: z.string().min(1, '请选择最早离港日'),
     etdTo: z.string().min(1, '请选择最晚离港日'),
-    containerType: z.string().min(1, '请选择箱型'),
+    containerType: z.string(),
     carrierCode: z
       .string()
       .trim()
@@ -182,7 +182,7 @@ export default function PortalRatesPage() {
       podCode: '',
       etdFrom: defaults.from,
       etdTo: defaults.to,
-      containerType: '40HQ',
+      containerType: '',
       carrierCode: '',
     },
   });
@@ -191,7 +191,7 @@ export default function PortalRatesPage() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<RateSearchResponse['pagination']>({
     page: 1,
-    pageSize: 20,
+    pageSize: 5,
     total: 0,
     totalPages: 0,
   });
@@ -230,19 +230,17 @@ export default function PortalRatesPage() {
     }
   };
   const search = useCallback(async () => {
-    if (!criteria) return;
     setLoading(true);
     setError(null);
-    const query = new URLSearchParams({
-      page: String(page),
-      pageSize: '20',
-      polCode: criteria.polCode.toUpperCase(),
-      podCode: criteria.podCode.toUpperCase(),
-      etdFrom: criteria.etdFrom,
-      etdTo: criteria.etdTo,
-      containerType: criteria.containerType,
-    });
-    if (criteria.carrierCode) query.set('carrierCode', criteria.carrierCode.toUpperCase());
+    const query = new URLSearchParams({ page: String(page), pageSize: '5' });
+    if (criteria) {
+      query.set('etdFrom', criteria.etdFrom);
+      query.set('etdTo', criteria.etdTo);
+      if (criteria.polCode) query.set('polCode', criteria.polCode.toUpperCase());
+      if (criteria.podCode) query.set('podCode', criteria.podCode.toUpperCase());
+      if (criteria.containerType) query.set('containerType', criteria.containerType);
+      if (criteria.carrierCode) query.set('carrierCode', criteria.carrierCode.toUpperCase());
+    }
     try {
       const result = await requestJson<RateSearchResponse>(
         apiFetch,
@@ -271,7 +269,7 @@ export default function PortalRatesPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        description="输入航线、离港日期和箱型，查询适用于贵司的在线参考价。"
+        description="浏览贵司当前可用运价，也可按航线、日期、箱型和船司缩小范围。"
         eyebrow="客户门户"
         title="运价查询"
       />
@@ -284,29 +282,27 @@ export default function PortalRatesPage() {
             </p>
           </div>
           <p className="rounded-md border border-danger/20 bg-danger/5 px-2.5 py-1.5 text-xs font-medium text-foreground">
-            <RequiredLegend>字段为查询前必须填写</RequiredLegend>
+            <RequiredLegend>离港日期为必填筛选条件</RequiredLegend>
           </p>
         </div>
         <form
           className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-6"
           onSubmit={(event) => void submit(event)}
         >
-          <FormField error={errors.polCode?.message} label="起运港 POL" required>
+          <FormField error={errors.polCode?.message} label="起运港 POL（可选）">
             <input
               {...register('polCode')}
               aria-invalid={Boolean(errors.polCode)}
               className={inputClass}
               placeholder="CNSHA"
-              required
             />
           </FormField>
-          <FormField error={errors.podCode?.message} label="目的港 POD" required>
+          <FormField error={errors.podCode?.message} label="目的港 POD（可选）">
             <input
               {...register('podCode')}
               aria-invalid={Boolean(errors.podCode)}
               className={inputClass}
               placeholder="USLAX"
-              required
             />
           </FormField>
           <FormField error={errors.etdFrom?.message} label="最早离港日" required>
@@ -327,13 +323,13 @@ export default function PortalRatesPage() {
               type="date"
             />
           </FormField>
-          <FormField error={errors.containerType?.message} label="箱型" required>
+          <FormField error={errors.containerType?.message} label="箱型（可选）">
             <select
               {...register('containerType')}
               aria-invalid={Boolean(errors.containerType)}
               className={inputClass}
-              required
             >
+              <option value="">全部箱型</option>
               {['20GP', '40GP', '40HQ', '45HQ'].map((type) => (
                 <option key={type}>{type}</option>
               ))}
@@ -348,7 +344,7 @@ export default function PortalRatesPage() {
               disabled={isSubmitting || loading}
               type="submit"
             >
-              <Search className="size-4" /> {loading ? '查询中…' : '查询运价'}
+              <Search className="size-4" /> {loading ? '筛选中…' : '筛选运价'}
             </button>
           </div>
         </form>
@@ -359,12 +355,14 @@ export default function PortalRatesPage() {
         <section className="overflow-hidden rounded border border-border bg-surface">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div>
-              <h2 className="text-sm font-semibold">查询结果</h2>
+              <h2 className="text-sm font-semibold">{criteria ? '查询结果' : '公司运价'}</h2>
               <p className="mt-1 text-xs text-muted">
-                仅展示贵司适用的在线参考价，不含内部采购和供应商信息。
+                {criteria
+                  ? '以下为符合当前筛选条件的在线参考价。'
+                  : '这里展示货代公司已发布、可供贵司查询的在线参考价。'}
               </p>
             </div>
-            {criteria && !loading && !error ? (
+            {!loading && !error ? (
               <span className="text-sm text-muted">{pagination.total} 个方案</span>
             ) : null}
           </div>
@@ -377,25 +375,22 @@ export default function PortalRatesPage() {
                 onRetry={() => setReloadKey((value) => value + 1)}
               />
             </div>
-          ) : !criteria ? (
-            <div className="p-4">
-              <EmptyState
-                description="填写上方查询条件后，匹配的有效运价会显示在这里。"
-                title="开始查询运价"
-              />
-            </div>
           ) : items.length === 0 ? (
             <div className="p-4">
               <EmptyState
-                description="当前条件下暂无有效方案，请调整日期、港口、箱型或船司。"
-                title="没有匹配的运价"
+                description={
+                  criteria
+                    ? '当前条件下暂无方案，请调整日期、港口、箱型或船司。'
+                    : '货代公司暂未发布可供客户查询的运价，请联系业务人员。'
+                }
+                title={criteria ? '没有匹配的运价' : '暂无已发布运价'}
               />
             </div>
           ) : (
             <>
               <div className="divide-y divide-border md:hidden">
                 {items.map((rate) => (
-                  <article className="space-y-3 px-4 py-4" key={rate.id}>
+                  <article className="space-y-3 px-4 py-4" key={`${rate.id}-${rate.containerType}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-semibold text-foreground">
@@ -475,7 +470,7 @@ export default function PortalRatesPage() {
                     {items.map((rate) => (
                       <tr
                         className="border-b border-border last:border-0 hover:bg-sidebar/60"
-                        key={rate.id}
+                        key={`${rate.id}-${rate.containerType}`}
                       >
                         <td className={cellClass}>
                           <div className="font-medium">{rate.carrierCode}</div>

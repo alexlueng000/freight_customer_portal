@@ -21,7 +21,13 @@ export class CustomerRatesService {
         message: 'Customer rate search requires a customer account',
       });
     }
-    if (query.etdFrom > query.etdTo) {
+    if ((query.etdFrom && !query.etdTo) || (!query.etdFrom && query.etdTo)) {
+      throw new BadRequestException({
+        code: 'INCOMPLETE_DEPARTURE_RANGE',
+        message: 'etdFrom and etdTo must be provided together',
+      });
+    }
+    if (query.etdFrom && query.etdTo && query.etdFrom > query.etdTo) {
       throw new BadRequestException({
         code: 'INVALID_DEPARTURE_RANGE',
         message: 'etdFrom must not be after etdTo',
@@ -37,69 +43,71 @@ export class CustomerRatesService {
         message: 'Customer company is not active',
       });
     }
-    const from = this.businessDate(query.etdFrom);
-    const to = this.businessDate(query.etdTo);
-    const where: Prisma.RateWhereInput = {
+    const today = this.businessDate(new Date().toISOString().slice(0, 10));
+    const from = query.etdFrom ? this.businessDate(query.etdFrom) : today;
+    const to = query.etdTo ? this.businessDate(query.etdTo) : undefined;
+    const rateWhere: Prisma.RateWhereInput = {
       tenantId: context.tenantId,
       status: RateStatus.ACTIVE,
-      polCode: query.polCode,
-      podCode: query.podCode,
+      ...(query.polCode ? { polCode: query.polCode } : {}),
+      ...(query.podCode ? { podCode: query.podCode } : {}),
       ...(query.carrierCode ? { carrierCode: query.carrierCode } : {}),
-      effectiveDate: { lte: to },
+      effectiveDate: { lte: to ?? today },
       expiryDate: { gte: from },
-      prices: { some: { containerType: query.containerType } },
-      OR: [{ etd: null }, { etd: { gte: from, lte: this.endOfDay(to) } }],
+      OR: [{ etd: null }, { etd: { gte: from, ...(to ? { lte: this.endOfDay(to) } : {}) } }],
     };
-    const [rates, total] = await this.prisma.$transaction([
-      this.prisma.rate.findMany({
+    const where: Prisma.RatePriceWhereInput = {
+      tenantId: context.tenantId,
+      ...(query.containerType ? { containerType: query.containerType } : {}),
+      rate: { is: rateWhere },
+    };
+    const [prices, total] = await this.prisma.$transaction([
+      this.prisma.ratePrice.findMany({
         where,
         select: {
           id: true,
-          polCode: true,
-          polName: true,
-          podCode: true,
-          podName: true,
-          carrierCode: true,
-          serviceName: true,
-          effectiveDate: true,
-          expiryDate: true,
-          etd: true,
-          transitDays: true,
-          prices: {
-            where: { containerType: query.containerType },
-            select: { containerType: true, costAmount: true, sellAmount: true, currency: true },
-            take: 1,
-          },
-          charges: {
-            where: {
-              isIncluded: false,
-              OR: [
-                { chargeBasis: { in: ['PER_BL', 'PER_SHIPMENT'] } },
-                { chargeBasis: 'PER_CONTAINER', containerType: query.containerType },
-              ],
-            },
+          containerType: true,
+          costAmount: true,
+          sellAmount: true,
+          currency: true,
+          rate: {
             select: {
               id: true,
-              chargeCode: true,
-              chargeName: true,
-              chargeBasis: true,
-              containerType: true,
-              amount: true,
-              currency: true,
+              polCode: true,
+              polName: true,
+              podCode: true,
+              podName: true,
+              carrierCode: true,
+              serviceName: true,
+              effectiveDate: true,
+              expiryDate: true,
+              etd: true,
+              transitDays: true,
+              charges: {
+                where: { isIncluded: false },
+                select: {
+                  id: true,
+                  chargeCode: true,
+                  chargeName: true,
+                  chargeBasis: true,
+                  containerType: true,
+                  amount: true,
+                  currency: true,
+                },
+                orderBy: { chargeCode: 'asc' },
+              },
             },
-            orderBy: { chargeCode: 'asc' },
           },
         },
-        orderBy: [{ etd: 'asc' }, { expiryDate: 'asc' }, { id: 'asc' }],
+        orderBy: [{ rate: { etd: 'asc' } }, { rate: { expiryDate: 'asc' } }, { id: 'asc' }],
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
       }),
-      this.prisma.rate.count({ where }),
+      this.prisma.ratePrice.count({ where }),
     ]);
     return {
-      items: rates.flatMap((rate) => {
-        const price = rate.prices[0];
-        if (!price) return [];
+      items: prices.map((price) => {
+        const rate = price.rate;
         const oceanSellAmount = this.pricing.calculate(
           price.costAmount,
           price.sellAmount,
@@ -107,32 +115,35 @@ export class CustomerRatesService {
           customer.defaultMarkupValue,
         );
         const charges = rate.charges
-          .filter((charge) => charge.currency === price.currency)
+          .filter(
+            (charge) =>
+              charge.currency === price.currency &&
+              (charge.chargeBasis !== 'PER_CONTAINER' ||
+                charge.containerType === price.containerType),
+          )
           .map((charge) => ({ ...charge, amount: charge.amount.toString() }));
         const totalSellAmount = charges.reduce(
           (total, charge) => total.plus(charge.amount),
           oceanSellAmount,
         );
-        return [
-          {
-            id: rate.id,
-            polCode: rate.polCode,
-            polName: rate.polName,
-            podCode: rate.podCode,
-            podName: rate.podName,
-            carrierCode: rate.carrierCode,
-            serviceName: rate.serviceName,
-            effectiveDate: rate.effectiveDate,
-            expiryDate: rate.expiryDate,
-            etd: rate.etd,
-            transitDays: rate.transitDays,
-            containerType: price.containerType,
-            oceanSellAmount: oceanSellAmount.toString(),
-            sellAmount: totalSellAmount.toString(),
-            charges,
-            currency: price.currency,
-          },
-        ];
+        return {
+          id: rate.id,
+          polCode: rate.polCode,
+          polName: rate.polName,
+          podCode: rate.podCode,
+          podName: rate.podName,
+          carrierCode: rate.carrierCode,
+          serviceName: rate.serviceName,
+          effectiveDate: rate.effectiveDate,
+          expiryDate: rate.expiryDate,
+          etd: rate.etd,
+          transitDays: rate.transitDays,
+          containerType: price.containerType,
+          oceanSellAmount: oceanSellAmount.toString(),
+          sellAmount: totalSellAmount.toString(),
+          charges,
+          currency: price.currency,
+        };
       }),
       pagination: {
         page: query.page,

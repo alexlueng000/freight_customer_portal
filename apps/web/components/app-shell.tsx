@@ -22,7 +22,11 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { NotificationMenu } from '@/components/notification-menu';
-import { filterNavigationGroups, navigationPermissions } from '@/lib/navigation-permissions';
+import {
+  filterNavigationGroups,
+  isNavigationItemActive,
+  navigationPermissions,
+} from '@/lib/navigation-permissions';
 import { cn } from '@/lib/utils';
 
 export interface ShellNavItem {
@@ -246,16 +250,18 @@ export function AppShell({
               <div className="space-y-1">
                 {group.items.map((item) => {
                   const Icon = item.icon;
-                  const active = item.href === pathname;
+                  const active = isNavigationItemActive(pathname, item.href);
 
                   return (
                     <Link
+                      aria-current={active ? 'page' : undefined}
                       key={item.href}
                       href={item.href}
                       className={cn(
                         'flex h-9 items-center gap-3 rounded px-3 text-sm font-medium text-muted transition hover:bg-surface hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20',
                         collapsed && 'justify-center px-0',
-                        active && 'bg-surface text-primary shadow-sm',
+                        active &&
+                          'bg-primary text-surface shadow-sm hover:bg-primary hover:text-surface',
                       )}
                       title={collapsed ? item.label : undefined}
                     >
@@ -324,13 +330,13 @@ export function AppShell({
         <div className="flex gap-1 overflow-x-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const active = item.href === pathname;
+            const active = isNavigationItemActive(pathname, item.href);
             return (
               <Link
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   'flex min-w-[64px] flex-1 flex-col items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium text-muted active:bg-sidebar',
-                  active && 'bg-primary/10 text-primary',
+                  active && 'bg-primary text-surface shadow-sm',
                 )}
                 href={item.href}
                 key={item.href}

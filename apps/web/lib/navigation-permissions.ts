@@ -58,3 +58,9 @@ export function canAccessPath(pathname: string, permissions: readonly string[]):
   const granted = new Set(permissions);
   return requiredPermissionsForPath(pathname).every((permission) => granted.has(permission));
 }
+
+export function isNavigationItemActive(pathname: string, href: string): boolean {
+  if (pathname === href) return true;
+  const isAreaRoot = href.split('/').filter(Boolean).length === 1;
+  return !isAreaRoot && pathname.startsWith(`${href}/`);
+}

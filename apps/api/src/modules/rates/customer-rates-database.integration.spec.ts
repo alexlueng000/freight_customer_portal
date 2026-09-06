@@ -157,6 +157,29 @@ describe('customer rate search database integration', () => {
     expect(result.pagination.total).toBe(1);
     expect(result.items.map((item) => item.id)).toHaveLength(1);
   });
+  it('lists all customer-visible container prices with server-side pagination', async () => {
+    const firstPage = await runAs(tenantA, fixedUser, fixedCustomer, () =>
+      service.search({
+        page: 1,
+        pageSize: 1,
+        etdFrom: '2026-09-01',
+        etdTo: '2026-09-30',
+      }),
+    );
+    const secondPage = await runAs(tenantA, fixedUser, fixedCustomer, () =>
+      service.search({
+        page: 2,
+        pageSize: 1,
+        etdFrom: '2026-09-01',
+        etdTo: '2026-09-30',
+      }),
+    );
+
+    expect(firstPage.pagination).toMatchObject({ total: 2, totalPages: 2, pageSize: 1 });
+    expect(firstPage.items).toHaveLength(1);
+    expect(secondPage.items).toHaveLength(1);
+    expect(firstPage.items[0]?.containerType).not.toBe(secondPage.items[0]?.containerType);
+  });
   it('rejects internal accounts and invalid departure ranges', async () => {
     await expect(
       runAs(tenantA, internalUser, undefined, () => service.search(query('40HQ'))),
@@ -166,6 +189,11 @@ describe('customer rate search database integration', () => {
         service.search({ ...query('40HQ'), etdFrom: '2026-10-01', etdTo: '2026-09-01' }),
       ),
     ).rejects.toMatchObject({ response: { code: 'INVALID_DEPARTURE_RANGE' } });
+    await expect(
+      runAs(tenantA, fixedUser, fixedCustomer, () =>
+        service.search({ page: 1, pageSize: 5, etdFrom: '2026-09-01' }),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'INCOMPLETE_DEPARTURE_RANGE' } });
   });
 });
 function query(containerType: string) {
