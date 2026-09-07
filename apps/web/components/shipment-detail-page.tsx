@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Check, PackageCheck, Ship, Anchor } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
@@ -149,11 +150,9 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       {error ? <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
       {notice ? <div className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">{notice}</div> : null}
 
-      <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-3">
-        <Fact label="当前状态" value={shipmentStatusDescription(shipment.status, mode)} />
+      <section className="grid gap-4 rounded border border-border bg-surface p-5 sm:grid-cols-2 lg:grid-cols-4">
         {routeNames ? <Fact label="航线代码" value={`${shipment.polCode} → ${shipment.podCode}`} /> : null}
-        <Fact label="船司 · 船名 / 航次" value={`${shipment.carrierCode ?? '—'} · ${shipment.vessel ?? '待确认'} / ${shipment.voyage ?? '—'}`} />
-        <Fact label="ETD / ETA" value={`${dateTime(shipment.etd)} / ${dateTime(shipment.eta)}`} />
+        <Fact label="船司" value={shipment.carrierCode ?? '待确认'} />
         <Fact label="箱型与数量" value={containerSummary || '—'} />
         <div>
           <div className="text-xs text-muted">来源 Booking</div>
@@ -165,19 +164,33 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
 
       <section className="rounded border border-border bg-surface p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-semibold">运输进度</h2>
+          <div>
+            <h2 className="text-lg font-semibold">运输进度</h2>
+            <p className="mt-1 text-sm text-muted">{shipmentStatusDescription(shipment.status, mode)}</p>
+          </div>
           {canManage && nextAction ? (
             <button className={primary} disabled={busy} onClick={() => beginAction(nextAction.key)}>{busy ? '处理中...' : nextAction.label}</button>
           ) : null}
         </div>
-        <ol className="mt-5 space-y-4 border-l-2 border-border pl-5">
-          {basicTimeline(shipment).map((item) => (
-            <li className="relative" key={item.key}>
-              <span className={`absolute -left-[27px] top-1 size-3 rounded-full ${item.done ? 'bg-primary' : 'bg-border'}`} />
-              <div className="font-semibold">{item.done ? '✓ ' : '○ '}{item.label}</div>
-              <div className="text-sm text-muted">{item.time}</div>
-            </li>
-          ))}
+        <ol aria-label="运输节点" className="mt-7 grid gap-0 sm:grid-cols-3">
+          {basicTimeline(shipment).map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <li aria-current={item.current ? 'step' : undefined} className="relative flex gap-4 pb-7 last:pb-0 sm:block sm:pb-0" key={item.key}>
+                {index < 2 ? <span aria-hidden="true" className={`absolute left-5 top-10 h-[calc(100%-2.5rem)] w-px sm:left-10 sm:top-5 sm:h-px sm:w-[calc(100%-2.5rem)] ${item.connected ? 'bg-primary/40' : 'bg-border'}`} /> : null}
+                <span aria-hidden="true" className={`relative z-10 flex size-10 shrink-0 items-center justify-center rounded-full border ${item.current ? 'border-primary bg-primary text-surface ring-4 ring-primary/10' : item.done ? 'border-primary/25 bg-primary/10 text-primary' : 'border-border bg-surface text-muted'}`}>
+                  {item.done && !item.current ? <Check className="size-5" /> : <Icon className="size-5" />}
+                </span>
+                <div className="min-w-0 sm:mt-4 sm:pr-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`font-semibold ${item.current ? 'text-primary' : 'text-foreground'}`}>{item.label}</span>
+                    <span className={`text-xs ${item.current ? 'text-primary' : 'text-muted'}`}>{item.current ? '当前阶段' : item.done ? '已完成' : shipment.status === 'CANCELLED' ? '已停止' : '待完成'}</span>
+                  </div>
+                  <div className="mt-1 text-sm tabular-nums text-muted">{item.time}</div>
+                </div>
+              </li>
+            );
+          })}
         </ol>
       </section>
 
@@ -201,10 +214,8 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
           <div className="mt-4 grid gap-4 sm:grid-cols-4">
             <Fact label="船名" value={shipment.vessel ?? '—'} />
             <Fact label="航次" value={shipment.voyage ?? '—'} />
-            <Fact label="ETD" value={dateTime(shipment.etd)} />
-            <Fact label="ETA" value={dateTime(shipment.eta)} />
-            <Fact label="实际开船" value={dateTime(shipment.atd)} />
-            <Fact label="实际到港" value={dateTime(shipment.ata)} />
+            <Fact label="预计开船 · ETD" value={formatDateTime(shipment.etd, '待确认')} />
+            <Fact label="预计到港 · ETA" value={formatDateTime(shipment.eta, '待确认')} />
           </div>
         )}
       </section>
@@ -249,8 +260,8 @@ const inputClass = 'h-9 w-full rounded border border-border bg-surface px-3 text
 function basicTimeline(shipment: Shipment) {
   const rank = shipment.status === 'ARRIVED' ? 2 : shipment.status === 'DEPARTED' ? 1 : shipment.status === 'CANCELLED' ? -1 : 0;
   return [
-    { key: 'booked', label: '已订舱', time: dateTime(shipment.booking.bookedAt), done: rank >= 0 },
-    { key: 'departed', label: '已开船', time: shipment.atd ? dateTime(shipment.atd) : `预计 ${dateTime(shipment.etd)}`, done: rank >= 1 },
-    { key: 'arrived', label: '已到港', time: shipment.ata ? dateTime(shipment.ata) : `预计 ${dateTime(shipment.eta)}`, done: rank >= 2 },
+    { key: 'booked', label: '已订舱', icon: PackageCheck, time: formatDateTime(shipment.booking.bookedAt, '订舱时间未记录'), done: rank >= 0, current: rank === 0, connected: rank >= 1 },
+    { key: 'departed', label: shipment.atd ? '已开船' : '开船', icon: Ship, time: shipment.atd ? `实际开船 ${dateTime(shipment.atd)}` : '等待开船确认', done: !!shipment.atd, current: rank === 1, connected: rank >= 2 },
+    { key: 'arrived', label: shipment.ata ? '已到港' : '到港', icon: Anchor, time: shipment.ata ? `实际到港 ${dateTime(shipment.ata)}` : '等待到港确认', done: !!shipment.ata, current: rank === 2, connected: false },
   ];
 }

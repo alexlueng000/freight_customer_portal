@@ -331,6 +331,7 @@ export default function AdminBookingDetail() {
       });
       const payload = (await response.json()) as { shipmentNo?: string; message?: string };
       if (!response.ok) throw new Error(payload.message ?? 'Basic Shipment 创建失败。');
+      setDialog(null);
       await load();
       setOperationNotice({
         tone: 'success',
