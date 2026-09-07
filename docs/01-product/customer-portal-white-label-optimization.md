@@ -1,5 +1,10 @@
 # Customer Portal 品牌化入口优化需求
 
+> 状态：试点方案已收敛
+> 修订日期：2026-09-08
+> 当前交付条件：自有服务器 IP 访问，暂无正式域名
+> 试点决策：使用 `/t/{portalSlug}` 识别 Tenant，登录后保留现有 `/portal/*` 业务路由
+
 ## 1. 背景
 
 当前 Customer Portal 登录页仍然呈现为典型 SaaS 后台登录界面：
@@ -64,10 +69,12 @@ Customer Portal 建议拆成两层：
 ```text
 Tenant Public Landing
 ↓
-Login / Register
+Customer Login
 ↓
 Customer Workspace
 ```
+
+V1 试点不提供客户自助注册。客户账号继续由租户内部用户创建和管理，避免引入邀请、邮箱验证、客户公司归属和开户审批等新流程。
 
 而 Operation 端继续保持：
 
@@ -281,39 +288,44 @@ Tenant Code
 
 # 7. Tenant 自动识别
 
-V1 目标：
+## 7.1 当前试点方案
 
-系统通过当前访问域名自动识别 tenant。
-
-优先支持：
+当前系统部署在自有服务器，使用 IP 访问，尚无可用的正式域名。本轮使用 URL Path 中的 `portalSlug` 识别 Tenant：
 
 ```text
-tenant-slug.yourdomain.com
+http(s)://SERVER_IP/t/northstar
+http(s)://SERVER_IP/t/northstar/login
 ```
 
-例如：
+系统从 `northstar` 解析 Tenant，客户无需查看或手动输入 `tenantCode`。
+
+`portalSlug` 是对外门户标识，不默认等同于内部 `Tenant.code`。建议规则为：
+
+```text
+小写字母、数字和连字符
+全局唯一
+不允许 admin、api、www、portal 等保留值
+```
+
+URL 中的 `portalSlug` 只负责识别 Tenant，不代替鉴权。登录和所有业务 API 仍必须使用服务端解析的 `tenantId`、Token 中的 Tenant Context 和 `customerCompanyId` 进行授权。
+
+客户登录请求应提交 `portalSlug + email + password`，由后端将 `portalSlug` 解析为 Tenant 后查找用户。不得只在界面隐藏租户代码，却继续由客户端构造或提交生产 `tenantCode`。后端对“Tenant 不存在”和“账号或密码错误”应返回统一登录失败信息，避免 Tenant 和账号枚举。
+
+## 7.2 未来域名方案
+
+取得正式域名后，可增加：
 
 ```text
 northstar.portal-domain.com
 ```
 
-自动识别：
-
-```text
-tenant = NORTHSTAR
-```
-
-未来可支持：
+未来再可选支持：
 
 ```text
 portal.northstarfreight.com
 ```
 
-即 Custom Domain。
-
-本轮如果 Custom Domain 成本过高，可以先不实现。
-
-但代码结构必须避免继续依赖客户手动输入 tenant code。
+路径、子域名和 Custom Domain 应调用同一 Tenant Resolver。本轮不实现子域名、Custom Domain、DNS 自动配置或证书签发。
 
 ---
 
@@ -345,6 +357,14 @@ localhost:3000/?tenant=DEMO
 
 开发环境的 tenant selector 与正式客户登录页分离。
 
+自有服务器的试点环境使用与生产相同的路径规则：
+
+```text
+http(s)://SERVER_IP/t/demo
+```
+
+如通过公网交付真实客户账号，必须使用 HTTPS。不得为了支持 IP + HTTP 而在生产环境全局降级 Cookie 或会话安全策略。
+
 ---
 
 # 9. Tenant Branding 数据模型
@@ -356,9 +376,10 @@ localhost:3000/?tenant=DEMO
 如缺少，可增加：
 
 ```text
-companyName
-logoUrl
-brandColor
+portalSlug
+brandName
+logoObjectKey
+primaryBrandColor
 heroTitle
 heroSubtitle
 
@@ -372,6 +393,8 @@ whatsapp
 
 serviceTags[]
 ```
+
+现有 `brandName`、`logoUrl` 和 `customDomain` 字段应优先复用或做兼容迁移。Logo 不应保存会过期的短时签名 URL；应保存对象 Key 或稳定的受控资源地址。
 
 所有新增字段尽量 optional。
 
@@ -513,14 +536,14 @@ Company Profile
 
 # 14. URL / Navigation
 
-建议结构：
+本轮最小试点结构：
 
 ```text
-/
-Public Landing
+/t/[portalSlug]
+Tenant Public Landing
 
-/login
-Tenant Login
+/t/[portalSlug]/login
+Tenant Customer Login
 
 /portal
 Customer Dashboard
@@ -529,13 +552,21 @@ Customer Dashboard
 /portal/quotes
 /portal/bookings
 /portal/shipments
+
+/admin/login
+Internal Login
+
+/admin
+Internal Workspace
 ```
 
-如果当前已有路由结构：
+登录成功后继续使用现有 `/portal/*` 业务路由，本轮不将所有 Portal 页面重构为 `/t/[portalSlug]/portal/*`。Tenant 范围继续由登录后的 Token 和服务端 Tenant Context 保证。
 
-不要强制重构全部 URL。
+Landing Page 上的“查询运价”不得变成匿名查价，应进入：
 
-优先最小改造。
+```text
+/t/[portalSlug]/login?next=/portal/rates
+```
 
 ---
 
@@ -544,7 +575,7 @@ Customer Dashboard
 必须保留当前：
 
 ```text
-/login?next=/portal/bookings
+/t/northstar/login?next=/portal/bookings
 ```
 
 之类的 Deep Link 能力。
@@ -564,6 +595,14 @@ Customer Dashboard
 ```
 
 Landing Page 优化不能破坏 Deep Link。
+
+通知和客户分享链接需要携带正确的门户入口。当前 IP 部署阶段可生成：
+
+```text
+http(s)://SERVER_IP/t/northstar/login?next=/portal/bookings/BOOKxxx
+```
+
+`next` 只能接受本站 `/portal` 下的合法路径，不得接受外部 URL。
 
 ---
 
@@ -639,6 +678,7 @@ Login CTA
 - Tenant Resolver
 - Current Route Structure
 - Branding support
+- IP/HTTPS 部署条件
 
 先给出最小改造方案。
 
@@ -651,6 +691,8 @@ Login CTA
 Tenant Branding Data
 
 不要先改 UI。
+
+本阶段优先新增 `portalSlug` 及必要品牌字段，建立路径 Tenant Resolver 和只返回公开展示信息的 Branding 读取能力。
 
 ---
 
@@ -670,6 +712,8 @@ Customer Login
 
 删除 Production 的 Tenant Code 输入。
 
+客户从 `/t/[portalSlug]/login` 进入，Tenant 由路径解析。内部员工使用独立 `/admin/login` 入口，本轮不重写内部鉴权流程。
+
 ---
 
 ## Phase 5
@@ -688,6 +732,8 @@ Login
 Deep Link
 Tenant Isolation
 Customer Workspace
+Unknown/Inactive Tenant
+Customer Credential on Wrong Tenant Portal
 
 ---
 
@@ -717,6 +763,13 @@ Customer Workspace
 10. 历史 Tenant 没有 Branding 配置也不会报错
 11. Mobile 可正常使用
 12. 没有引入完整 CMS
+13. 客户可通过 `http(s)://SERVER_IP/t/{portalSlug}` 访问对应租户门户
+14. 客户登录成功后继续使用现有 `/portal/*` 业务路由
+15. 内部员工仍可通过独立 Admin 入口登录
+16. Tenant A 的门户不能使用 Tenant B 的客户账号登录
+17. 未知、暂停或关闭的 Tenant 不提供客户登录
+18. “查询运价”CTA 必须先登录，本轮不暴露匿名运价 API
+19. 通过公网使用真实客户账号时必须使用 HTTPS
 
 ---
 
@@ -734,6 +787,11 @@ Theme Builder
 租户自定义 CSS
 多语言 CMS
 Custom Domain 自动配置
+子域名 Tenant 识别
+DNS 自动配置
+SSL 证书自动签发
+客户自助注册
+匿名运价查询
 在线聊天
 CRM
 Marketing Automation
@@ -776,6 +834,7 @@ Freight SaaS Backend
 1. 修改了哪些 Model
 2. Tenant Branding 新增了哪些字段
 3. Tenant 如何自动识别
+   - 试点阶段如何从 `/t/{portalSlug}` 解析
 4. Landing Page 新增了哪些页面
 5. Login Flow 如何变化
 6. 是否删除了 Production Tenant Code 输入
@@ -784,6 +843,7 @@ Freight SaaS Backend
 9. Mobile 是否处理
 10. 是否存在架构风险
 11. 尚未实现的内容
+12. 客户门户的 HTTPS 入口和内部 Admin 登录入口
 
 如果现有架构与上述方案冲突：
 
