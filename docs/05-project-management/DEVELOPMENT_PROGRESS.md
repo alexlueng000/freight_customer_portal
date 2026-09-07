@@ -213,14 +213,14 @@
 - SO 先写入 S3 兼容对象存储，再在数据库事务内创建 Document 和 BookingSoRecord；首次登记 SO 时将 Booking 更新为 `BOOKED` 并写入审计，数据库失败时清理孤儿对象。
 - Document 保存对象 Key、原始文件名、MIME、大小、版本、上传者、客户可见性和状态；对象 Key 不作为授权边界。
 - 客户下载前同时校验 tenant、customer scope、`customerVisible=true` 和 ACTIVE 状态；隐藏文件及跨租户 Document ID 不可下载。
-- 后台可从已 `BOOKED` 且存在已发布 SO 的 Booking 创建 Basic Shipment，复制客户、航线、船司和 ETD 快照并生成租户内 Shipment 编号。
+- 后台可从已 `BOOKED` 且存在有效内部登记 SO 的 Booking 创建 Basic Shipment，无需先发布 SO；创建时复制客户、航线、船司和 ETD 快照并生成租户内 Shipment 编号。
 - 客户与后台 Booking 详情页均展示 SO 和 Shipment；下载通过带 Bearer Token 的 API 请求完成。
 - DEMO 数据已经实际走通 Submitted → Approved → Booking Submitted → SO Registered/Published → Basic Shipment Created，并完成真实 MinIO 上传和客户下载验证。
 
 ### 2.17 Basic Shipment 后端
 
 - Shipment 已按最新 V1 收敛要求调整为：PLANNED → DEPARTED → ARRIVED，另有 CANCELLED；DEPARTED 即代表运输中。
-- Booking 已登记并发布 SO 后创建 Shipment，初始进入 PLANNED / 待开船。
+- Booking 已内部登记 SO 后即可创建 Shipment，初始进入 PLANNED / 待开船；SO 发布仅控制客户查看和下载。
 - 迁移 `20260902190000_basic_shipment_status_v11` 曾将历史 `PLANNED/IN_PROGRESS` 过渡到 V1.1 初版状态；最终迁移 `20260902223000_simplify_shipment_status_v1` 将存量 `CREATED/BOOKED` 收敛为 `PLANNED`、`IN_TRANSIT` 收敛为 `DEPARTED`、`COMPLETED` 收敛为 `ARRIVED`。
 - 状态动作使用语义化端点，事务内同步写入系统 TrackingEvent 与包含 before/after 的 AuditLog。
 - 已建立 Container 模型，支持柜号、箱型、封条、VGM 及提柜/进港/装船/卸船时间；柜号按批准格式校验。
@@ -232,6 +232,7 @@
 
 ### 2.18 Basic Shipment 前端
 
+- Quote 与 Booking 详情页共用同一业务流程解析规则；Quote 详情接口返回关联 Booking 和最新 Shipment 状态，同一票在不同页面展示一致的最远业务进度。
 - 已将后台与客户门户的 Shipment 模拟页面替换为真实 API 列表和详情，支持关键词、状态筛选及 loading、empty、error 状态。
 - 后台详情支持维护船名航次、ETD/ETA、MBL/HBL 参考字段，新增 Container、追加客户可见/内部 TrackingEvent，并执行 Basic Shipment 状态动作。
 - 后台保留 DRAFT_BL、FINAL_BL 和 OTHER 参考附件上传能力；V1.1 客户侧不再把 BL/完整单证作为 P0 任务暴露。
@@ -421,7 +422,7 @@ V1.1 主链路为 Rate → Quote → Booking → SO → Basic Shipment，基线�
 - [x] 完成 Booking 提交、审核、确认、拒绝和取消状态动作。
 - [x] SO 上传至 S3 兼容对象存储并通过 Document 元数据授权客户下载。
 - [x] 登记 SO 后进入 `BOOKED`，SO 发布动作独立控制客户可见性。
-- [x] 从已发布 SO 的 Booking 创建 Basic Shipment 并复制航线快照。
+- [x] 从已内部登记 SO 的 Booking 创建 Basic Shipment 并复制航线快照，客户发布不是前置条件。
 - [x] Shipment 状态机已按最新 V1 收敛要求更新为 PLANNED/DEPARTED/ARRIVED/CANCELLED。
 - [x] 覆盖隐藏文件、跨租户文件访问和 Shipment 租户一致性测试。
 - [x] V1.1 正常业务主链已由项目负责人确认走通；正式归档时补录验收签署人姓名。

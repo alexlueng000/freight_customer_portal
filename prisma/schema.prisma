@@ -201,6 +201,7 @@ model Tenant {
   rateImportMappings     RateImportMappingProfile[]
   quotes                 Quote[]
   quoteCargoItems        QuoteCargoItem[]
+  bookingCargoItems      BookingCargoItem[]
   bookings               Booking[]
   shipments              Shipment[]
   containers             Container[]
@@ -580,38 +581,43 @@ model RefreshSession {
 }
 
 model Quote {
-  id                  String      @id @default(cuid())
-  tenantId            String
-  quoteNo             String      @db.VarChar(50)
-  customerCompanyId   String
-  salesOwnerId        String?
-  sourceRateId        String?
-  status              QuoteStatus @default(DRAFT)
-  polCode             String      @db.VarChar(10)
-  podCode             String      @db.VarChar(10)
-  carrierCode         String?     @db.VarChar(20)
-  etd                 DateTime?   @db.Timestamptz(3)
-  validUntil          DateTime    @db.Date
-  currency            String      @db.VarChar(3)
-  subtotal            Decimal     @db.Decimal(18, 4)
-  totalAmount         Decimal     @db.Decimal(18, 4)
-  pickupAddress       String?     @db.VarChar(1000)
-  deliveryAddress     String?     @db.VarChar(1000)
-  requestedServices   String[]    @default([])
-  customerTerms       String?     @db.VarChar(2000)
-  internalNote        String?     @db.VarChar(2000)
-  sentAt              DateTime?   @db.Timestamptz(3)
-  sentById            String?
-  acceptedAt          DateTime?   @db.Timestamptz(3)
-  bookedAt            DateTime?   @db.Timestamptz(3)
-  priceOverriddenAt   DateTime?   @db.Timestamptz(3)
-  priceOverriddenById String?
-  priceOverrideReason String?     @db.VarChar(500)
-  version             Int         @default(1)
-  createdById         String?
-  updatedById         String?
-  createdAt           DateTime    @default(now()) @db.Timestamptz(3)
-  updatedAt           DateTime    @updatedAt @db.Timestamptz(3)
+  id                   String      @id @default(cuid())
+  tenantId             String
+  quoteNo              String      @db.VarChar(50)
+  customerCompanyId    String
+  salesOwnerId         String?
+  sourceRateId         String?
+  status               QuoteStatus @default(DRAFT)
+  polCode              String      @db.VarChar(10)
+  podCode              String      @db.VarChar(10)
+  carrierCode          String?     @db.VarChar(20)
+  etd                  DateTime?   @db.Timestamptz(3)
+  validUntil           DateTime    @db.Date
+  currency             String      @db.VarChar(3)
+  subtotal             Decimal     @db.Decimal(18, 4)
+  totalAmount          Decimal     @db.Decimal(18, 4)
+  containerQuantity    Int?
+  incoterm             String?     @db.VarChar(10)
+  pickupLocationText   String?     @db.VarChar(1000)
+  deliveryLocationText String?     @db.VarChar(1000)
+  exportCustomsRemark  String?     @db.VarChar(1000)
+  importCustomsRemark  String?     @db.VarChar(1000)
+  customerRemarks      String?     @db.VarChar(2000)
+  requestedServices    String[]    @default([])
+  customerTerms        String?     @db.VarChar(2000)
+  internalNote         String?     @db.VarChar(2000)
+  sentAt               DateTime?   @db.Timestamptz(3)
+  sentById             String?
+  acceptedAt           DateTime?   @db.Timestamptz(3)
+  bookedAt             DateTime?   @db.Timestamptz(3)
+  priceOverriddenAt    DateTime?   @db.Timestamptz(3)
+  priceOverriddenById  String?
+  priceOverrideReason  String?     @db.VarChar(500)
+  version              Int         @default(1)
+  createdById          String?
+  updatedById          String?
+  createdAt            DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime    @updatedAt @db.Timestamptz(3)
 
   tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   customer          CustomerCompany  @relation(fields: [customerCompanyId], references: [id], onDelete: Restrict)
@@ -632,17 +638,19 @@ model Quote {
 }
 
 model QuoteCargoItem {
-  id                  String   @id @default(cuid())
-  tenantId            String
-  quoteId             String
-  commodity           String   @db.VarChar(500)
-  grossWeightKg       Decimal  @db.Decimal(18, 3)
-  specialRequirements String?  @db.VarChar(2000)
-  sortOrder           Int      @default(0)
-  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  id                   String   @id @default(cuid())
+  tenantId             String
+  quoteId              String
+  commodity            String   @db.VarChar(500)
+  estimatedGrossWeight Decimal? @db.Decimal(18, 3)
+  cargoNature          String?  @db.VarChar(200)
+  specialRequirement   String?  @db.VarChar(2000)
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  quote  Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  quote             Quote              @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  bookingCargoItems BookingCargoItem[]
 
   @@index([tenantId, quoteId, sortOrder])
 }
@@ -669,44 +677,49 @@ model QuoteItem {
 }
 
 model Booking {
-  id                  String        @id @default(cuid())
-  tenantId            String
-  bookingNo           String        @db.VarChar(50)
-  quoteId             String?
-  customerCompanyId   String
-  status              BookingStatus @default(DRAFT)
-  polCode             String        @db.VarChar(10)
-  podCode             String        @db.VarChar(10)
-  carrierCode         String?       @db.VarChar(20)
-  etd                 DateTime?     @db.Timestamptz(3)
-  commodity           String?       @db.VarChar(300)
-  packageType         PackageType?
-  packages            Int?
-  grossWeight         Decimal?      @db.Decimal(18, 4)
-  volumeCbm           Decimal?      @db.Decimal(18, 4)
-  cargoReadyDate      DateTime?     @db.Date
-  isDangerousGoods    Boolean       @default(false)
-  specialInstructions String?       @db.VarChar(2000)
-  sourceShipperId     String?
-  shipperName         String?       @db.VarChar(200)
-  shipperAddress      String?       @db.VarChar(1000)
-  bookingContactName  String?       @db.VarChar(150)
-  bookingContactEmail String?       @db.VarChar(320)
-  bookingContactPhone String?       @db.VarChar(50)
-  lastStatusRemark    String?       @db.VarChar(500)
-  submittedAt         DateTime?     @db.Timestamptz(3)
-  underReviewAt       DateTime?     @db.Timestamptz(3)
-  confirmedAt         DateTime?     @db.Timestamptz(3)
-  revisionRequestedAt DateTime?     @db.Timestamptz(3)
-  approvedAt          DateTime?     @db.Timestamptz(3)
-  bookingSubmittedAt  DateTime?     @db.Timestamptz(3)
-  bookedAt            DateTime?     @db.Timestamptz(3)
-  rejectedAt          DateTime?     @db.Timestamptz(3)
-  cancelledAt         DateTime?     @db.Timestamptz(3)
-  createdById         String?
-  updatedById         String?
-  createdAt           DateTime      @default(now()) @db.Timestamptz(3)
-  updatedAt           DateTime      @updatedAt @db.Timestamptz(3)
+  id                   String        @id @default(cuid())
+  tenantId             String
+  bookingNo            String        @db.VarChar(50)
+  quoteId              String?
+  customerCompanyId    String
+  status               BookingStatus @default(DRAFT)
+  polCode              String        @db.VarChar(10)
+  podCode              String        @db.VarChar(10)
+  carrierCode          String?       @db.VarChar(20)
+  serviceName          String?       @db.VarChar(200)
+  etd                  DateTime?     @db.Timestamptz(3)
+  incoterm             String?       @db.VarChar(10)
+  requestedServices    String[]      @default([])
+  pickupLocationText   String?       @db.VarChar(1000)
+  deliveryLocationText String?       @db.VarChar(1000)
+  commodity            String?       @db.VarChar(300)
+  packageType          PackageType?
+  packages             Int?
+  grossWeight          Decimal?      @db.Decimal(18, 4)
+  volumeCbm            Decimal?      @db.Decimal(18, 4)
+  cargoReadyDate       DateTime?     @db.Date
+  isDangerousGoods     Boolean       @default(false)
+  specialInstructions  String?       @db.VarChar(2000)
+  sourceShipperId      String?
+  shipperName          String?       @db.VarChar(200)
+  shipperAddress       String?       @db.VarChar(1000)
+  bookingContactName   String?       @db.VarChar(150)
+  bookingContactEmail  String?       @db.VarChar(320)
+  bookingContactPhone  String?       @db.VarChar(50)
+  lastStatusRemark     String?       @db.VarChar(500)
+  submittedAt          DateTime?     @db.Timestamptz(3)
+  underReviewAt        DateTime?     @db.Timestamptz(3)
+  confirmedAt          DateTime?     @db.Timestamptz(3)
+  revisionRequestedAt  DateTime?     @db.Timestamptz(3)
+  approvedAt           DateTime?     @db.Timestamptz(3)
+  bookingSubmittedAt   DateTime?     @db.Timestamptz(3)
+  bookedAt             DateTime?     @db.Timestamptz(3)
+  rejectedAt           DateTime?     @db.Timestamptz(3)
+  cancelledAt          DateTime?     @db.Timestamptz(3)
+  createdById          String?
+  updatedById          String?
+  createdAt            DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime      @updatedAt @db.Timestamptz(3)
 
   tenant            Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   quote             Quote?                    @relation(fields: [quoteId], references: [id], onDelete: Restrict)
@@ -715,6 +728,7 @@ model Booking {
   createdBy         User?                     @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy         User?                     @relation("BookingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   containerRequests BookingContainerRequest[]
+  cargoItems        BookingCargoItem[]
   shipments         Shipment[]
   documents         Document[]
   reviewActions     BookingReviewAction[]
@@ -725,6 +739,28 @@ model Booking {
   @@index([tenantId, quoteId])
   @@index([tenantId, sourceShipperId])
   @@index([tenantId, createdAt])
+}
+
+model BookingCargoItem {
+  id                     String   @id @default(cuid())
+  tenantId               String
+  bookingId              String
+  sourceQuoteCargoItemId String?
+  commodity              String   @db.VarChar(500)
+  estimatedGrossWeight   Decimal? @db.Decimal(18, 3)
+  cargoNature            String?  @db.VarChar(200)
+  specialRequirement     String?  @db.VarChar(2000)
+  sortOrder              Int      @default(0)
+  createdAt              DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sourceQuoteItem QuoteCargoItem? @relation(fields: [sourceQuoteCargoItemId], references: [id], onDelete: SetNull)
+
+  @@unique([bookingId, sourceQuoteCargoItemId])
+  @@index([tenantId, bookingId, sortOrder])
+  @@index([tenantId, sourceQuoteCargoItemId])
 }
 
 model BookingSoRecord {

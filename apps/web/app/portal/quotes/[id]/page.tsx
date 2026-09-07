@@ -13,11 +13,13 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { hasPermission } from '@/lib/auth';
+import { resolveQuoteBusinessFlow } from '@/lib/business-flow';
 import { customerQuoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Item {
@@ -40,19 +42,31 @@ interface Quote {
   etd: string | null;
   validUntil: string;
   currency: string;
-  totalAmount: string;
-  pickupAddress: string | null;
-  deliveryAddress: string | null;
+  totalAmount: string | null;
+  requestContainerType: string | null;
+  containerQuantity: number | null;
+  incoterm: string | null;
+  pickupLocationText: string | null;
+  deliveryLocationText: string | null;
+  exportCustomsRemark: string | null;
+  importCustomsRemark: string | null;
+  customerRemarks: string | null;
   requestedServices: string[];
   cargoItems: Array<{
     id: string;
     commodity: string;
-    grossWeightKg: string;
-    specialRequirements: string | null;
+    estimatedGrossWeight: string | null;
+    cargoNature: string | null;
+    specialRequirement: string | null;
   }>;
   customerTerms: string | null;
   sentAt: string | null;
   version: number;
+  bookings: Array<{
+    id: string;
+    status: string;
+    shipments: Array<{ id: string; status: string }>;
+  }>;
   items: Item[];
 }
 export default function QuoteDetailPage() {
@@ -162,7 +176,15 @@ export default function QuoteDetailPage() {
   if (loading) return <LoadingState rows={6} />;
   if (error || !quote)
     return <ErrorState description={error || '报价不存在'} onRetry={() => void load()} />;
-  const containerSummary = summarizeContainers(quote.items);
+  const formalQuotePublished = quote.sentAt !== null && quote.totalAmount !== null;
+  const containerSummary = formalQuotePublished
+    ? summarizeContainers(quote.items)
+    : summarizeRequestContainer(quote.requestContainerType, quote.containerQuantity);
+  const businessFlow = resolveQuoteBusinessFlow(
+    quote,
+    customerQuoteStatusLabel(quote.status),
+    'portal',
+  );
   return (
     <div className="space-y-5">
       <Link className="text-sm text-primary hover:underline" href="/portal/quotes">
@@ -216,8 +238,15 @@ export default function QuoteDetailPage() {
         eyebrow={`报价 V${quote.version}`}
         title={quote.quoteNo}
       />
+      <BusinessFlow {...businessFlow} />
       <QuoteDecisionStatus quote={quote} />
-      <RouteSummary podCode={quote.podCode} polCode={quote.polCode} quoteItems={quote.items} />
+      <RouteSummary
+        containerQuantity={quote.containerQuantity}
+        podCode={quote.podCode}
+        polCode={quote.polCode}
+        quoteItems={quote.items}
+        requestContainerType={quote.requestContainerType}
+      />
       {actionError ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           {actionError}
@@ -254,16 +283,32 @@ export default function QuoteDetailPage() {
                 : '仅港到港海运'
             }
           />
-          <Fact label="发货地" value={quote.pickupAddress ?? '—'} />
-          <Fact label="收货地" value={quote.deliveryAddress ?? '—'} />
+          <Fact
+            label="箱量"
+            value={quote.containerQuantity === null ? '—' : String(quote.containerQuantity)}
+          />
+          <Fact label="Incoterm" value={quote.incoterm ?? '—'} />
+          <Fact label="提货地点" value={quote.pickupLocationText ?? '—'} />
+          <Fact label="派送地点" value={quote.deliveryLocationText ?? '—'} />
+          <Fact label="出口报关备注" value={quote.exportCustomsRemark ?? '—'} />
+          <Fact label="进口清关备注" value={quote.importCustomsRemark ?? '—'} />
+          <Fact label="客户备注" value={quote.customerRemarks ?? '—'} />
         </div>
         <div className="divide-y divide-border">
           {quote.cargoItems.length ? (
             quote.cargoItems.map((item, index) => (
               <div className="grid gap-4 py-4 sm:grid-cols-3" key={item.id}>
                 <Fact label={`货物 ${index + 1}`} value={item.commodity} />
-                <Fact label="毛重" value={`${Number(item.grossWeightKg).toLocaleString()} kg`} />
-                <Fact label="特殊要求" value={item.specialRequirements ?? '无'} />
+                <Fact
+                  label="预计重量"
+                  value={
+                    item.estimatedGrossWeight === null
+                      ? '—'
+                      : `${Number(item.estimatedGrossWeight).toLocaleString()} kg`
+                  }
+                />
+                <Fact label="货物性质" value={item.cargoNature ?? '—'} />
+                <Fact label="特殊要求" value={item.specialRequirement ?? '无'} />
               </div>
             ))
           ) : (
@@ -271,7 +316,7 @@ export default function QuoteDetailPage() {
           )}
         </div>
       </section>
-      {quote.customerTerms?.trim() ? (
+      {formalQuotePublished && quote.customerTerms?.trim() ? (
         <section className="rounded border border-border bg-surface p-4">
           <h2 className="text-sm font-semibold">报价条款</h2>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
@@ -279,53 +324,63 @@ export default function QuoteDetailPage() {
           </p>
         </section>
       ) : null}
-      <section className="overflow-hidden rounded border border-border bg-surface">
-        <div className="border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold">报价明细</h2>
-          <p className="mt-1 text-xs text-muted">
-            价格已在生成时保存为快照，后续源运价修改不会影响本报价。
-          </p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                <th className={head}>费用</th>
-                <th className={head}>计费方式</th>
-                <th className={head}>计费数量</th>
-                <th className={head}>单价</th>
-                <th className={`${head} text-right`}>金额</th>
-              </tr>
-            </thead>
-            <tbody>
-              {quote.items.map((item) => (
-                <tr className="border-b border-border" key={item.id}>
-                  <td className={cell}>
-                    <div className="font-medium">{item.chargeName}</div>
-                    <div className="text-xs text-muted">{item.chargeCode}</div>
+      {formalQuotePublished ? (
+        <section className="overflow-hidden rounded border border-border bg-surface">
+          <div className="border-b border-border px-4 py-3">
+            <h2 className="text-sm font-semibold">报价明细</h2>
+            <p className="mt-1 text-xs text-muted">
+              价格已在生成时保存为快照，后续源运价修改不会影响本报价。
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-sidebar text-xs text-muted">
+                  <th className={head}>费用</th>
+                  <th className={head}>计费方式</th>
+                  <th className={head}>计费数量</th>
+                  <th className={head}>单价</th>
+                  <th className={`${head} text-right`}>金额</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quote.items.map((item) => (
+                  <tr className="border-b border-border" key={item.id}>
+                    <td className={cell}>
+                      <div className="font-medium">{item.chargeName}</div>
+                      <div className="text-xs text-muted">{item.chargeCode}</div>
+                    </td>
+                    <td className={cell}>{chargeUnitLabel(item)}</td>
+                    <td className={cell}>{Number(item.quantity).toFixed(2)}</td>
+                    <td className={cell}>{money(item.unitPrice, item.currency)}</td>
+                    <td className={`${cell} text-right font-semibold`}>
+                      {money(item.amount, item.currency)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-sidebar">
+                  <td className="px-4 py-4 text-right font-semibold" colSpan={4}>
+                    报价总额
                   </td>
-                  <td className={cell}>{chargeUnitLabel(item)}</td>
-                  <td className={cell}>{Number(item.quantity).toFixed(2)}</td>
-                  <td className={cell}>{money(item.unitPrice, item.currency)}</td>
-                  <td className={`${cell} text-right font-semibold`}>
-                    {money(item.amount, item.currency)}
+                  <td className="px-4 py-4 text-right text-lg font-bold text-primary">
+                    {money(quote.totalAmount, quote.currency)}
                   </td>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-sidebar">
-                <td className="px-4 py-4 text-right font-semibold" colSpan={4}>
-                  报价总额
-                </td>
-                <td className="px-4 py-4 text-right text-lg font-bold text-primary">
-                  {money(quote.totalAmount, quote.currency)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </section>
+              </tfoot>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <section className="rounded border border-warning/25 bg-warning/10 px-4 py-4">
+          <h2 className="text-sm font-semibold">Formal Quote 尚未发布</h2>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            当前仅显示你提交的 Quote Request。Sales
+            发布后，此处才会显示正式报价金额、费用明细和报价条款。
+          </p>
+        </section>
+      )}
       {canAcceptQuote && confirmingAccept ? (
         <div
           aria-labelledby="accept-quote-title"
@@ -479,10 +534,10 @@ function requestedServiceLabel(code: string) {
   return (
     (
       {
-        ORIGIN_LOGISTICS: '头程物流',
-        ORIGIN_CUSTOMS_CLEARANCE: '始发国清关',
-        DESTINATION_CUSTOMS_CLEARANCE: '目的国清关',
-        DESTINATION_LOGISTICS: '尾程物流',
+        ORIGIN_PICKUP: '起运地拖车 / 提货',
+        EXPORT_CUSTOMS: '出口报关',
+        IMPORT_CUSTOMS: '目的港清关',
+        DESTINATION_DELIVERY: '目的地派送',
       } as Record<string, string>
     )[code] ?? code
   );
@@ -594,12 +649,21 @@ function RouteSummary({
   polCode,
   podCode,
   quoteItems,
+  requestContainerType,
+  containerQuantity,
 }: {
   polCode: string;
   podCode: string;
   quoteItems: Item[];
+  requestContainerType: string | null;
+  containerQuantity: number | null;
 }) {
   const containers = quoteContainers(quoteItems);
+  const displayedContainers = containers.length
+    ? containers
+    : requestContainerType && containerQuantity
+      ? [{ containerType: requestContainerType, quantity: containerQuantity }]
+      : [];
 
   return (
     <section className="overflow-hidden rounded border border-primary/15 bg-surface shadow-sm">
@@ -619,8 +683,8 @@ function RouteSummary({
             箱量
           </div>
           <div className="mt-2 space-y-2">
-            {containers.length ? (
-              containers.map((item) => (
+            {displayedContainers.length ? (
+              displayedContainers.map((item) => (
                 <div key={item.containerType}>
                   <div className="text-xl font-bold text-warning">
                     {Number(item.quantity).toFixed(0)} 个 {item.containerType}
@@ -677,7 +741,8 @@ function RouteEndpoint({
 }
 const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
-function money(value: string, currency: string) {
+function money(value: string | null, currency: string) {
+  if (value === null) return '尚未发布';
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
 }
 function chargeUnitLabel(item: Pick<Item, 'chargeBasis' | 'containerType'>) {
@@ -696,6 +761,10 @@ function summarizeContainers(items: Item[]) {
         `${Number(item.quantity).toFixed(0)} 个 ${item.containerType} ${containerTypeLabel(item.containerType)}`,
     )
     .join(' / ');
+}
+function summarizeRequestContainer(containerType: string | null, quantity: number | null) {
+  if (!containerType || !quantity) return '待确认';
+  return `${quantity} × ${containerType}`;
 }
 function quoteContainers(items: Item[]) {
   const pricedContainers = items.filter(

@@ -93,7 +93,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
               description={
                 status || query
                   ? '请调整状态或关键词后重新查看。'
-                  : 'Booking 确认并发布 SO 后，系统会创建 Basic Shipment，你可以在这里查看运输进度。'
+                  : 'Booking 确认并登记 SO 后，Operation 可以创建 Basic Shipment，你可以在这里查看运输进度。'
               }
             />
           </div>

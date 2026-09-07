@@ -93,8 +93,8 @@ test.describe('V1.1 Rate to Basic Shipment golden path', () => {
         data: {
           rateId: rate.id,
           containerType: '40HQ',
-          quantity: 2,
-          cargoItems: [{ commodity: 'Furniture', grossWeightKg: 18000 }],
+          containerQuantity: 2,
+          cargoItems: [{ commodity: 'Furniture', estimatedGrossWeight: 18000 }],
           requestedServices: [],
         },
       }),

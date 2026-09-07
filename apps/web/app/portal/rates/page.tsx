@@ -49,22 +49,28 @@ interface ApiErrorPayload {
   details?: { fieldErrors?: Record<string, string[]> };
 }
 const requestedServiceOptions = [
-  { code: 'ORIGIN_LOGISTICS', label: '头程物流' },
-  { code: 'ORIGIN_CUSTOMS_CLEARANCE', label: '始发国清关' },
-  { code: 'DESTINATION_CUSTOMS_CLEARANCE', label: '目的国清关' },
-  { code: 'DESTINATION_LOGISTICS', label: '尾程物流' },
+  { code: 'ORIGIN_PICKUP', label: '起运地拖车 / 提货' },
+  { code: 'EXPORT_CUSTOMS', label: '出口报关' },
+  { code: 'IMPORT_CUSTOMS', label: '目的港清关' },
+  { code: 'DESTINATION_DELIVERY', label: '目的地派送' },
 ] as const;
 type RequestedServiceCode = (typeof requestedServiceOptions)[number]['code'];
+const incotermOptions = ['EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'DAP', 'DDP', 'OTHER'] as const;
 interface QuoteRequestValues {
   quantity: string;
   cargoItems: Array<{
     clientId: string;
     commodity: string;
-    grossWeightKg: string;
-    specialRequirements: string;
+    estimatedGrossWeightKg: string;
+    cargoNature: string;
+    specialRequirement: string;
   }>;
-  pickupAddress: string;
-  deliveryAddress: string;
+  pickupLocation: string;
+  deliveryLocation: string;
+  exportCustomsRemark: string;
+  importCustomsRemark: string;
+  customerRemarks: string;
+  incoterm: '' | (typeof incotermOptions)[number];
   requestedServices: RequestedServiceCode[];
 }
 let nextCargoItemId = 1;
@@ -72,57 +78,62 @@ function newCargoItem(): QuoteRequestValues['cargoItems'][number] {
   return {
     clientId: `cargo-${nextCargoItemId++}`,
     commodity: '',
-    grossWeightKg: '',
-    specialRequirements: '',
+    estimatedGrossWeightKg: '',
+    cargoNature: '',
+    specialRequirement: '',
   };
 }
 const quoteRequestSchema = z
   .object({
-    quantity: z.string().refine((value) => {
-      const quantity = Number(value);
-      return Number.isInteger(quantity) && quantity >= 1 && quantity <= 999;
-    }, '箱量必须是 1–999 之间的整数。'),
-    cargoItems: z
-      .array(
-        z.object({
-          clientId: z.string(),
-          commodity: z
-            .string()
-            .trim()
-            .min(1, '请填写货物品名。')
-            .max(500, '货物品名不能超过 500 字。'),
-          grossWeightKg: z.string().refine((value) => {
-            const weight = Number(value);
-            return Number.isFinite(weight) && weight > 0 && weight <= 999999999;
-          }, '请输入大于 0 的毛重。'),
-          specialRequirements: z.string().trim().max(2000, '特殊要求不能超过 2000 字。'),
-        }),
-      )
-      .min(1, '请至少添加一种货物。')
-      .max(50, '一次报价最多添加 50 种货物。'),
-    pickupAddress: z.string().trim().max(1000, '发货地不能超过 1000 字。'),
-    deliveryAddress: z.string().trim().max(1000, '收货地不能超过 1000 字。'),
-    requestedServices: z.array(
-      z.enum([
-        'ORIGIN_LOGISTICS',
-        'ORIGIN_CUSTOMS_CLEARANCE',
-        'DESTINATION_CUSTOMS_CLEARANCE',
-        'DESTINATION_LOGISTICS',
-      ]),
-    ),
+  quantity: z.string().refine((value) => {
+    const quantity = Number(value);
+    return Number.isInteger(quantity) && quantity >= 1 && quantity <= 999;
+  }, '箱量必须是 1–999 之间的整数。'),
+  cargoItems: z
+    .array(
+      z.object({
+        clientId: z.string(),
+        commodity: z
+          .string()
+          .trim()
+          .min(1, '请填写货物品名。')
+          .max(500, '货物品名不能超过 500 字。'),
+        estimatedGrossWeightKg: z.string().refine((value) => {
+          if (!value.trim()) return true;
+          const weight = Number(value);
+          return Number.isFinite(weight) && weight > 0 && weight <= 999999999;
+        }, '请输入大于 0 的重量。'),
+        cargoNature: z.string().trim().max(200, '货物性质不能超过 200 字。'),
+        specialRequirement: z.string().trim().max(2000, '特殊要求不能超过 2000 字。'),
+      }),
+    )
+    .min(1, '请至少添加一种货物。')
+    .max(50, '一次报价最多添加 50 种货物。'),
+  pickupLocation: z.string().trim().max(1000, '提货地点不能超过 1000 字。'),
+  deliveryLocation: z.string().trim().max(1000, '派送地点不能超过 1000 字。'),
+  exportCustomsRemark: z.string().trim().max(1000, '出口报关备注不能超过 1000 字。'),
+  importCustomsRemark: z.string().trim().max(1000, '进口清关备注不能超过 1000 字。'),
+  customerRemarks: z.string().trim().max(2000, '客户备注不能超过 2000 字。'),
+  incoterm: z.union([z.literal(''), z.enum(incotermOptions)]),
+  requestedServices: z.array(
+    z.enum(['ORIGIN_PICKUP', 'EXPORT_CUSTOMS', 'IMPORT_CUSTOMS', 'DESTINATION_DELIVERY']),
+  ),
   })
   .superRefine((value, context) => {
-    if (value.requestedServices.includes('ORIGIN_LOGISTICS') && !value.pickupAddress)
+    if (value.requestedServices.includes('ORIGIN_PICKUP') && !value.pickupLocation.trim())
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['pickupAddress'],
-        message: '勾选头程物流后，请填写发货地。',
+        path: ['pickupLocation'],
+        message: '选择起运地拖车后，请填写 Pickup Location。',
       });
-    if (value.requestedServices.includes('DESTINATION_LOGISTICS') && !value.deliveryAddress)
+    if (
+      value.requestedServices.includes('DESTINATION_DELIVERY') &&
+      !value.deliveryLocation.trim()
+    )
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['deliveryAddress'],
-        message: '勾选尾程物流后，请填写收货地。',
+        path: ['deliveryLocation'],
+        message: '选择目的地派送后，请填写 Delivery Location。',
       });
   });
 class PortalRateApiError extends Error {
@@ -211,14 +222,21 @@ export default function PortalRatesPage() {
         body: JSON.stringify({
           rateId: rate.id,
           containerType: rate.containerType,
-          quantity: Number(values.quantity),
+          containerQuantity: Number(values.quantity),
+          incoterm: values.incoterm || undefined,
           cargoItems: values.cargoItems.map((item) => ({
             commodity: item.commodity.trim(),
-            grossWeightKg: Number(item.grossWeightKg),
-            specialRequirements: item.specialRequirements.trim() || undefined,
+            ...(item.estimatedGrossWeightKg.trim()
+              ? { estimatedGrossWeight: Number(item.estimatedGrossWeightKg) }
+              : {}),
+            cargoNature: item.cargoNature.trim() || undefined,
+            specialRequirement: item.specialRequirement.trim() || undefined,
           })),
-          pickupAddress: values.pickupAddress.trim() || undefined,
-          deliveryAddress: values.deliveryAddress.trim() || undefined,
+          pickupLocationText: values.pickupLocation.trim() || undefined,
+          deliveryLocationText: values.deliveryLocation.trim() || undefined,
+          exportCustomsRemark: values.exportCustomsRemark.trim() || undefined,
+          importCustomsRemark: values.importCustomsRemark.trim() || undefined,
+          customerRemarks: values.customerRemarks.trim() || undefined,
           requestedServices: values.requestedServices,
         }),
       });
@@ -593,8 +611,12 @@ function QuoteRequestDialog({
   const [values, setValues] = useState<QuoteRequestValues>({
     quantity: '1',
     cargoItems: [newCargoItem()],
-    pickupAddress: '',
-    deliveryAddress: '',
+    pickupLocation: '',
+    deliveryLocation: '',
+    exportCustomsRemark: '',
+    importCustomsRemark: '',
+    customerRemarks: '',
+    incoterm: '',
     requestedServices: [],
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -621,7 +643,7 @@ function QuoteRequestDialog({
   };
   const updateCargoItem = (
     index: number,
-    field: 'commodity' | 'grossWeightKg' | 'specialRequirements',
+    field: 'commodity' | 'estimatedGrossWeightKg' | 'cargoNature' | 'specialRequirement',
     value: string,
   ) => {
     setValues((current) => ({
@@ -646,6 +668,19 @@ function QuoteRequestDialog({
     }));
     setFieldErrors({});
   };
+  const toggleRequestedService = (code: RequestedServiceCode, checked: boolean) => {
+    update(
+      'requestedServices',
+      checked
+        ? [...values.requestedServices, code]
+        : values.requestedServices.filter((serviceCode) => serviceCode !== code),
+    );
+    if (checked) return;
+    if (code === 'ORIGIN_PICKUP') update('pickupLocation', '');
+    if (code === 'DESTINATION_DELIVERY') update('deliveryLocation', '');
+    if (code === 'EXPORT_CUSTOMS') update('exportCustomsRemark', '');
+    if (code === 'IMPORT_CUSTOMS') update('importCustomsRemark', '');
+  };
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
@@ -663,7 +698,7 @@ function QuoteRequestDialog({
               获取正式报价
             </h2>
             <p className="mt-1 text-sm text-muted">
-              填写本次货物与委托服务，销售将据此确认并发送正式报价。
+              请补充本票货物概况及所需服务，销售将基于这些信息确认正式报价。
             </p>
           </div>
           <button
@@ -677,41 +712,43 @@ function QuoteRequestDialog({
           </button>
         </div>
         <div className="space-y-5 p-5">
-          <section className="grid gap-4 rounded-md border border-border bg-sidebar/50 p-4 sm:grid-cols-2 lg:grid-cols-4">
-            <QuoteFact label="航线" value={`${rate.polCode} → ${rate.podCode}`} />
-            <QuoteFact label="船司" value={rate.carrierCode} />
-            <QuoteFact label="ETD" value={rate.etd ? formatDate(rate.etd) : '船期待确认'} />
-            <QuoteFact label="有效期至" value={formatDate(rate.expiryDate)} />
-          </section>
-          <label className="block text-sm">
-            <FieldLabel label="箱量" required />
-            <span className="mt-1 block text-xs text-muted">
-              本次报价的 {rate.containerType} 集装箱数量
-            </span>
-            <div className="mt-2 flex items-center gap-3">
-              <input
-                aria-invalid={Boolean(fieldErrors.quantity)}
-                className="h-10 w-32 rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger"
-                inputMode="numeric"
-                max={999}
-                min={1}
-                onChange={(event) => update('quantity', event.target.value)}
-                required
-                type="number"
-                value={values.quantity}
-              />
-              <span className="text-sm font-medium">× {rate.containerType}</span>
+          <section className="space-y-4 rounded-md border border-border p-4">
+            <h3 className="text-sm font-semibold">当前运价条件</h3>
+            <div className="grid gap-x-5 gap-y-4 rounded bg-sidebar/50 p-4 sm:grid-cols-2 lg:grid-cols-3">
+              <QuoteFact label="航线" value={`${rate.polCode} → ${rate.podCode}`} />
+              <QuoteFact label="船司" value={rate.carrierCode} />
+              <QuoteFact label="服务" value={rate.serviceName || '待确认'} />
+              <QuoteFact label="ETD" value={rate.etd ? formatDate(rate.etd) : '船期待确认'} />
+              <QuoteFact label="有效期" value={formatDate(rate.expiryDate)} />
+              <QuoteFact label="箱型" value={rate.containerType} />
             </div>
-            {fieldErrors.quantity ? (
-              <span className="mt-1 block text-xs text-danger">{fieldErrors.quantity}</span>
-            ) : null}
-          </label>
+            <label className="block max-w-xs text-sm">
+              <FieldLabel label="箱量" required />
+              <div className="mt-2 flex items-center gap-3">
+                <input
+                  aria-invalid={Boolean(fieldErrors.quantity)}
+                  className="h-10 w-32 rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger"
+                  inputMode="numeric"
+                  max={999}
+                  min={1}
+                  onChange={(event) => update('quantity', event.target.value)}
+                  required
+                  type="number"
+                  value={values.quantity}
+                />
+                <span className="text-sm font-medium">× {rate.containerType}</span>
+              </div>
+              {fieldErrors.quantity ? (
+                <span className="mt-1 block text-xs text-danger">{fieldErrors.quantity}</span>
+              ) : null}
+            </label>
+          </section>
           <section className="space-y-4 rounded-md border border-border p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold">货物信息</h3>
+                <h3 className="text-sm font-semibold">货物概况</h3>
                 <p className="mt-1 text-xs text-muted">
-                  可添加多种货物，销售会分别核对货物属性、重量和操作要求。
+                  默认填写一条；如本票包含多种货物，可继续添加。
                 </p>
               </div>
               <button
@@ -748,7 +785,7 @@ function QuoteRequestDialog({
                   <div className="grid gap-4 sm:grid-cols-2">
                     <QuoteRequestField
                       error={fieldErrors[`cargoItems.${index}.commodity`]}
-                      label="货物品名"
+                      label="品名"
                       required
                     >
                       <input
@@ -762,37 +799,48 @@ function QuoteRequestDialog({
                       />
                     </QuoteRequestField>
                     <QuoteRequestField
-                      error={fieldErrors[`cargoItems.${index}.grossWeightKg`]}
-                      label="毛重（kg）"
-                      required
+                      error={fieldErrors[`cargoItems.${index}.estimatedGrossWeightKg`]}
+                      label="预计重量（kg，选填）"
                     >
                       <input
                         className={inputClass}
                         inputMode="decimal"
                         min="0.001"
                         onChange={(event) =>
-                          updateCargoItem(index, 'grossWeightKg', event.target.value)
+                          updateCargoItem(index, 'estimatedGrossWeightKg', event.target.value)
                         }
                         placeholder="例如：18000"
                         step="0.001"
                         type="number"
-                        value={item.grossWeightKg}
+                        value={item.estimatedGrossWeightKg}
                       />
                     </QuoteRequestField>
-                  </div>
-                  <div className="mt-4">
                     <QuoteRequestField
-                      error={fieldErrors[`cargoItems.${index}.specialRequirements`]}
+                      error={fieldErrors[`cargoItems.${index}.cargoNature`]}
+                      label="货物性质（选填）"
+                    >
+                      <input
+                        className={inputClass}
+                        maxLength={200}
+                        onChange={(event) =>
+                          updateCargoItem(index, 'cargoNature', event.target.value)
+                        }
+                        placeholder="例如：普货、易碎品"
+                        value={item.cargoNature}
+                      />
+                    </QuoteRequestField>
+                    <QuoteRequestField
+                      error={fieldErrors[`cargoItems.${index}.specialRequirement`]}
                       label="特殊要求（选填）"
                     >
-                      <textarea
-                        className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                      <input
+                        className={inputClass}
                         maxLength={2000}
                         onChange={(event) =>
-                          updateCargoItem(index, 'specialRequirements', event.target.value)
+                          updateCargoItem(index, 'specialRequirement', event.target.value)
                         }
-                        placeholder="例如：超长超重、温控、危险品资料状态、指定操作时间等"
-                        value={item.specialRequirements}
+                        placeholder="例如：温控、指定操作时间"
+                        value={item.specialRequirement}
                       />
                     </QuoteRequestField>
                   </div>
@@ -802,11 +850,25 @@ function QuoteRequestDialog({
           </section>
           <section className="space-y-4 rounded-md border border-border p-4">
             <div>
-              <h3 className="text-sm font-semibold">需要货代办理的服务</h3>
-              <p className="mt-1 text-xs text-muted">
-                按实际需要多选；未勾选的服务不会默认计入本次需求。
-              </p>
+              <h3 className="text-sm font-semibold">需要附加服务</h3>
+              <p className="mt-1 text-xs text-muted">按需多选；选择后可补充对应地点或备注。</p>
             </div>
+            <QuoteRequestField label="Incoterm（选填）">
+              <select
+                className={inputClass}
+                onChange={(event) =>
+                  update('incoterm', event.target.value as QuoteRequestValues['incoterm'])
+                }
+                value={values.incoterm}
+              >
+                <option value="">请选择</option>
+                {incotermOptions.map((incoterm) => (
+                  <option key={incoterm} value={incoterm}>
+                    {incoterm}
+                  </option>
+                ))}
+              </select>
+            </QuoteRequestField>
             <div className="grid gap-3 sm:grid-cols-2">
               {requestedServiceOptions.map((option) => (
                 <label
@@ -816,14 +878,7 @@ function QuoteRequestDialog({
                   <input
                     checked={values.requestedServices.includes(option.code)}
                     className="size-4 accent-primary"
-                    onChange={(event) =>
-                      update(
-                        'requestedServices',
-                        event.target.checked
-                          ? [...values.requestedServices, option.code]
-                          : values.requestedServices.filter((code) => code !== option.code),
-                      )
-                    }
+                    onChange={(event) => toggleRequestedService(option.code, event.target.checked)}
                     type="checkbox"
                   />
                   <span className="font-medium">{option.label}</span>
@@ -831,33 +886,76 @@ function QuoteRequestDialog({
               ))}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <QuoteRequestField
-                error={fieldErrors.pickupAddress}
-                label={`发货地${values.requestedServices.includes('ORIGIN_LOGISTICS') ? '' : '（选填）'}`}
-                required={values.requestedServices.includes('ORIGIN_LOGISTICS')}
-              >
-                <textarea
-                  className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                  maxLength={1000}
-                  onChange={(event) => update('pickupAddress', event.target.value)}
-                  placeholder="城市 / 区域及详细提货地址"
-                  value={values.pickupAddress}
-                />
-              </QuoteRequestField>
-              <QuoteRequestField
-                error={fieldErrors.deliveryAddress}
-                label={`收货地${values.requestedServices.includes('DESTINATION_LOGISTICS') ? '' : '（选填）'}`}
-                required={values.requestedServices.includes('DESTINATION_LOGISTICS')}
-              >
-                <textarea
-                  className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                  maxLength={1000}
-                  onChange={(event) => update('deliveryAddress', event.target.value)}
-                  placeholder="城市 / 区域及详细送货地址"
-                  value={values.deliveryAddress}
-                />
-              </QuoteRequestField>
+              {values.requestedServices.includes('ORIGIN_PICKUP') ? (
+                <QuoteRequestField
+                  error={fieldErrors.pickupLocation}
+                  label="Pickup Location"
+                  required
+                >
+                  <textarea
+                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                    maxLength={1000}
+                    onChange={(event) => update('pickupLocation', event.target.value)}
+                    placeholder="城市 / 区域及详细提货地点"
+                    value={values.pickupLocation}
+                  />
+                </QuoteRequestField>
+              ) : null}
+              {values.requestedServices.includes('DESTINATION_DELIVERY') ? (
+                <QuoteRequestField
+                  error={fieldErrors.deliveryLocation}
+                  label="Delivery Location"
+                  required
+                >
+                  <textarea
+                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                    maxLength={1000}
+                    onChange={(event) => update('deliveryLocation', event.target.value)}
+                    placeholder="城市 / 区域及详细派送地点"
+                    value={values.deliveryLocation}
+                  />
+                </QuoteRequestField>
+              ) : null}
+              {values.requestedServices.includes('EXPORT_CUSTOMS') ? (
+                <QuoteRequestField
+                  error={fieldErrors.exportCustomsRemark}
+                  label="Export Customs Remark（选填）"
+                >
+                  <textarea
+                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                    maxLength={1000}
+                    onChange={(event) => update('exportCustomsRemark', event.target.value)}
+                    placeholder="补充出口报关相关说明"
+                    value={values.exportCustomsRemark}
+                  />
+                </QuoteRequestField>
+              ) : null}
+              {values.requestedServices.includes('IMPORT_CUSTOMS') ? (
+                <QuoteRequestField
+                  error={fieldErrors.importCustomsRemark}
+                  label="Import Customs Remark（选填）"
+                >
+                  <textarea
+                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                    maxLength={1000}
+                    onChange={(event) => update('importCustomsRemark', event.target.value)}
+                    placeholder="补充目的港清关相关说明"
+                    value={values.importCustomsRemark}
+                  />
+                </QuoteRequestField>
+              ) : null}
             </div>
+          </section>
+          <section className="rounded-md border border-border p-4">
+            <QuoteRequestField error={fieldErrors.customerRemarks} label="Customer Remark（选填）">
+              <textarea
+                className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                maxLength={2000}
+                onChange={(event) => update('customerRemarks', event.target.value)}
+                placeholder="补充希望销售关注的报价说明"
+                value={values.customerRemarks}
+              />
+            </QuoteRequestField>
           </section>
           <section className="overflow-hidden rounded-md border border-border">
             <div className="border-b border-border bg-sidebar px-4 py-3 text-sm font-semibold">
@@ -919,7 +1017,7 @@ function QuoteRequestDialog({
             onClick={submit}
             type="button"
           >
-            {submitting ? '提交中…' : '提交销售确认'}
+            {submitting ? '提交中…' : '提交报价需求'}
           </button>
         </div>
       </section>

@@ -16,9 +16,9 @@ Accepted Quote
 → Operation 退回补充或审核通过
 → 提交船司/代理
 → 内部保存 SO
-→ 核对并发布 SO
-→ 客户下载 SO
 → 创建 Shipment
+→ 按需发布 SO
+→ 客户下载 SO
 ```
 
 Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本清单的通过条件。
@@ -97,7 +97,8 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 - 非法文件被拒绝，不创建 Document 或改变 Booking 状态。
 - 合法文件写入 S3 兼容对象存储，数据库只保存元数据。
 - 内部保存后 Document 类型为 `SO`、版本从 1 开始、`customerVisible=false`。
-- 发布事务原子设置 Record=`PUBLISHED`、Document=`customerVisible=true`、Booking=`BOOKED`。
+- 内部登记事务将 Booking 从 `BOOKING_SUBMITTED` 更新为 `BOOKED`。
+- 发布事务原子设置 Record=`PUBLISHED`、Document=`customerVisible=true`，Booking 保持 `BOOKED`。
 - 数据库事务失败时尝试清理已上传的孤儿对象。
 
 结果：`□ 通过  □ 失败  □ 阻塞`
@@ -122,7 +123,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 ### SHIPMENT-UAT-006 从 Booking 创建 Shipment
 
-1. Operation 对存在已发布 SO 的 `BOOKED` Booking 点击“创建 Shipment”。
+1. Operation 对存在有效内部登记 SO 的 `BOOKED` Booking 点击“创建 Shipment”，无需先发布 SO。
 2. 填写可选 Vessel、Voyage 和 ETA。
 3. 再次从同一 Booking 创建 Shipment。
 
@@ -130,6 +131,7 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 - Shipment 编号符合 `SHPyyyyMM######`，V1 常规路径初始状态为 `PLANNED / 待开船`。
 - customer、Booking、POL/POD、Carrier 和 ETD 快照正确。
+- SO 发布状态只控制客户能否查看和下载 SO，不阻塞内部 Shipment 建档。
 - V1 常规路径阻止重复创建；数据模型仍保留 Booking 1:N Shipment 的未来能力。
 - Shipment 创建写入 AuditLog，客户可在自己的 Shipment 列表读取。
 
@@ -149,8 +151,9 @@ Container、Tracking Timeline、BL、Invoice 属于后续阶段，不纳入本�
 
 ```text
 Booking BOOKED
-→ SO 已发布给客户
-→ 创建 Basic Shipment
+→ SO 已在内部登记
+→ 创建 Basic Shipment（无需先发布 SO）
+→ 按需发布 SO 给客户
 → 维护船名 / 航次 / ETD / ETA
 → 标记已开船
 → 标记已到港
@@ -158,7 +161,7 @@ Booking BOOKED
 
 复验结果：
 
-- SO 发布后客户可见，但客户 Shipment 列表必须等 Basic Shipment 创建后才显示，符合 V1.1 “SO 发布”和“Shipment 建档”解耦口径。
+- SO 发布后客户可查看 SO；Shipment 建档只要求已内部登记 SO，不要求先发布。客户 Shipment 列表必须等 Basic Shipment 创建后才显示。
 - 后台已完成从 `BOOK202609000007` 创建 `SHP202609000001`。
 - Shipment 状态已走到 `ARRIVED / 已到港`，页面 Timeline 显示 `已订舱 → 已开船 → 已到港`。
 - 本轮人工复验中发现并修正两个 UX 问题：创建 Basic Shipment 增加站内二次确认；Shipment 状态动作不再使用浏览器原生确认框，时间异常提示合并到站内弹窗。

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
@@ -11,6 +12,17 @@ import { FieldLabel } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 import { bookingStatusLabel, bookingStatusTone } from '@/lib/booking-status';
 import { hasPermission } from '@/lib/auth';
+import { resolveBookingBusinessFlow } from '@/lib/business-flow';
+
+interface BookingCargoItem {
+  id: string;
+  sourceQuoteCargoItemId: string | null;
+  commodity: string;
+  estimatedGrossWeight: string | null;
+  cargoNature: string | null;
+  specialRequirement: string | null;
+}
+
 interface Booking {
   id: string;
   bookingNo: string;
@@ -34,6 +46,7 @@ interface Booking {
   bookingContactEmail: string | null;
   bookingContactPhone: string | null;
   lastStatusRemark: string | null;
+  createdAt: string;
   customer: { name: string };
   quote: {
     quoteNo: string;
@@ -53,6 +66,7 @@ interface Booking {
     weightPerContainer: string | null;
     remark: string | null;
   }>;
+  cargoItems: BookingCargoItem[];
   shipments: Array<{ id: string; shipmentNo: string; status: string }>;
   reviewActions: Array<{
     id: string;
@@ -254,7 +268,7 @@ export default function AdminBookingDetail() {
       setOperationNotice({
         tone: 'success',
         title: 'SO 已登记成功',
-        description: `SO ${submittedSoNumber} 已保存为内部记录，客户暂不可见。发布后客户才能查看和下载。`,
+        description: `SO ${submittedSoNumber} 已保存为内部记录，现在可以创建 Basic Shipment。客户暂不可见此 SO，发布后才能查看和下载。`,
       });
     } catch (caught) {
       const message = (caught as Error).message;
@@ -300,7 +314,7 @@ export default function AdminBookingDetail() {
     }
   };
   const createShipment = async () => {
-    if (!currentSo || currentSo.status !== 'PUBLISHED') return;
+    if (!currentSo || !['INTERNAL_DRAFT', 'PUBLISHED'].includes(currentSo.status)) return;
     setBusy(true);
     setError('');
     setOperationNotice(null);
@@ -365,6 +379,7 @@ export default function AdminBookingDetail() {
     soRecords.find((record) => record.status === 'INTERNAL_DRAFT') ??
     soRecords.find((record) => record.status === 'PUBLISHED') ??
     soRecords[0];
+  const businessFlow = resolveBookingBusinessFlow(b, 'admin');
   const openCarrierDialog = () => {
     setSourceName(latestSubmission?.carrierSourceName ?? b.carrierCode ?? '');
     setReference(latestSubmission?.carrierReference ?? '');
@@ -391,7 +406,7 @@ export default function AdminBookingDetail() {
       <PageHeader
         eyebrow={b.customer.name}
         title={b.bookingNo}
-        description="Operation Booking Review"
+        description={`创建时间：${formatDateTime(b.createdAt)}`}
         actions={
           <div className="flex gap-2">
             {canManage && b.status === 'SUBMITTED' ? (
@@ -426,6 +441,7 @@ export default function AdminBookingDetail() {
           </div>
         }
       />
+      <BusinessFlow {...businessFlow} />
       {operationNotice ? <OperationNoticeBar notice={operationNotice} /> : null}
       {error && !operationNotice ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -472,20 +488,52 @@ export default function AdminBookingDetail() {
       </section>
       <ReviewIssues issues={reviewIssues} status={b.status} />
       <section className="grid items-start gap-4 lg:grid-cols-[1.15fr_0.95fr_1fr]">
-        <InfoPanel title="货物信息 Cargo" meta={b.isDangerousGoods ? '危险品' : '普货'}>
-          <CompactFact label="品名" value={b.commodity ?? '—'} />
-          <CompactFact label="包装" value={formatPackage(b)} />
-          <CompactFact label="毛重" value={b.grossWeight ? `${b.grossWeight} KG` : '—'} />
-          <CompactFact label="体积" value={b.volumeCbm ? `${b.volumeCbm} CBM` : '—'} />
-          <CompactFact label="货好日期" value={formatDate(b.cargoReadyDate)} />
-          <CompactFact
-            label="危险品"
-            value={b.isDangerousGoods ? '是，需要资料核对' : '否'}
-            tone={b.isDangerousGoods ? 'warning' : 'default'}
-          />
-          {b.specialInstructions ? (
-            <CompactFact label="特殊要求" value={b.specialInstructions} wide />
-          ) : null}
+        <InfoPanel
+          title="货物信息 Cargo"
+          meta={`${b.cargoItems.length || (b.commodity ? 1 : 0)} 项 · ${b.isDangerousGoods ? '危险品' : '普货'}`}
+        >
+          {b.cargoItems.length ? (
+            b.cargoItems.map((item, index) => (
+              <div className="py-3" key={item.id}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-primary">货物 {index + 1}</div>
+                  {item.cargoNature ? (
+                    <span className="text-xs text-muted">{item.cargoNature}</span>
+                  ) : null}
+                </div>
+                <dl className="mt-1 divide-y divide-border">
+                  <CompactFact label="品名" value={item.commodity} />
+                  <CompactFact
+                    label="预计重量"
+                    value={item.estimatedGrossWeight ? `${item.estimatedGrossWeight} KG` : '—'}
+                  />
+                  <CompactFact label="货物性质" value={item.cargoNature ?? '—'} />
+                  <CompactFact label="特殊要求" value={item.specialRequirement ?? '无'} wide />
+                </dl>
+              </div>
+            ))
+          ) : (
+            <dl>
+              <CompactFact label="品名" value={b.commodity ?? '—'} />
+              <CompactFact label="毛重" value={b.grossWeight ? `${b.grossWeight} KG` : '—'} />
+            </dl>
+          )}
+          <div className="py-3">
+            <div className="text-sm font-semibold">订舱汇总</div>
+            <dl className="mt-1 divide-y divide-border">
+              <CompactFact label="包装" value={formatPackage(b)} />
+              <CompactFact label="总体积" value={b.volumeCbm ? `${b.volumeCbm} CBM` : '—'} />
+              <CompactFact label="货好日期" value={formatDate(b.cargoReadyDate)} />
+              <CompactFact
+                label="危险品"
+                value={b.isDangerousGoods ? '是，需要资料核对' : '否'}
+                tone={b.isDangerousGoods ? 'warning' : 'default'}
+              />
+              {b.specialInstructions ? (
+                <CompactFact label="订舱特殊说明" value={b.specialInstructions} wide />
+              ) : null}
+            </dl>
+          </div>
         </InfoPanel>
         <InfoPanel title="发货人 Shipper">
           <CompactFact label="Company" value={b.shipperName ?? '—'} />
@@ -708,7 +756,7 @@ export default function AdminBookingDetail() {
                   </button>
                   {canManageDocuments && currentSo.status === 'INTERNAL_DRAFT' ? (
                     <button
-                      className={primary}
+                      className={secondary}
                       disabled={busy}
                       onClick={() => {
                         setPublishingSoId(currentSo.id);
@@ -719,7 +767,9 @@ export default function AdminBookingDetail() {
                       发布给客户
                     </button>
                   ) : null}
-                  {canCreateShipment && currentSo.status === 'PUBLISHED' && !b.shipments.length ? (
+                  {canCreateShipment &&
+                  ['INTERNAL_DRAFT', 'PUBLISHED'].includes(currentSo.status) &&
+                  !b.shipments.length ? (
                     <button
                       className={`${primary} inline-flex items-center gap-2`}
                       disabled={busy}
@@ -1100,8 +1150,9 @@ function ActionDialog(props: {
         {props.mode === 'create-shipment' ? (
           <div className="space-y-3">
             <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-              创建后客户将在出运列表看到该 Basic Shipment。请确认 SO
-              已核对，船期信息可作为当前出运基础信息。
+              创建后客户将在出运列表看到该 Basic Shipment。请确认内部登记的 SO
+              已核对，船期信息可作为当前出运基础信息。SO 是否发布只影响客户查看和下载
+              SO，不影响出运建档。
             </div>
             {props.shipmentPreview ? (
               <dl className="grid gap-3 rounded border border-border bg-sidebar p-3 text-sm sm:grid-cols-2">

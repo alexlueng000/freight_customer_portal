@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import {
   BookingReviewActionType,
+  BookingSoRecordStatus,
   BookingStatus,
+  DocumentStatus,
   Prisma,
   QuoteStatus,
   RoleCode,
@@ -35,7 +37,12 @@ const bookingSelect = {
   polCode: true,
   podCode: true,
   carrierCode: true,
+  serviceName: true,
   etd: true,
+  incoterm: true,
+  requestedServices: true,
+  pickupLocationText: true,
+  deliveryLocationText: true,
   commodity: true,
   packageType: true,
   packages: true,
@@ -65,6 +72,18 @@ const bookingSelect = {
       quantity: true,
       weightPerContainer: true,
       remark: true,
+      sortOrder: true,
+    },
+    orderBy: { sortOrder: 'asc' as const },
+  },
+  cargoItems: {
+    select: {
+      id: true,
+      sourceQuoteCargoItemId: true,
+      commodity: true,
+      estimatedGrossWeight: true,
+      cargoNature: true,
+      specialRequirement: true,
       sortOrder: true,
     },
     orderBy: { sortOrder: 'asc' as const },
@@ -166,6 +185,8 @@ export class BookingsService {
             where: { chargeCode: 'OCEAN_FREIGHT', containerType: { not: null } },
             orderBy: { sortOrder: 'asc' },
           },
+          cargoItems: { orderBy: { sortOrder: 'asc' } },
+          sourceRate: { select: { serviceName: true } },
         },
       });
       if (!quote)
@@ -193,6 +214,11 @@ export class BookingsService {
         select: { value: true },
       });
       const bookingNo = `BOOK${yearMonth}${String(counter.value).padStart(6, '0')}`;
+      const inheritedGrossWeight = quote.cargoItems.reduce(
+        (total, item) =>
+          item.estimatedGrossWeight ? total.plus(item.estimatedGrossWeight) : total,
+        new Prisma.Decimal(0),
+      );
       const grouped = new Map<string, number>();
       for (const item of quote.items)
         if (item.containerType)
@@ -236,7 +262,14 @@ export class BookingsService {
           polCode: quote.polCode,
           podCode: quote.podCode,
           carrierCode: quote.carrierCode,
+          serviceName: quote.sourceRate?.serviceName,
           etd: quote.etd,
+          incoterm: quote.incoterm,
+          requestedServices: quote.requestedServices,
+          pickupLocationText: quote.pickupLocationText,
+          deliveryLocationText: quote.deliveryLocationText,
+          commodity: quote.cargoItems[0]?.commodity.slice(0, 300),
+          grossWeight: inheritedGrossWeight.gt(0) ? inheritedGrossWeight : null,
           bookingContactName: user.displayName,
           bookingContactEmail: user.email,
           bookingContactPhone: matchedContact?.phone ?? defaultContact?.phone,
@@ -251,6 +284,17 @@ export class BookingsService {
               containerType,
               quantity,
               sortOrder,
+            })),
+          },
+          cargoItems: {
+            create: quote.cargoItems.map((item) => ({
+              tenantId: context.tenantId,
+              sourceQuoteCargoItemId: item.id,
+              commodity: item.commodity,
+              estimatedGrossWeight: item.estimatedGrossWeight,
+              cargoNature: item.cargoNature,
+              specialRequirement: item.specialRequirement,
+              sortOrder: item.sortOrder,
             })),
           },
         },
@@ -273,7 +317,13 @@ export class BookingsService {
             entityType: 'Booking',
             entityId: booking.id,
             action: 'CREATE',
-            afterData: { bookingNo, quoteId: quote.id, status: BookingStatus.DRAFT },
+            afterData: {
+              bookingNo,
+              quoteId: quote.id,
+              status: BookingStatus.DRAFT,
+              cargoItemCount: quote.cargoItems.length,
+              requestedServices: quote.requestedServices,
+            },
           },
           {
             tenantId: context.tenantId,
@@ -448,7 +498,7 @@ export class BookingsService {
     return this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findFirst({
         where: { id, tenantId: context.tenantId, customerCompanyId: context.customerCompanyId },
-        include: { containerRequests: true },
+        include: { containerRequests: true, cargoItems: true },
       });
       if (!booking)
         throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
@@ -477,22 +527,109 @@ export class BookingsService {
           { sourceShipperId: ['sourceShipperId must belong to the current customer company'] },
         );
       if (dto.grossWeight && new Prisma.Decimal(dto.grossWeight).lte(0))
-        throw this.fieldError('BOOKING_GROSS_WEIGHT_INVALID', 'Gross weight must be greater than 0', {
-          grossWeight: ['grossWeight must be greater than 0'],
-        });
+        throw this.fieldError(
+          'BOOKING_GROSS_WEIGHT_INVALID',
+          'Gross weight must be greater than 0',
+          {
+            grossWeight: ['grossWeight must be greater than 0'],
+          },
+        );
       if (dto.volumeCbm && new Prisma.Decimal(dto.volumeCbm).lte(0))
         throw this.fieldError(
           'BOOKING_VOLUME_CBM_INVALID',
           'Volume CBM must be greater than 0 when provided',
           { volumeCbm: ['volumeCbm must be greater than 0 when provided'] },
         );
+      if (dto.cargoItems) {
+        const requestedIds = new Set(dto.cargoItems.map((item) => item.id));
+        if (
+          requestedIds.size !== dto.cargoItems.length ||
+          requestedIds.size !== booking.cargoItems.length ||
+          booking.cargoItems.some((item) => !requestedIds.has(item.id))
+        )
+          throw this.fieldError(
+            'BOOKING_CARGO_ITEMS_MISMATCH',
+            'Booking cargo items do not match the current draft',
+            {
+              cargoItems: ['cargoItems must contain each current booking cargo item exactly once'],
+            },
+          );
+        for (const item of dto.cargoItems) {
+          if (item.estimatedGrossWeight && new Prisma.Decimal(item.estimatedGrossWeight).lte(0))
+            throw this.fieldError(
+              'BOOKING_CARGO_WEIGHT_INVALID',
+              'Estimated gross weight must be greater than 0',
+              { cargoItems: ['estimatedGrossWeight must be greater than 0 when provided'] },
+            );
+          await tx.bookingCargoItem.updateMany({
+            where: { id: item.id, bookingId: id, tenantId: context.tenantId },
+            data: {
+              commodity: item.commodity.trim(),
+              estimatedGrossWeight: item.estimatedGrossWeight
+                ? new Prisma.Decimal(item.estimatedGrossWeight)
+                : null,
+              cargoNature: item.cargoNature?.trim() || null,
+              specialRequirement: item.specialRequirement?.trim() || null,
+            },
+          });
+        }
+      }
+      if (dto.containerRequests) {
+        const containerTypes = new Set(dto.containerRequests.map((item) => item.containerType));
+        if (containerTypes.size !== dto.containerRequests.length)
+          throw this.fieldError(
+            'BOOKING_CONTAINER_DUPLICATE',
+            'Container types must be unique within a booking',
+            { containerRequests: ['containerType cannot be repeated'] },
+          );
+        await tx.bookingContainerRequest.deleteMany({ where: { bookingId: id } });
+        await tx.bookingContainerRequest.createMany({
+          data: dto.containerRequests.map((item, sortOrder) => ({
+            tenantId: context.tenantId,
+            bookingId: id,
+            containerType: item.containerType.trim().toUpperCase(),
+            quantity: item.quantity,
+            sortOrder,
+          })),
+        });
+      }
+      const inheritedCargoWeight = dto.cargoItems?.reduce(
+        (total, item) =>
+          item.estimatedGrossWeight
+            ? total.plus(new Prisma.Decimal(item.estimatedGrossWeight))
+            : total,
+        new Prisma.Decimal(0),
+      );
       const updated = await tx.booking.update({
         where: { id },
         data: {
-          commodity: dto.commodity?.trim(),
+          polCode: dto.polCode?.trim().toUpperCase(),
+          podCode: dto.podCode?.trim().toUpperCase(),
+          carrierCode:
+            dto.carrierCode === undefined
+              ? undefined
+              : dto.carrierCode.trim().toUpperCase() || null,
+          serviceName: nullableText(dto.serviceName),
+          etd: dto.etd ? new Date(dto.etd) : undefined,
+          incoterm:
+            dto.incoterm === undefined ? undefined : dto.incoterm.trim().toUpperCase() || null,
+          requestedServices: dto.requestedServices
+            ? [...new Set(dto.requestedServices)]
+            : undefined,
+          pickupLocationText: nullableText(dto.pickupLocationText),
+          deliveryLocationText: nullableText(dto.deliveryLocationText),
+          commodity: dto.cargoItems
+            ? dto.cargoItems[0]?.commodity.trim().slice(0, 300)
+            : dto.commodity?.trim(),
           packageType: dto.packageType,
           packages: dto.packages,
-          grossWeight: dto.grossWeight ? new Prisma.Decimal(dto.grossWeight) : undefined,
+          grossWeight: dto.cargoItems
+            ? inheritedCargoWeight?.gt(0)
+              ? inheritedCargoWeight
+              : null
+            : dto.grossWeight
+              ? new Prisma.Decimal(dto.grossWeight)
+              : undefined,
           volumeCbm: dto.volumeCbm ? new Prisma.Decimal(dto.volumeCbm) : undefined,
           cargoReadyDate: dto.cargoReadyDate
             ? new Date(`${dto.cargoReadyDate}T00:00:00.000Z`)
@@ -528,7 +665,7 @@ export class BookingsService {
     const context = this.requireCustomer();
     const booking = await this.prisma.booking.findFirst({
       where: { id, tenantId: context.tenantId, customerCompanyId: context.customerCompanyId },
-      include: { containerRequests: true },
+      include: { containerRequests: true, cargoItems: true },
     });
     if (!booking)
       throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
@@ -549,6 +686,11 @@ export class BookingsService {
     if (!booking.bookingContactEmail && !booking.bookingContactPhone)
       missing.push('bookingContactEmailOrPhone');
     if (booking.containerRequests.length === 0) missing.push('containerRequests');
+    if (
+      booking.cargoItems.length > 0 &&
+      booking.cargoItems.some((item) => !item.commodity.trim() || !item.estimatedGrossWeight?.gt(0))
+    )
+      missing.push('cargoItems');
     if (missing.length)
       throw new BadRequestException({
         code: 'BOOKING_INCOMPLETE',
@@ -566,7 +708,14 @@ export class BookingsService {
           id,
           ...this.internalWhere(context),
           status: BookingStatus.BOOKED,
-          documents: { some: { documentType: 'SO', status: 'ACTIVE', customerVisible: true } },
+          soRecords: {
+            some: {
+              status: {
+                in: [BookingSoRecordStatus.INTERNAL_DRAFT, BookingSoRecordStatus.PUBLISHED],
+              },
+              document: { status: DocumentStatus.ACTIVE },
+            },
+          },
         },
         select: {
           id: true,
@@ -580,8 +729,8 @@ export class BookingsService {
       });
       if (!booking)
         throw new NotFoundException({
-          code: 'BOOKED_BOOKING_WITH_PUBLISHED_SO_NOT_FOUND',
-          message: 'Booked booking with a published SO not found',
+          code: 'BOOKED_BOOKING_WITH_REGISTERED_SO_NOT_FOUND',
+          message: 'Booked booking with a registered SO not found',
         });
       const existing = await tx.shipment.findFirst({
         where: { tenantId: context.tenantId, bookingId: id },
@@ -994,11 +1143,11 @@ export class BookingsService {
     const mismatchMessage = this.findQuoteMismatch(booking);
     if (mismatchMessage) {
       issues.push({
-        code: 'BOOKING_QUOTE_MISMATCH',
-        severity: 'error',
-        blocking: true,
+        code: 'BOOKING_QUOTE_DIFFERENCE',
+        severity: 'warning',
+        blocking: false,
         field: 'quote',
-        message: mismatchMessage,
+        message: `${mismatchMessage} Quote 阶段信息为预估值，请以 Booking 当前资料执行。`,
       });
     }
     return issues;
@@ -1048,6 +1197,15 @@ export class BookingsService {
   }
   private auditSnapshot(value: {
     status: BookingStatus;
+    polCode: string;
+    podCode: string;
+    carrierCode: string | null;
+    serviceName: string | null;
+    etd: Date | null;
+    incoterm: string | null;
+    requestedServices: string[];
+    pickupLocationText: string | null;
+    deliveryLocationText: string | null;
     commodity: string | null;
     packageType: string | null;
     packages: number | null;
@@ -1059,9 +1217,26 @@ export class BookingsService {
     sourceShipperId: string | null;
     shipperName: string | null;
     bookingContactName: string | null;
+    containerRequests: Array<{ containerType: string; quantity: number }>;
+    cargoItems: Array<{
+      id: string;
+      commodity: string;
+      estimatedGrossWeight: { toString(): string } | null;
+      cargoNature: string | null;
+      specialRequirement: string | null;
+    }>;
   }): Prisma.InputJsonObject {
     return {
       status: value.status,
+      polCode: value.polCode,
+      podCode: value.podCode,
+      carrierCode: value.carrierCode,
+      serviceName: value.serviceName,
+      etd: value.etd?.toISOString() ?? null,
+      incoterm: value.incoterm,
+      requestedServices: value.requestedServices,
+      pickupLocationText: value.pickupLocationText,
+      deliveryLocationText: value.deliveryLocationText,
       commodity: value.commodity,
       packageType: value.packageType,
       packages: value.packages,
@@ -1073,6 +1248,17 @@ export class BookingsService {
       sourceShipperId: value.sourceShipperId,
       shipperName: value.shipperName,
       bookingContactName: value.bookingContactName,
+      containerRequests: value.containerRequests.map((item) => ({
+        containerType: item.containerType,
+        quantity: item.quantity,
+      })),
+      cargoItems: value.cargoItems.map((item) => ({
+        id: item.id,
+        commodity: item.commodity,
+        estimatedGrossWeight: item.estimatedGrossWeight?.toString() ?? null,
+        cargoNature: item.cargoNature,
+        specialRequirement: item.specialRequirement,
+      })),
     };
   }
 
@@ -1114,6 +1300,11 @@ export class BookingsService {
 
 function dateOnly(value: Date | null | undefined) {
   return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function nullableText(value: string | undefined) {
+  if (value === undefined) return undefined;
+  return value.trim() || null;
 }
 
 function containerSignature(

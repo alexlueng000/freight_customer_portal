@@ -2,6 +2,7 @@
 
 > 状态：ACCEPTED
 > 日期：2026-09-01
+> 修订：2026-09-07，SO 内部登记与客户发布彻底解耦
 > 影响范围：Booking、SO、Shipment、Notification、Audit、API、Web、Seed、自动化测试
 
 ## 1. 背景
@@ -47,7 +48,7 @@ SUBMITTED | APPROVED | BOOKING_SUBMITTED → REJECTED | CANCELLED
 | REVISION_REQUIRED | 资料退回客户补充 | 待补充资料 | 客户编辑并重新提交 |
 | APPROVED | 资料审核通过，待向船司/代理订舱 | 处理中 | Operation 提交船司/代理 |
 | BOOKING_SUBMITTED | 已向船司/代理提交，等待 SO | 订舱处理中 | 内部登记 SO |
-| BOOKED | 已收到并发布 SO | 已订舱 | 创建 Shipment、客户查看 SO |
+| BOOKED | 已收到并在内部登记 SO | 已订舱 | 创建 Shipment、按需发布 SO |
 | REJECTED | 业务明确拒绝，终态 | 已拒绝 | 只读 |
 | CANCELLED | 已取消，终态 | 已取消 | 只读 |
 
@@ -64,7 +65,7 @@ REJECTED          → （终态）
 CANCELLED         → （终态）
 ```
 
-`BOOKED` 只能由 SO 发布事务产生，禁止提供普通“设为已订舱”端点。
+`BOOKED` 只能由 SO 登记事务产生，禁止提供普通“设为已订舱”端点。SO 发布是独立的客户可见性动作，不改变 Booking 状态，也不是创建 Shipment 的前置条件。
 
 ## 4. 语义化动作与权限
 
@@ -76,8 +77,8 @@ CANCELLED         → （终态）
 | 审核通过 | `POST /admin/bookings/:id/approve` | `booking.manage` | SUBMITTED → APPROVED |
 | 业务拒绝 | `POST /admin/bookings/:id/reject` | `booking.manage` | 指定状态 → REJECTED |
 | 提交船司/代理 | `POST /admin/bookings/:id/submit-to-carrier` | `booking.manage` | APPROVED → BOOKING_SUBMITTED |
-| 登记 SO | `POST /admin/bookings/:id/so-records` | `document.upload` | 状态不变 |
-| 发布 SO | `POST /admin/bookings/:id/so-records/:soId/publish` | `document.manage` | BOOKING_SUBMITTED → BOOKED |
+| 登记 SO | `POST /admin/bookings/:id/so-records` | `document.upload` | BOOKING_SUBMITTED → BOOKED |
+| 发布 SO | `POST /admin/bookings/:id/so-records/:soId/publish` | `document.manage` | 状态不变，仅将 SO 设为客户可见 |
 
 旧 `/review`、`/confirm`、`/release-so` 不继续承载新业务。预试点阶段可在同一变更中更新全部调用方并删除；如果外部客户端已经使用，则先返回弃用提示并设置一个版本兼容窗口。
 
@@ -89,7 +90,7 @@ CANCELLED         → （终态）
 | SUBMITTED | SUBMITTED | 语义不变 |
 | UNDER_REVIEW | SUBMITTED | 旧状态没有独立业务价值 |
 | CONFIRMED | APPROVED | 旧 Confirm 实际是内部资料审核通过 |
-| SO_RELEASED | BOOKED | 仅在数据满足已发布 SO，或作为明确记录的历史例外时映射 |
+| SO_RELEASED | BOOKED | 旧状态表示已取得 SO；客户可见性以 SO Document/Record 的发布状态为准 |
 | REJECTED | REJECTED | 旧记录按终止处理，不推断为可补充 |
 | CANCELLED | CANCELLED | 语义不变 |
 
@@ -120,7 +121,7 @@ CANCELLED         → （终态）
 - 退回原因使用稳定代码；客户可见说明与内部备注分字段保存。
 - 客户 API 不返回内部备注。
 - SO 上传默认 `customerVisible=false`；发布事务才可设置为 true。
-- Shipment 创建要求 Booking=BOOKED 且存在已发布 SO；历史例外必须在迁移报告中明确处理。
+- Shipment 创建要求 Booking=BOOKED 且存在有效的内部登记 SO；SO 是否发布给客户不影响 Shipment 建档。
 - 需要同步更新 Prisma enum、数据库约束、Seed、Swagger、前端状态文案/筛选、Notification 事件和全部测试。
 
 ## 8. 确认项
@@ -128,4 +129,4 @@ CANCELLED         → （终态）
 - [x] 批准采用 `REVISION_REQUIRED / APPROVED / BOOKING_SUBMITTED / BOOKED`。
 - [x] 批准 `REJECTED` 仅表示业务终止。
 - [x] 批准客户看到 APPROVED 时统一显示“处理中”，不暴露内部审核术语。
-- [x] 批准 BOOKED 必须由 SO 发布事务产生。
+- [x] 批准 BOOKED 必须由 SO 登记事务产生，SO 发布仅控制客户可见性。

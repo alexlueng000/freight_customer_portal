@@ -97,20 +97,63 @@ describe('booking database integration', () => {
         },
       })
     ).id;
+    const sourceRate = await prisma.rate.create({
+      data: {
+        tenantId: tenantA,
+        rateNo: `RATE-${runId}`,
+        polCode: 'CNSHA',
+        polName: 'Shanghai',
+        podCode: 'USLAX',
+        podName: 'Los Angeles',
+        carrierCode: 'COSCO',
+        serviceName: 'Transpacific Express',
+        effectiveDate: day(-1),
+        expiryDate: day(7),
+        currency: 'USD',
+        status: 'ACTIVE',
+      },
+    });
     quoteA = (
       await prisma.quote.create({
         data: {
           tenantId: tenantA,
           quoteNo: `QT-${runId}`,
           customerCompanyId: customerA,
+          sourceRateId: sourceRate.id,
           status: QuoteStatus.ACCEPTED,
           polCode: 'CNSHA',
           podCode: 'USLAX',
           carrierCode: 'COSCO',
+          etd: day(5),
+          containerQuantity: 2,
+          incoterm: 'FOB',
+          requestedServices: ['ORIGIN_PICKUP', 'EXPORT_CUSTOMS'],
+          pickupLocationText: 'Shanghai warehouse',
+          deliveryLocationText: 'Los Angeles warehouse',
           validUntil: day(7),
           currency: 'USD',
           subtotal: new Prisma.Decimal(1200),
           totalAmount: new Prisma.Decimal(1200),
+          cargoItems: {
+            create: [
+              {
+                tenantId: tenantA,
+                commodity: 'Furniture',
+                estimatedGrossWeight: new Prisma.Decimal(15000),
+                cargoNature: 'General cargo',
+                specialRequirement: 'Keep dry',
+                sortOrder: 0,
+              },
+              {
+                tenantId: tenantA,
+                commodity: 'Lighting fixtures',
+                estimatedGrossWeight: new Prisma.Decimal(2200),
+                cargoNature: 'Fragile',
+                specialRequirement: 'Handle with care',
+                sortOrder: 1,
+              },
+            ],
+          },
           items: {
             create: {
               tenantId: tenantA,
@@ -138,6 +181,7 @@ describe('booking database integration', () => {
     await prisma.customerShipper.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.quoteItem.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.quote.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await prisma.rate.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.businessNumberCounter.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.user.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.customerCompany.deleteMany({ where: { tenantId: { in: tenantIds } } });
@@ -162,11 +206,55 @@ describe('booking database integration', () => {
     expect(created.status).toBe(BookingStatus.DRAFT);
     expect(created.containerRequests).toMatchObject([{ containerType: '40HQ', quantity: 2 }]);
     expect(created).toMatchObject({
+      polCode: 'CNSHA',
+      podCode: 'USLAX',
+      carrierCode: 'COSCO',
+      serviceName: 'Transpacific Express',
+      incoterm: 'FOB',
+      requestedServices: ['ORIGIN_PICKUP', 'EXPORT_CUSTOMS'],
+      pickupLocationText: 'Shanghai warehouse',
+      deliveryLocationText: 'Los Angeles warehouse',
       sourceShipperId: defaultShipper.id,
       shipperName: 'Default Shipper',
       bookingContactName: 'a',
       bookingContactEmail: `a-${runId}@example.test`,
     });
+    expect(created.cargoItems).toMatchObject([
+      {
+        commodity: 'Furniture',
+        estimatedGrossWeight: new Prisma.Decimal(15000),
+        cargoNature: 'General cargo',
+        specialRequirement: 'Keep dry',
+      },
+      {
+        commodity: 'Lighting fixtures',
+        estimatedGrossWeight: new Prisma.Decimal(2200),
+        cargoNature: 'Fragile',
+        specialRequirement: 'Handle with care',
+      },
+    ]);
+    const editedCargoItems = created.cargoItems.map((item, index) => ({
+      id: item.id,
+      commodity: item.commodity,
+      estimatedGrossWeight: index === 0 ? '15280' : item.estimatedGrossWeight?.toString(),
+      cargoNature: item.cargoNature ?? undefined,
+      specialRequirement: item.specialRequirement ?? undefined,
+    }));
+    const edited = await runCustomer(tenantA, userA, customerA, () =>
+      service.update(created.id, {
+        polCode: 'CNNGB',
+        containerRequests: [{ containerType: '40HQ', quantity: 3 }],
+        cargoItems: editedCargoItems,
+      }),
+    );
+    expect(edited.polCode).toBe('CNNGB');
+    expect(edited.containerRequests).toMatchObject([{ containerType: '40HQ', quantity: 3 }]);
+    expect(edited.cargoItems[0]?.estimatedGrossWeight?.toString()).toBe('15280');
+    const sourceCargo = await prisma.quoteCargoItem.findFirstOrThrow({
+      where: { quoteId: quoteA, sortOrder: 0 },
+    });
+    expect(sourceCargo.estimatedGrossWeight?.toString()).toBe('15000');
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: quoteA } })).polCode).toBe('CNSHA');
     expect((await prisma.quote.findUniqueOrThrow({ where: { id: quoteA } })).status).toBe(
       QuoteStatus.BOOKED,
     );
@@ -326,9 +414,7 @@ describe('booking database integration', () => {
       etd: new Date('2026-09-09T00:00:00.000Z'),
       quantity: 2,
     });
-    const booking = await runCustomer(tenantA, userA, customerA, () =>
-      service.create({ quoteId }),
-    );
+    const booking = await runCustomer(tenantA, userA, customerA, () => service.create({ quoteId }));
     await runCustomer(tenantA, userA, customerA, () =>
       service.update(booking.id, {
         commodity: 'Consumer goods',
@@ -345,11 +431,15 @@ describe('booking database integration', () => {
     );
     await runCustomer(tenantA, userA, customerA, () => service.submit(booking.id));
 
-    await expect(runInternal(() => service.approve(booking.id, { remark: 'Checked' }))).rejects.toMatchObject({
+    await expect(
+      runInternal(() => service.approve(booking.id, { remark: 'Checked' })),
+    ).rejects.toMatchObject({
       response: {
         code: 'BOOKING_REVIEW_BLOCKED',
         details: {
-          reviewIssues: [expect.objectContaining({ code: 'CARGO_READY_AFTER_ETD', blocking: true })],
+          reviewIssues: [
+            expect.objectContaining({ code: 'CARGO_READY_AFTER_ETD', blocking: true }),
+          ],
         },
       },
     });
@@ -363,14 +453,12 @@ describe('booking database integration', () => {
     );
   });
 
-  it('blocks approval when booking container requirements no longer match the source quote', async () => {
+  it('allows approximate booking data to differ from the source quote and reports a warning', async () => {
     const quoteId = await createAcceptedQuote('MISMATCH', {
       etd: new Date('2026-09-12T00:00:00.000Z'),
       quantity: 2,
     });
-    const booking = await runCustomer(tenantA, userA, customerA, () =>
-      service.create({ quoteId }),
-    );
+    const booking = await runCustomer(tenantA, userA, customerA, () => service.create({ quoteId }));
     await prisma.bookingContainerRequest.updateMany({
       where: { tenantId: tenantA, bookingId: booking.id, containerType: '40HQ' },
       data: { quantity: 1 },
@@ -391,17 +479,35 @@ describe('booking database integration', () => {
     );
     await runCustomer(tenantA, userA, customerA, () => service.submit(booking.id));
 
-    await expect(runInternal(() => service.approve(booking.id, { remark: 'Checked' }))).rejects.toMatchObject({
-      response: {
-        code: 'BOOKING_REVIEW_BLOCKED',
-        details: {
-          reviewIssues: [expect.objectContaining({ code: 'BOOKING_QUOTE_MISMATCH', blocking: true })],
-        },
-      },
+    const detail = (await runInternal(() => service.getInternal(booking.id))) as Awaited<
+      ReturnType<BookingsService['getInternal']>
+    > & { reviewIssues: Array<{ code: string; blocking: boolean }> };
+    expect(detail.reviewIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'BOOKING_QUOTE_DIFFERENCE', blocking: false }),
+      ]),
+    );
+    await expect(
+      runInternal(() => service.approve(booking.id, { remark: 'Checked' })),
+    ).resolves.toMatchObject({
+      status: BookingStatus.APPROVED,
     });
   });
 
-  it('keeps SO internal until publish and safely replaces the published version', async () => {
+  it('allows shipment creation from an internal SO while keeping SO publication separate', async () => {
+    await prisma.booking.update({
+      where: { id: bookingA },
+      data: { status: BookingStatus.BOOKED },
+    });
+    await expect(
+      runInternal(() => service.createShipment(bookingA, { vessel: 'Demo Vessel' })),
+    ).rejects.toMatchObject({
+      response: { code: 'BOOKED_BOOKING_WITH_REGISTERED_SO_NOT_FOUND' },
+    });
+    await prisma.booking.update({
+      where: { id: bookingA },
+      data: { status: BookingStatus.BOOKING_SUBMITTED },
+    });
     const draft = await runInternal(() =>
       bookingSo.create(
         bookingA,
@@ -428,10 +534,18 @@ describe('booking database integration', () => {
     await expect(
       runCustomer(tenantA, userA, customerA, () => documents.download(draft.document.id)),
     ).rejects.toMatchObject({ response: { code: 'DOCUMENT_NOT_FOUND' } });
-    await expect(
-      runInternal(() => service.createShipment(bookingA, { vessel: 'Demo Vessel' })),
-    ).rejects.toMatchObject({
-      response: { code: 'BOOKED_BOOKING_WITH_PUBLISHED_SO_NOT_FOUND' },
+    const shipment = await runInternal(() =>
+      service.createShipment(bookingA, { vessel: 'Demo Vessel', voyage: 'DV001' }),
+    );
+    expect(shipment.bookingId).toBe(bookingA);
+    expect(lastNotification('SHIPMENT_CREATED')).toMatchObject({
+      tenantId: tenantA,
+      customerCompanyId: customerA,
+      payload: {
+        bookingId: bookingA,
+        shipmentId: shipment.id,
+        href: `/portal/shipments/${shipment.id}`,
+      },
     });
     const published = await runInternal(() => bookingSo.publish(bookingA, draft.id));
     expect(published).toMatchObject({ status: 'PUBLISHED', version: 1 });
@@ -507,19 +621,6 @@ describe('booking database integration', () => {
       }),
     ).toBe(1);
 
-    const shipment = await runInternal(() =>
-      service.createShipment(bookingA, { vessel: 'Demo Vessel', voyage: 'DV001' }),
-    );
-    expect(shipment.bookingId).toBe(bookingA);
-    expect(lastNotification('SHIPMENT_CREATED')).toMatchObject({
-      tenantId: tenantA,
-      customerCompanyId: customerA,
-      payload: {
-        bookingId: bookingA,
-        shipmentId: shipment.id,
-        href: `/portal/shipments/${shipment.id}`,
-      },
-    });
     const hidden = await prisma.document.create({
       data: {
         tenantId: tenantA,
@@ -598,10 +699,7 @@ function lastNotification(type: string) {
   return undefined;
 }
 
-async function createAcceptedQuote(
-  suffix: string,
-  options: { etd: Date; quantity: number },
-) {
+async function createAcceptedQuote(suffix: string, options: { etd: Date; quantity: number }) {
   return (
     await prisma.quote.create({
       data: {

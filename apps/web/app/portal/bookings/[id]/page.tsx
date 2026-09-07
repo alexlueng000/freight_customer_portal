@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
@@ -11,6 +12,7 @@ import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
 import { hasPermission } from '@/lib/auth';
 import { bookingStatusTone, customerBookingStatusLabel } from '@/lib/booking-status';
+import { resolveBookingBusinessFlow } from '@/lib/business-flow';
 
 interface Container {
   id?: string;
@@ -18,6 +20,14 @@ interface Container {
   quantity: number;
   weightPerContainer: string | null;
   remark: string | null;
+}
+interface BookingCargoItem {
+  id: string;
+  sourceQuoteCargoItemId: string | null;
+  commodity: string;
+  estimatedGrossWeight: string | null;
+  cargoNature: string | null;
+  specialRequirement: string | null;
 }
 interface Booking {
   id: string;
@@ -27,7 +37,12 @@ interface Booking {
   polCode: string;
   podCode: string;
   carrierCode: string | null;
+  serviceName: string | null;
   etd: string | null;
+  incoterm: string | null;
+  requestedServices: string[];
+  pickupLocationText: string | null;
+  deliveryLocationText: string | null;
   commodity: string | null;
   packageType: string | null;
   packages: number | null;
@@ -44,6 +59,7 @@ interface Booking {
   bookingContactPhone: string | null;
   lastStatusRemark: string | null;
   containerRequests: Container[];
+  cargoItems: BookingCargoItem[];
   shipments: Array<{ id: string; shipmentNo: string; status: string }>;
   quote: { quoteNo: string; currency: string; totalAmount: string } | null;
 }
@@ -145,6 +161,28 @@ export default function BookingDetailPage() {
   }, [load]);
   const change = (key: keyof Booking, value: unknown) =>
     setForm((v) => (v ? { ...v, [key]: value } : v));
+  const changeCargoItem = (index: number, key: keyof BookingCargoItem, value: unknown) =>
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            cargoItems: current.cargoItems.map((item, itemIndex) =>
+              itemIndex === index ? { ...item, [key]: value } : item,
+            ),
+          }
+        : current,
+    );
+  const changeContainer = (index: number, key: 'containerType' | 'quantity', value: unknown) =>
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            containerRequests: current.containerRequests.map((item, itemIndex) =>
+              itemIndex === index ? { ...item, [key]: value } : item,
+            ),
+          }
+        : current,
+    );
   const saveDraft = async (currentForm: Booking) => {
     let sourceShipperId = currentForm.sourceShipperId || undefined;
     if (saveShipperToAddressBook && !sourceShipperId) {
@@ -180,6 +218,28 @@ export default function BookingDetailPage() {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        polCode: optionalText(currentForm.polCode),
+        podCode: optionalText(currentForm.podCode),
+        carrierCode: optionalText(currentForm.carrierCode),
+        serviceName: optionalText(currentForm.serviceName),
+        etd: currentForm.etd?.slice(0, 10),
+        incoterm: optionalText(currentForm.incoterm),
+        requestedServices: currentForm.requestedServices,
+        pickupLocationText: optionalText(currentForm.pickupLocationText),
+        deliveryLocationText: optionalText(currentForm.deliveryLocationText),
+        containerRequests: currentForm.containerRequests.map((item) => ({
+          containerType: item.containerType,
+          quantity: Number(item.quantity),
+        })),
+        cargoItems: currentForm.cargoItems.length
+          ? currentForm.cargoItems.map((item) => ({
+              id: item.id,
+              commodity: item.commodity,
+              estimatedGrossWeight: optionalText(item.estimatedGrossWeight),
+              cargoNature: optionalText(item.cargoNature),
+              specialRequirement: optionalText(item.specialRequirement),
+            }))
+          : undefined,
         commodity: optionalText(currentForm.commodity),
         packageType: optionalText(currentForm.packageType),
         packages: currentForm.packages ? Number(currentForm.packages) : undefined,
@@ -334,6 +394,7 @@ export default function BookingDetailPage() {
   if (!booking || !form)
     return <ErrorState description={error || '订舱不存在'} onRetry={() => void load()} />;
   const editable = canEditBooking && ['DRAFT', 'REVISION_REQUIRED'].includes(booking.status);
+  const businessFlow = resolveBookingBusinessFlow(booking, 'portal');
   return (
     <div className="space-y-5">
       <Link className="text-sm text-primary hover:underline" href="/portal/bookings">
@@ -374,6 +435,7 @@ export default function BookingDetailPage() {
           </div>
         }
       />
+      <BusinessFlow {...businessFlow} />
       <BookingProgressStatus booking={booking} />
       {error ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -396,7 +458,7 @@ export default function BookingDetailPage() {
             <h2 className="font-semibold">来源报价</h2>
             <p className="mt-1 text-sm text-muted">
               本次订舱基于已接受报价 {booking.quote?.quoteNo ?? booking.quoteId ?? '—'}
-              ，以下商务条件不可修改。
+              。以下内容已自动带入，Quote 阶段为预估信息，可在提交订舱前修改。
             </p>
           </div>
           {booking.quoteId ? (
@@ -408,12 +470,130 @@ export default function BookingDetailPage() {
             </Link>
           ) : null}
         </div>
-        <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-4">
-          <Fact label="航线" value={`${booking.polCode} → ${booking.podCode}`} />
-          <Fact label="船司" value={booking.carrierCode ?? '—'} />
-          <Fact label="ETD" value={booking.etd?.slice(0, 10) ?? '待确认'} />
-          <Fact label="箱型与箱量" value={formatContainerRequests(booking.containerRequests)} />
-        </dl>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="POL" required>
+            <input
+              className={input}
+              disabled={!editable}
+              maxLength={10}
+              value={form.polCode}
+              onChange={(event) => change('polCode', event.target.value)}
+            />
+          </Field>
+          <Field label="POD" required>
+            <input
+              className={input}
+              disabled={!editable}
+              maxLength={10}
+              value={form.podCode}
+              onChange={(event) => change('podCode', event.target.value)}
+            />
+          </Field>
+          <Field label="Carrier">
+            <input
+              className={input}
+              disabled={!editable}
+              value={form.carrierCode ?? ''}
+              onChange={(event) => change('carrierCode', event.target.value)}
+            />
+          </Field>
+          <Field label="Service">
+            <input
+              className={input}
+              disabled={!editable}
+              value={form.serviceName ?? ''}
+              onChange={(event) => change('serviceName', event.target.value)}
+            />
+          </Field>
+          <Field label="ETD">
+            <input
+              className={input}
+              disabled={!editable}
+              type="date"
+              value={form.etd?.slice(0, 10) ?? ''}
+              onChange={(event) => change('etd', event.target.value)}
+            />
+          </Field>
+          <Field label="Incoterm">
+            <select
+              className={input}
+              disabled={!editable}
+              value={form.incoterm ?? ''}
+              onChange={(event) => change('incoterm', event.target.value)}
+            >
+              <option value="">请选择</option>
+              {['EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'DAP', 'DDP', 'OTHER'].map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="提货地点">
+            <input
+              className={input}
+              disabled={!editable}
+              value={form.pickupLocationText ?? ''}
+              onChange={(event) => change('pickupLocationText', event.target.value)}
+            />
+          </Field>
+          <Field label="派送地点">
+            <input
+              className={input}
+              disabled={!editable}
+              value={form.deliveryLocationText ?? ''}
+              onChange={(event) => change('deliveryLocationText', event.target.value)}
+            />
+          </Field>
+          {form.containerRequests.map((container, index) => (
+            <div
+              className="grid grid-cols-[1fr_110px] gap-2 sm:col-span-2"
+              key={container.id ?? index}
+            >
+              <Field label={`箱型 ${index + 1}`} required>
+                <input
+                  className={input}
+                  disabled={!editable}
+                  value={container.containerType}
+                  onChange={(event) => changeContainer(index, 'containerType', event.target.value)}
+                />
+              </Field>
+              <Field label="箱量" required error={fieldErrors.containerRequests}>
+                <input
+                  className={inputClass(fieldErrors.containerRequests)}
+                  disabled={!editable}
+                  min="1"
+                  type="number"
+                  value={container.quantity}
+                  onChange={(event) => changeContainer(index, 'quantity', event.target.value)}
+                />
+              </Field>
+            </div>
+          ))}
+          <fieldset className="sm:col-span-2 lg:col-span-4">
+            <legend className="text-sm font-medium">Requested Services</legend>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+              {requestedServiceOptions.map((service) => (
+                <label className="flex items-center gap-2 text-sm" key={service.value}>
+                  <input
+                    checked={form.requestedServices.includes(service.value)}
+                    disabled={!editable}
+                    type="checkbox"
+                    onChange={(event) =>
+                      change(
+                        'requestedServices',
+                        event.target.checked
+                          ? [...form.requestedServices, service.value]
+                          : form.requestedServices.filter((value) => value !== service.value),
+                      )
+                    }
+                  />
+                  {service.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </div>
         {booking.quote ? (
           <p className="mt-3 text-sm text-muted">
             报价摘要：{booking.quote.currency}{' '}
@@ -432,14 +612,72 @@ export default function BookingDetailPage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <h2 className="text-sm font-semibold sm:col-span-2">货物信息</h2>
-          <Field label="货物品名" required error={fieldErrors.commodity}>
-            <input
-              className={inputClass(fieldErrors.commodity)}
-              disabled={!editable}
-              value={form.commodity ?? ''}
-              onChange={(e) => change('commodity', e.target.value)}
-            />
-          </Field>
+          {form.cargoItems.map((item, index) => (
+            <div
+              className="grid gap-4 rounded border border-border p-4 sm:col-span-2 sm:grid-cols-2"
+              key={item.id}
+            >
+              <div className="text-sm font-semibold sm:col-span-2">货物 {index + 1}</div>
+              <Field label="货物品名" required error={fieldErrors.cargoItems}>
+                <input
+                  className={inputClass(fieldErrors.cargoItems)}
+                  disabled={!editable}
+                  value={item.commodity}
+                  onChange={(event) => changeCargoItem(index, 'commodity', event.target.value)}
+                />
+              </Field>
+              <Field label="预计毛重 KG" error={fieldErrors.cargoItems}>
+                <input
+                  className={inputClass(fieldErrors.cargoItems)}
+                  disabled={!editable}
+                  inputMode="decimal"
+                  value={item.estimatedGrossWeight ?? ''}
+                  onChange={(event) =>
+                    changeCargoItem(index, 'estimatedGrossWeight', event.target.value)
+                  }
+                />
+              </Field>
+              <Field label="Cargo Nature">
+                <input
+                  className={input}
+                  disabled={!editable}
+                  value={item.cargoNature ?? ''}
+                  onChange={(event) => changeCargoItem(index, 'cargoNature', event.target.value)}
+                />
+              </Field>
+              <Field label="Special Requirement">
+                <textarea
+                  className={`${input} min-h-20 py-2`}
+                  disabled={!editable}
+                  value={item.specialRequirement ?? ''}
+                  onChange={(event) =>
+                    changeCargoItem(index, 'specialRequirement', event.target.value)
+                  }
+                />
+              </Field>
+            </div>
+          ))}
+          {!form.cargoItems.length ? (
+            <>
+              <Field label="货物品名" required error={fieldErrors.commodity}>
+                <input
+                  className={inputClass(fieldErrors.commodity)}
+                  disabled={!editable}
+                  value={form.commodity ?? ''}
+                  onChange={(event) => change('commodity', event.target.value)}
+                />
+              </Field>
+              <Field label="毛重 KG" required error={fieldErrors.grossWeight}>
+                <input
+                  className={inputClass(fieldErrors.grossWeight)}
+                  disabled={!editable}
+                  inputMode="decimal"
+                  value={form.grossWeight ?? ''}
+                  onChange={(event) => change('grossWeight', event.target.value)}
+                />
+              </Field>
+            </>
+          ) : null}
           <Field label="包装类型" required error={fieldErrors.packageType}>
             <select
               className={inputClass(fieldErrors.packageType)}
@@ -472,15 +710,6 @@ export default function BookingDetailPage() {
               type="date"
               value={form.cargoReadyDate?.slice(0, 10) ?? ''}
               onChange={(e) => change('cargoReadyDate', e.target.value)}
-            />
-          </Field>
-          <Field label="毛重 KG" required error={fieldErrors.grossWeight}>
-            <input
-              className={inputClass(fieldErrors.grossWeight)}
-              disabled={!editable}
-              inputMode="decimal"
-              value={form.grossWeight ?? ''}
-              onChange={(e) => change('grossWeight', e.target.value)}
             />
           </Field>
           <Field label="体积 CBM" error={fieldErrors.volumeCbm}>
@@ -639,7 +868,7 @@ export default function BookingDetailPage() {
             </div>
           ) : null}
         </div>
-        <Field label="特殊要求（选填）" wide>
+        <Field label="Booking Remark / 特殊操作说明（选填）" wide>
           <textarea
             className={`${inputClass(fieldErrors.dangerousGoodsInfo)} min-h-24 py-2`}
             disabled={!editable}
@@ -718,7 +947,11 @@ export default function BookingDetailPage() {
               <dt className="text-muted">箱量需求</dt>
               <dd>{formatContainerRequests(form.containerRequests)}</dd>
               <dt className="text-muted">货物</dt>
-              <dd>{form.commodity}</dd>
+              <dd>
+                {form.cargoItems.length
+                  ? form.cargoItems.map((item) => item.commodity).join('、')
+                  : form.commodity}
+              </dd>
             </dl>
             <div className="rounded bg-sidebar px-5 py-3 text-sm text-muted">
               操作团队审核后会确认或拒绝订舱；确认后将继续处理 SO 和 Shipment。
@@ -899,14 +1132,29 @@ const inputClass = (error?: string) =>
 const primary =
   'h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40';
 const secondary = 'h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40';
+const requestedServiceOptions = [
+  { value: 'ORIGIN_PICKUP', label: '起运地提货' },
+  { value: 'EXPORT_CUSTOMS', label: '出口报关' },
+  { value: 'IMPORT_CUSTOMS', label: '进口清关' },
+  { value: 'DESTINATION_DELIVERY', label: '目的地派送' },
+] as const;
 
 function validateForSubmit(form: Booking): FieldErrors {
   const errors: FieldErrors = {};
-  if (!form.commodity?.trim()) errors.commodity = '请输入货物品名。';
+  if (form.cargoItems.length) {
+    if (
+      form.cargoItems.some(
+        (item) => !item.commodity.trim() || !isPositiveEstimatedWeight(item.estimatedGrossWeight),
+      )
+    )
+      errors.cargoItems = '请为每条货物填写品名和大于 0 的预计毛重。';
+  } else {
+    if (!form.commodity?.trim()) errors.commodity = '请输入货物品名。';
+    if (!isPositiveDecimal(form.grossWeight)) errors.grossWeight = '请输入大于 0 的毛重。';
+  }
   if (!form.packageType) errors.packageType = '请选择包装类型。';
   if (!Number.isInteger(Number(form.packages)) || Number(form.packages) < 1)
     errors.packages = '请输入大于或等于 1 的整数。';
-  if (!isPositiveDecimal(form.grossWeight)) errors.grossWeight = '请输入大于 0 的毛重。';
   if (form.volumeCbm && !isPositiveDecimal(form.volumeCbm))
     errors.volumeCbm = '体积如填写，必须大于 0。';
   if (!form.cargoReadyDate) errors.cargoReadyDate = '请选择预计货好日期。';
@@ -922,11 +1170,18 @@ function validateForSubmit(form: Booking): FieldErrors {
   if (
     !form.containerRequests.length ||
     form.containerRequests.some(
-      (item) => !item.containerType.trim() || !Number.isInteger(item.quantity) || item.quantity < 1,
+      (item) =>
+        !item.containerType.trim() ||
+        !Number.isInteger(Number(item.quantity)) ||
+        Number(item.quantity) < 1,
     )
   )
     errors.containerRequests = '请至少填写一条有效的箱型和箱量，箱量必须大于或等于 1。';
   return errors;
+}
+
+function isPositiveEstimatedWeight(value: string | null) {
+  return Boolean(value && /^\d{1,14}(?:\.\d{1,3})?$/.test(value) && Number(value) > 0);
 }
 
 function isPositiveDecimal(value: string | null) {

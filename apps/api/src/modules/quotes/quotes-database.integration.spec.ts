@@ -34,12 +34,21 @@ let tenantA: string,
 let quoteId: string;
 const cargoRequest = {
   cargoItems: [
-    { commodity: 'Furniture', grossWeightKg: 18000, specialRequirements: 'Keep dry' },
-    { commodity: 'Garments', grossWeightKg: 2500 },
+    {
+      commodity: 'Furniture',
+      estimatedGrossWeight: 18000,
+      cargoNature: 'General cargo',
+      specialRequirement: 'Keep dry',
+    },
+    { commodity: 'Garments' },
   ],
-  pickupAddress: 'Shanghai, China',
-  deliveryAddress: 'Los Angeles, USA',
-  requestedServices: ['ORIGIN_LOGISTICS', 'DESTINATION_LOGISTICS'],
+  incoterm: 'FOB',
+  pickupLocationText: 'Shanghai, China',
+  deliveryLocationText: 'Los Angeles, USA',
+  exportCustomsRemark: 'Export declaration required',
+  importCustomsRemark: 'Importer will provide documents',
+  customerRemarks: 'Please confirm free time',
+  requestedServices: ['ORIGIN_PICKUP', 'EXPORT_CUSTOMS', 'DESTINATION_DELIVERY'],
 };
 
 describe('quote database integration', () => {
@@ -161,6 +170,8 @@ describe('quote database integration', () => {
   });
   afterAll(async () => {
     await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await prisma.shipment.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await prisma.booking.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.quoteItem.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.quote.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.businessNumberCounter.deleteMany({ where: { tenantId: { in: tenantIds } } });
@@ -173,9 +184,14 @@ describe('quote database integration', () => {
     await prisma.$disconnect();
   });
 
-  it('creates immutable cost and sell snapshots while hiding cost from customer reads', async () => {
+  it('creates immutable snapshots while hiding the unpublished formal quote from customer reads', async () => {
     const created = await runAs(tenantA, userA, customerA, () =>
-      service.create({ rateId: rateA, containerType: '40HQ', quantity: 2, ...cargoRequest }),
+      service.create({
+        rateId: rateA,
+        containerType: '40HQ',
+        containerQuantity: 2,
+        ...cargoRequest,
+      }),
     );
     expect(created.quoteNo).toMatch(/^QT\d{12}$/);
     quoteId = created.id;
@@ -188,20 +204,32 @@ describe('quote database integration', () => {
       data: { costAmount: new Prisma.Decimal(9999), sellAmount: new Prisma.Decimal(9999) },
     });
     const detail = await runAs(tenantA, userA, customerA, () => service.get(created.id));
-    expect(detail.items.map((item) => item.quantity.toString())).toEqual(['2', '1', '2']);
-    expect(detail.items.map((item) => item.chargeBasis)).toEqual([
-      'PER_CONTAINER',
-      'PER_BL',
-      'PER_CONTAINER',
-    ]);
-    expect(detail.items.map((item) => item.amount.toString())).toEqual(['2600', '20', '80']);
-    expect(detail.totalAmount.toString()).toBe('2700');
+    expect(detail.items).toEqual([]);
+    expect(detail.totalAmount).toBeNull();
+    expect(detail.customerTerms).toBeNull();
+    expect(detail.requestContainerType).toBe('40HQ');
     expect(detail).toMatchObject({
-      pickupAddress: 'Shanghai, China',
-      requestedServices: ['ORIGIN_LOGISTICS', 'DESTINATION_LOGISTICS'],
+      containerQuantity: 2,
+      incoterm: 'FOB',
+      pickupLocationText: 'Shanghai, China',
+      deliveryLocationText: 'Los Angeles, USA',
+      exportCustomsRemark: 'Export declaration required',
+      importCustomsRemark: 'Importer will provide documents',
+      customerRemarks: 'Please confirm free time',
+      requestedServices: ['ORIGIN_PICKUP', 'EXPORT_CUSTOMS', 'DESTINATION_DELIVERY'],
       cargoItems: [
-        { commodity: 'Furniture', specialRequirements: 'Keep dry' },
-        { commodity: 'Garments', specialRequirements: null },
+        {
+          commodity: 'Furniture',
+          estimatedGrossWeight: new Prisma.Decimal(18000),
+          cargoNature: 'General cargo',
+          specialRequirement: 'Keep dry',
+        },
+        {
+          commodity: 'Garments',
+          estimatedGrossWeight: null,
+          cargoNature: null,
+          specialRequirement: null,
+        },
       ],
     });
     expect(JSON.stringify(detail)).not.toContain('costAmount');
@@ -216,17 +244,28 @@ describe('quote database integration', () => {
       service.list({ page: 1, pageSize: 20 }),
     );
     expect(own.items).toHaveLength(1);
+    expect(own.items[0]?.totalAmount).toBeNull();
     await expect(
       runAs(tenantB, userB, customerB, () => service.get(own.items[0]!.id)),
     ).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
     await expect(
       runAs(tenantB, userB, customerB, () =>
-        service.create({ rateId: rateA, containerType: '40HQ', quantity: 1, ...cargoRequest }),
+        service.create({
+          rateId: rateA,
+          containerType: '40HQ',
+          containerQuantity: 1,
+          ...cargoRequest,
+        }),
       ),
     ).rejects.toMatchObject({ response: { code: 'RATE_NOT_AVAILABLE' } });
     try {
       await runAs(tenantA, userA, customerA, () =>
-        service.create({ rateId: rateA, containerType: '20GP', quantity: 1, ...cargoRequest }),
+        service.create({
+          rateId: rateA,
+          containerType: '20GP',
+          containerQuantity: 1,
+          ...cargoRequest,
+        }),
       );
       throw new Error('Expected rate price validation to fail');
     } catch (caught) {
@@ -234,6 +273,41 @@ describe('quote database integration', () => {
       expect(response.code).toBe('RATE_PRICE_NOT_AVAILABLE');
       expect(response.details?.fieldErrors?.containerType).toHaveLength(1);
     }
+  });
+  it('opens historical quotes that predate the new request fields', async () => {
+    const historical = await prisma.quote.create({
+      data: {
+        tenantId: tenantA,
+        quoteNo: `QT-HIST-${runId}`,
+        customerCompanyId: customerA,
+        status: 'SENT',
+        polCode: 'CNSHA',
+        podCode: 'USLAX',
+        carrierCode: 'COSCO',
+        validUntil: day(10),
+        currency: 'USD',
+        subtotal: new Prisma.Decimal(1200),
+        totalAmount: new Prisma.Decimal(1200),
+        sentAt: new Date(),
+        createdById: internalUser,
+        updatedById: internalUser,
+      },
+    });
+
+    const customerDetail = await runAs(tenantA, userA, customerA, () =>
+      service.get(historical.id),
+    );
+    const salesDetail = await runInternal(() => service.getInternal(historical.id));
+    expect(customerDetail).toMatchObject({
+      id: historical.id,
+      cargoItems: [],
+      containerQuantity: null,
+      incoterm: null,
+      pickupLocationText: null,
+      deliveryLocationText: null,
+      requestedServices: [],
+    });
+    expect(salesDetail).toMatchObject({ id: historical.id, cargoItems: [] });
   });
   it('lets sales edit review terms and validity without exposing internal notes', async () => {
     await expect(
@@ -258,7 +332,7 @@ describe('quote database integration', () => {
     expect(updated.internalNote).toBe('Matched competitor lane offer.');
 
     const customerDetail = await runAs(tenantA, userA, customerA, () => service.get(quoteId));
-    expect(customerDetail.customerTerms).toBe('Subject to space and equipment availability.');
+    expect(customerDetail.customerTerms).toBeNull();
     expect(JSON.stringify(customerDetail)).not.toContain('internalNote');
     expect(JSON.stringify(customerDetail)).not.toContain('Matched competitor lane offer');
   });
@@ -268,6 +342,29 @@ describe('quote database integration', () => {
       rateNo: `RATE-${runId}`,
       supplierName: 'Demo Supplier',
       contractNo: 'SC-2026',
+    });
+    expect(internalDetail).toMatchObject({
+      containerQuantity: 2,
+      incoterm: 'FOB',
+      pickupLocationText: 'Shanghai, China',
+      deliveryLocationText: 'Los Angeles, USA',
+      exportCustomsRemark: 'Export declaration required',
+      importCustomsRemark: 'Importer will provide documents',
+      customerRemarks: 'Please confirm free time',
+      requestedServices: ['ORIGIN_PICKUP', 'EXPORT_CUSTOMS', 'DESTINATION_DELIVERY'],
+      cargoItems: [
+        {
+          commodity: 'Furniture',
+          cargoNature: 'General cargo',
+          specialRequirement: 'Keep dry',
+        },
+        {
+          commodity: 'Garments',
+          estimatedGrossWeight: null,
+          cargoNature: null,
+          specialRequirement: null,
+        },
+      ],
     });
     const item = await prisma.quoteItem.findFirstOrThrow({
       where: { quoteId, chargeCode: 'OCEAN_FREIGHT' },
@@ -311,6 +408,9 @@ describe('quote database integration', () => {
     }
     const viewed = await runAs(tenantA, userA, customerA, () => service.get(quoteId));
     expect(viewed.status).toBe('VIEWED');
+    expect(viewed.totalAmount?.toString()).toBe('2900');
+    expect(viewed.items.map((item) => item.amount.toString())).toEqual(['2800', '20', '80']);
+    expect(viewed.customerTerms).toBe('Subject to space and equipment availability.');
     const accepted = await runAs(tenantA, userA, customerA, () => service.accept(quoteId));
     expect(accepted.status).toBe('ACCEPTED');
     expect(accepted.acceptedAt).toBeDefined();
@@ -320,9 +420,54 @@ describe('quote database integration', () => {
       runAs(tenantA, userA, customerA, () => service.reject(quoteId)),
     ).rejects.toMatchObject({ response: { code: 'ILLEGAL_QUOTE_TRANSITION' } });
   });
+  it('returns linked booking and shipment progress to both quote detail audiences', async () => {
+    await prisma.quote.update({
+      where: { id: quoteId },
+      data: { status: 'BOOKED', bookedAt: new Date() },
+    });
+    const booking = await prisma.booking.create({
+      data: {
+        tenantId: tenantA,
+        bookingNo: `BOOK-FLOW-${runId}`,
+        quoteId,
+        customerCompanyId: customerA,
+        status: 'BOOKED',
+        polCode: 'CNSHA',
+        podCode: 'USLAX',
+      },
+    });
+    const shipment = await prisma.shipment.create({
+      data: {
+        tenantId: tenantA,
+        shipmentNo: `SHP-FLOW-${runId}`,
+        bookingId: booking.id,
+        customerCompanyId: customerA,
+        status: 'DEPARTED',
+        polCode: 'CNSHA',
+        podCode: 'USLAX',
+      },
+    });
+
+    const internalDetail = await runInternal(() => service.getInternal(quoteId));
+    const customerDetail = await runAs(tenantA, userA, customerA, () => service.get(quoteId));
+    const expectedProgress = [
+      {
+        id: booking.id,
+        status: 'BOOKED',
+        shipments: [{ id: shipment.id, status: 'DEPARTED' }],
+      },
+    ];
+    expect(internalDetail.bookings).toEqual(expectedProgress);
+    expect(customerDetail.bookings).toEqual(expectedProgress);
+  });
   it('expires overdue quotes before a customer can accept them', async () => {
     const created = await runAs(tenantA, userA, customerA, () =>
-      service.create({ rateId: rateA, containerType: '40HQ', quantity: 1, ...cargoRequest }),
+      service.create({
+        rateId: rateA,
+        containerType: '40HQ',
+        containerQuantity: 1,
+        ...cargoRequest,
+      }),
     );
     await runInternal(() => service.send(created.id));
     await prisma.quote.update({ where: { id: created.id }, data: { validUntil: day(-1) } });

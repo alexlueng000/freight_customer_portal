@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import type { Shipment } from '@/components/shipment-types';
 import { StatusBadge } from '@/components/status-badge';
 import { hasPermission } from '@/lib/auth';
+import { resolveShipmentBusinessFlow } from '@/lib/business-flow';
 import { formatContainerSummary, formatDateTime, formatRouteSummary } from '@/lib/formatters';
 import {
   shipmentStatusDescription,
@@ -120,6 +122,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const containerSummary = formatContainerSummary(shipment.booking.containerRequests);
   const routeNames = shipment.booking.quote?.sourceRate;
   const canManage = mode === 'admin' && hasPermission(user, 'shipment.manage');
+  const businessFlow = resolveShipmentBusinessFlow(shipment, mode);
   const actionWarning =
     action === 'depart' && shipment.etd && occurredAt && new Date(occurredAt) < new Date(shipment.etd)
       ? '实际开船时间早于计划 ETD，请确认时间是否正确。'
@@ -142,6 +145,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
           </StatusBadge>
         }
       />
+      <BusinessFlow {...businessFlow} />
       {error ? <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
       {notice ? <div className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">{notice}</div> : null}
 

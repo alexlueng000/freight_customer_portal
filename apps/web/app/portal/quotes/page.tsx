@@ -22,7 +22,8 @@ interface Quote {
   etd: string | null;
   validUntil: string;
   currency: string;
-  totalAmount: string;
+  totalAmount: string | null;
+  sentAt: string | null;
 }
 interface QuoteList {
   items: Quote[];
@@ -152,7 +153,9 @@ export default function QuotesPage() {
                       <div className="text-right">
                         <dt className="text-xs text-muted">金额</dt>
                         <dd className="mt-0.5 font-semibold text-primary">
-                          {money(quote.totalAmount, quote.currency)}
+                          {quote.sentAt === null || quote.totalAmount === null
+                            ? '销售审核中'
+                            : money(quote.totalAmount, quote.currency)}
                         </dd>
                       </div>
                       <div>
@@ -230,7 +233,9 @@ export default function QuotesPage() {
                           </div>
                         </td>
                         <td className={`${cell} font-semibold`}>
-                          {money(quote.totalAmount, quote.currency)}
+                          {quote.sentAt === null || quote.totalAmount === null
+                            ? '销售审核中'
+                            : money(quote.totalAmount, quote.currency)}
                         </td>
                         <td className={cell}>{quote.validUntil.slice(0, 10)}</td>
                         <td className={cell}>

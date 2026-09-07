@@ -76,8 +76,8 @@ test.describe('Customer booking experience', () => {
         data: {
           rateId: rate.id,
           containerType: '40HQ',
-          quantity: 2,
-          cargoItems: [{ commodity: 'Furniture', grossWeightKg: 18000 }],
+          containerQuantity: 2,
+          cargoItems: [{ commodity: 'Furniture', estimatedGrossWeight: 18000 }],
           requestedServices: [],
         },
       }),
@@ -104,13 +104,15 @@ test.describe('Customer booking experience', () => {
 
     await expect(page.getByRole('link', { name: new RegExp(quote.quoteNo) })).toBeVisible();
     await expect(page.getByText('2 × 40HQ')).toBeVisible();
-    await expect(page.getByRole('textbox', { name: /^联系人 \*/ })).not.toHaveValue('');
+    await expect(page.getByRole('textbox', { name: /^联系人 必填/ })).not.toHaveValue('');
     await expect(page.getByLabel('联系人邮箱')).toHaveValue(customerEmail);
     await expect(page.getByLabel('发货人名称')).toHaveValue(`默认发货人 ${run}`);
+    await expect(page.getByRole('textbox', { name: '货物品名 必填' })).toHaveValue('Furniture');
+    await expect(page.getByRole('textbox', { name: '预计毛重 KG' })).toHaveValue('18000');
     await expect(page.getByText('SO 与 Shipment')).toHaveCount(0);
 
     await page.getByRole('button', { name: '提交订舱' }).click();
-    await expect(page.getByText('请输入货物品名。')).toBeVisible();
+    await expect(page.getByText('请输入货物品名。')).toHaveCount(0);
     await expect(page.getByText('请选择包装类型。')).toBeVisible();
     await expect(page.getByText('请选择预计货好日期。')).toBeVisible();
 
@@ -141,11 +143,11 @@ test.describe('Customer booking experience', () => {
     expect(activeShippers.some((shipper) => shipper.id === alternateShipper.id)).toBeFalsy();
     expect(activeShippers.some((shipper) => shipper.id === defaultShipper.id)).toBeTruthy();
 
-    await page.getByLabel('货物品名').fill('Consumer goods');
+    await page.getByRole('textbox', { name: '货物品名 必填' }).fill('Consumer goods');
     await page.getByLabel('包装类型').selectOption('CARTON');
     await page.getByLabel('包装数量').fill('100');
     await page.getByLabel('预计货好日期').fill(dateOnly(addDays(now, 3)));
-    await page.getByLabel('毛重 KG').fill('12000');
+    await page.getByRole('textbox', { name: '预计毛重 KG' }).fill('12000');
     await page.getByRole('button', { name: '保存草稿' }).click();
     await page.getByRole('button', { name: '提交订舱' }).click();
     await page.getByRole('button', { name: '确认提交给操作团队' }).click();

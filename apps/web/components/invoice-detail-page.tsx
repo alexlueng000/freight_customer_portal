@@ -3,12 +3,14 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
 import type { Invoice, InvoiceDocument } from '@/components/invoice-types';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { hasPermission } from '@/lib/auth';
+import { resolveInvoiceBusinessFlow } from '@/lib/business-flow';
 
 export function InvoiceDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const { id } = useParams<{ id: string }>();
@@ -131,6 +133,7 @@ export function InvoiceDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
       确认账单
     </button>
   ) : undefined;
+  const businessFlow = resolveInvoiceBusinessFlow(invoice);
   return (
     <div className="space-y-5">
       <Link
@@ -145,6 +148,7 @@ export function InvoiceDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
         description={`${invoice.shipment.shipmentNo} · ${invoice.shipment.polCode} → ${invoice.shipment.podCode}`}
         actions={actions}
       />
+      <BusinessFlow {...businessFlow} />
       {error ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}

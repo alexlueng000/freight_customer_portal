@@ -4,11 +4,13 @@ import { useParams } from 'next/navigation';
 import { ArrowRight, CheckCircle2, FileSearch, MapPin, Package, TrendingUp, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { FieldLabel } from '@/components/required-mark';
 import { StatusBadge } from '@/components/status-badge';
+import { resolveQuoteBusinessFlow } from '@/lib/business-flow';
 import { quoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 
 interface Item {
@@ -33,17 +35,24 @@ interface Quote {
   polCode: string;
   podCode: string;
   carrierCode: string | null;
+  etd: string | null;
   validUntil: string;
   currency: string;
   totalAmount: string;
-  pickupAddress: string | null;
-  deliveryAddress: string | null;
+  containerQuantity: number | null;
+  incoterm: string | null;
+  pickupLocationText: string | null;
+  deliveryLocationText: string | null;
+  exportCustomsRemark: string | null;
+  importCustomsRemark: string | null;
+  customerRemarks: string | null;
   requestedServices: string[];
   cargoItems: Array<{
     id: string;
     commodity: string;
-    grossWeightKg: string;
-    specialRequirements: string | null;
+    estimatedGrossWeight: string | null;
+    cargoNature: string | null;
+    specialRequirement: string | null;
   }>;
   customerTerms: string | null;
   internalNote: string | null;
@@ -60,6 +69,11 @@ interface Quote {
     expiryDate: string;
     transitDays: number | null;
   } | null;
+  bookings: Array<{
+    id: string;
+    status: string;
+    shipments: Array<{ id: string; status: string }>;
+  }>;
   items: Item[];
 }
 export default function AdminQuoteDetailPage() {
@@ -108,6 +122,23 @@ export default function AdminQuoteDetailPage() {
     const timer = window.setTimeout(() => setNotice(null), 3200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+  useEffect(() => {
+    if (!editing) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !acting) {
+        setEditing(false);
+        setReason('');
+        setError('');
+      }
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [acting, editing]);
   const act = async (action: 'send' | 'cancel') => {
     setActing(true);
     setError('');
@@ -213,6 +244,11 @@ export default function AdminQuoteDetailPage() {
   );
   const pricingSummary = summarizePricing(quote.items);
   const containerSummary = summarizeContainers(quote.items);
+  const businessFlow = resolveQuoteBusinessFlow(
+    quote,
+    quoteStatusLabel(quote.status),
+    'admin',
+  );
   return (
     <div className="space-y-5">
       <Link className="text-sm text-primary hover:underline" href="/admin/quotes">
@@ -226,8 +262,9 @@ export default function AdminQuoteDetailPage() {
         />
       ) : null}
       <PageHeader
-        eyebrow={quote.customer.name}
+        eyebrow="Sales / Operation · Quote Review"
         title={quote.quoteNo}
+        description="核对客户需求、Reference Rate 与报价金额，确认无误后再发布 Formal Quote。"
         actions={
           <div className="flex gap-2">
             {quote.status === 'DRAFT' ? null : (
@@ -244,6 +281,8 @@ export default function AdminQuoteDetailPage() {
               <button
                 className="h-9 rounded border border-primary/30 px-4 text-sm font-semibold text-primary"
                 onClick={() => {
+                  setError('');
+                  setReason('');
                   setPrices(
                     Object.fromEntries(quote.items.map((item) => [item.id, item.unitPrice])),
                   );
@@ -271,12 +310,30 @@ export default function AdminQuoteDetailPage() {
                 onClick={() => setConfirmingSend(true)}
                 type="button"
               >
-                确认并发送客户
+                发布 Formal Quote
               </button>
             ) : null}
           </div>
         }
       />
+      <BusinessFlow {...businessFlow} />
+      <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <Fact label="状态">
+          <StatusBadge tone={quoteStatusTone(quote.status)}>
+            {quoteStatusLabel(quote.status)}
+          </StatusBadge>
+        </Fact>
+        <Fact label="客户" value={quote.customer.name} />
+        <Fact
+          label="Carrier / Service"
+          value={
+            [quote.carrierCode, quote.sourceRate?.serviceName].filter(Boolean).join(' / ') || '—'
+          }
+        />
+        <Fact label="ETD" value={quote.etd?.slice(0, 10) ?? '待确认'} />
+        <Fact label="Container Type × Quantity" value={containerSummary} />
+        <Fact label="Reference Rate" value={quote.sourceRate?.rateNo ?? '—'} />
+      </section>
       <RouteSummary podCode={quote.podCode} polCode={quote.polCode} quoteItems={quote.items} />
       <QuoteRequestSummary quote={quote} />
       {error ? (
@@ -304,70 +361,6 @@ export default function AdminQuoteDetailPage() {
           </button>
         </div>
       ) : null}
-      {editing ? (
-        <section className="space-y-4 rounded border border-primary/20 bg-primary/5 p-4">
-          <div>
-            <h2 className="font-semibold">调整报价</h2>
-            <p className="text-xs text-muted">仅草稿可调整；原价、修改价、原因和操作人会被保留。</p>
-          </div>
-          <div className="grid gap-3">
-            {quote.items.map((item) => (
-              <label
-                className="grid gap-1 text-sm sm:grid-cols-[1fr_180px] sm:items-center"
-                key={item.id}
-              >
-                <span>
-                  {item.chargeName} {chargeUnitLabel(item)}
-                </span>
-                <input
-                  className="h-9 rounded border border-border bg-surface px-3"
-                  inputMode="decimal"
-                  onChange={(event) =>
-                    setPrices((value) => ({ ...value, [item.id]: event.target.value }))
-                  }
-                  value={prices[item.id] ?? item.unitPrice}
-                />
-              </label>
-            ))}
-          </div>
-          <label className="block text-sm">
-            <FieldLabel label="改价原因" required />
-            <textarea
-              className="mt-1 min-h-20 w-full rounded border border-border bg-surface p-3"
-              maxLength={500}
-              onChange={(event) => setReason(event.target.value)}
-              value={reason}
-            />
-          </label>
-          <div className="flex justify-end gap-2">
-            <button
-              className="h-9 rounded border border-border px-4 text-sm font-semibold"
-              onClick={() => setEditing(false)}
-              type="button"
-            >
-              取消
-            </button>
-            <button
-              className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
-              disabled={acting || reason.trim().length < 3}
-              onClick={() => void savePrices()}
-              type="button"
-            >
-              保存改价
-            </button>
-          </div>
-        </section>
-      ) : null}
-      <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-4">
-        <Fact label="状态">
-          <StatusBadge tone={quoteStatusTone(quote.status)}>
-            {quoteStatusLabel(quote.status)}
-          </StatusBadge>
-        </Fact>
-        <Fact label="客户" value={quote.customer.name} />
-        <Fact label="船司" value={quote.carrierCode ?? '—'} />
-        <Fact label="有效期至" value={quote.validUntil.slice(0, 10)} />
-      </section>
       <section className="rounded border border-border bg-surface">
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold">条款与内部信息</h2>
@@ -437,7 +430,7 @@ export default function AdminQuoteDetailPage() {
         <SectionHeader
           description="销售审核时用于追溯成本来源、合约和发送记录。"
           icon={<FileSearch aria-hidden className="size-4" />}
-          title="Rate 来源与发送记录"
+          title="Reference Rate（内部参考运价）"
         />
         <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
           <SourceFact emphasis label="来源 Rate" value={quote.sourceRate?.rateNo ?? '—'} />
@@ -479,45 +472,181 @@ export default function AdminQuoteDetailPage() {
         </div>
       </section>
       <section className="overflow-hidden rounded border border-border bg-surface">
-        <table className="w-full min-w-[760px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-border bg-sidebar text-xs text-muted">
-              <th className={head}>费用</th>
-              <th className={head}>计费方式</th>
-              <th className={head}>计费数量</th>
-              <th className={head}>成本快照</th>
-              <th className={head}>销售单价</th>
-              <th className={`${head} text-right`}>金额</th>
-            </tr>
-          </thead>
-          <tbody>
-            {quote.items.map((item) => (
-              <tr className="border-b border-border" key={item.id}>
-                <td className={cell}>{item.chargeName}</td>
-                <td className={cell}>{chargeUnitLabel(item)}</td>
-                <td className={cell}>{Number(item.quantity).toFixed(2)}</td>
-                <td className={cell}>
-                  {item.costAmount ? money(item.costAmount, item.currency) : '—'}
+        <SectionHeader
+          description={
+            quote.status === 'DRAFT'
+              ? '当前是待发布的报价草稿，仅供 Sales / Operation 审核；发布后才成为客户可见的正式报价。'
+              : '这是已发布的 Formal Quote 价格快照，客户可按当前状态查看和处理。'
+          }
+          icon={<FileSearch aria-hidden className="size-4" />}
+          title="Formal Quote（正式报价）"
+        />
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-border bg-sidebar text-xs text-muted">
+                <th className={head}>费用</th>
+                <th className={head}>计费方式</th>
+                <th className={head}>计费数量</th>
+                <th className={head}>Reference Rate（成本快照）</th>
+                <th className={head}>Formal Quote 单价</th>
+                <th className={`${head} text-right`}>金额</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quote.items.map((item) => (
+                <tr className="border-b border-border" key={item.id}>
+                  <td className={cell}>{item.chargeName}</td>
+                  <td className={cell}>{chargeUnitLabel(item)}</td>
+                  <td className={cell}>{Number(item.quantity).toFixed(2)}</td>
+                  <td className={cell}>
+                    {item.costAmount ? money(item.costAmount, item.currency) : '—'}
+                  </td>
+                  <td className={cell}>{money(item.unitPrice, item.currency)}</td>
+                  <td className={`${cell} text-right font-semibold`}>
+                    {money(item.amount, item.currency)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-sidebar">
+                <td className="px-4 py-4 text-right font-semibold" colSpan={5}>
+                  报价总额
                 </td>
-                <td className={cell}>{money(item.unitPrice, item.currency)}</td>
-                <td className={`${cell} text-right font-semibold`}>
-                  {money(item.amount, item.currency)}
+                <td className="px-4 py-4 text-right text-lg font-bold text-primary">
+                  {money(quote.totalAmount, quote.currency)}
                 </td>
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="bg-sidebar">
-              <td className="px-4 py-4 text-right font-semibold" colSpan={5}>
-                报价总额
-              </td>
-              <td className="px-4 py-4 text-right text-lg font-bold text-primary">
-                {money(quote.totalAmount, quote.currency)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+            </tfoot>
+          </table>
+        </div>
       </section>
+      {editing ? (
+        <div
+          aria-describedby="price-adjustment-description"
+          aria-labelledby="price-adjustment-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-3 sm:p-6"
+          role="dialog"
+        >
+          <button
+            aria-label="关闭调整价格弹窗"
+            className="absolute inset-0 cursor-default"
+            disabled={acting}
+            onClick={() => {
+              setEditing(false);
+              setReason('');
+              setError('');
+            }}
+            type="button"
+          />
+          <div className="relative flex max-h-[calc(100dvh-24px)] w-full max-w-2xl flex-col overflow-hidden rounded border border-border bg-surface shadow-xl sm:max-h-[calc(100dvh-48px)]">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+              <div>
+                <h2 className="text-base font-semibold" id="price-adjustment-title">
+                  调整报价价格
+                </h2>
+                <p className="mt-1 text-sm text-muted" id="price-adjustment-description">
+                  修改销售单价并填写原因。系统会保留原价、修改价、操作人与时间。
+                </p>
+              </div>
+              <button
+                aria-label="关闭"
+                className="grid size-9 shrink-0 place-items-center rounded border border-border text-muted hover:bg-sidebar hover:text-foreground disabled:opacity-40"
+                disabled={acting}
+                onClick={() => {
+                  setEditing(false);
+                  setReason('');
+                  setError('');
+                }}
+                type="button"
+              >
+                <X aria-hidden className="size-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4">
+              <div className="divide-y divide-border rounded border border-border">
+                {quote.items.map((item, index) => (
+                  <div
+                    className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_140px_200px] sm:items-end"
+                    key={item.id}
+                  >
+                    <div className="min-w-0 text-sm">
+                      <div className="font-semibold text-foreground">{item.chargeName}</div>
+                      <div className="mt-1 text-xs text-muted">{chargeUnitLabel(item)}</div>
+                    </div>
+                    <div className="text-sm">
+                      <div className="text-xs text-muted">原销售单价</div>
+                      <div className="mt-1 font-semibold">
+                        {money(item.unitPrice, item.currency)}
+                      </div>
+                    </div>
+                    <label className="block text-sm" htmlFor={`price-${item.id}`}>
+                      <span className="text-xs text-muted">调整后单价（{item.currency}）</span>
+                      <input
+                        autoFocus={index === 0}
+                        className="mt-1 h-10 w-full rounded border border-border bg-surface px-3 font-semibold tabular-nums focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        id={`price-${item.id}`}
+                        inputMode="decimal"
+                        onChange={(event) =>
+                          setPrices((value) => ({ ...value, [item.id]: event.target.value }))
+                        }
+                        value={prices[item.id] ?? item.unitPrice}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+              <label className="mt-4 block text-sm" htmlFor="price-adjustment-reason">
+                <FieldLabel label="改价原因" required />
+                <textarea
+                  className="mt-1 min-h-24 w-full resize-y rounded border border-border bg-surface p-3 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  id="price-adjustment-reason"
+                  maxLength={500}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="例如：客户议价、市场价调整、竞争报价匹配"
+                  value={reason}
+                />
+                <span className="mt-1 block text-xs text-muted">
+                  至少填写 3 个字符，仅内部可见。
+                </span>
+              </label>
+              {error ? (
+                <div
+                  aria-live="assertive"
+                  className="mt-4 rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger"
+                  role="alert"
+                >
+                  {error}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end">
+              <button
+                className="h-10 rounded border border-border px-4 text-sm font-semibold hover:bg-sidebar disabled:opacity-40"
+                disabled={acting}
+                onClick={() => {
+                  setEditing(false);
+                  setReason('');
+                  setError('');
+                }}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="h-10 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+                disabled={acting || reason.trim().length < 3}
+                onClick={() => void savePrices()}
+                type="button"
+              >
+                {acting ? '保存中…' : '保存改价'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {confirmingSend ? (
         <div
           aria-labelledby="send-quote-title"
@@ -528,9 +657,11 @@ export default function AdminQuoteDetailPage() {
           <div className="w-full max-w-md rounded border border-border bg-surface shadow-xl">
             <div className="border-b border-border px-5 py-4">
               <h2 className="text-base font-semibold" id="send-quote-title">
-                确认并发送客户
+                发布 Formal Quote
               </h2>
-              <p className="mt-1 text-sm text-muted">发送后客户可下载 PDF、接受或拒绝报价。</p>
+              <p className="mt-1 text-sm text-muted">
+                发布后状态将从待销售确认变为已发送，客户才可查看正式金额、下载 PDF、接受或拒绝报价。
+              </p>
             </div>
             <div className="space-y-3 px-5 py-4 text-sm">
               <Fact label="报价编号" value={quote.quoteNo} />
@@ -558,7 +689,7 @@ export default function AdminQuoteDetailPage() {
                 onClick={() => void confirmSend()}
                 type="button"
               >
-                {acting ? '发送中…' : '确认发送'}
+                {acting ? '发布中…' : '确认发布'}
               </button>
             </div>
           </div>
@@ -578,8 +709,16 @@ function QuoteRequestSummary({ quote }: { quote: Quote }) {
         </p>
       </div>
       <div className="grid gap-4 border-b border-border p-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Fact label="发货地" value={quote.pickupAddress ?? '—'} />
-        <Fact label="收货地" value={quote.deliveryAddress ?? '—'} />
+        <Fact
+          label="箱量"
+          value={quote.containerQuantity === null ? '—' : String(quote.containerQuantity)}
+        />
+        <Fact label="Incoterm" value={quote.incoterm ?? '—'} />
+        <Fact label="提货地点" value={quote.pickupLocationText ?? '—'} />
+        <Fact label="派送地点" value={quote.deliveryLocationText ?? '—'} />
+        <Fact label="出口报关备注" value={quote.exportCustomsRemark ?? '—'} />
+        <Fact label="进口清关备注" value={quote.importCustomsRemark ?? '—'} />
+        <Fact label="客户备注" value={quote.customerRemarks ?? '—'} />
         <Fact
           label="委托服务"
           value={
@@ -594,8 +733,16 @@ function QuoteRequestSummary({ quote }: { quote: Quote }) {
           quote.cargoItems.map((item, index) => (
             <div className="grid gap-4 p-4 sm:grid-cols-3" key={item.id}>
               <Fact label={`货物 ${index + 1}`} value={item.commodity} />
-              <Fact label="毛重" value={`${Number(item.grossWeightKg).toLocaleString()} kg`} />
-              <Fact label="特殊要求" value={item.specialRequirements ?? '无'} />
+              <Fact
+                label="预计重量"
+                value={
+                  item.estimatedGrossWeight === null
+                    ? '—'
+                    : `${Number(item.estimatedGrossWeight).toLocaleString()} kg`
+                }
+              />
+              <Fact label="货物性质" value={item.cargoNature ?? '—'} />
+              <Fact label="特殊要求" value={item.specialRequirement ?? '无'} />
             </div>
           ))
         ) : (
@@ -610,10 +757,10 @@ function requestedServiceLabel(code: string) {
   return (
     (
       {
-        ORIGIN_LOGISTICS: '头程物流',
-        ORIGIN_CUSTOMS_CLEARANCE: '始发国清关',
-        DESTINATION_CUSTOMS_CLEARANCE: '目的国清关',
-        DESTINATION_LOGISTICS: '尾程物流',
+        ORIGIN_PICKUP: '起运地拖车 / 提货',
+        EXPORT_CUSTOMS: '出口报关',
+        IMPORT_CUSTOMS: '目的港清关',
+        DESTINATION_DELIVERY: '目的地派送',
       } as Record<string, string>
     )[code] ?? code
   );
@@ -651,7 +798,7 @@ function SentBanner({
             <CheckCircle2 aria-hidden className="size-5" />
           </div>
           <div>
-            <div className="text-sm font-bold text-success">已发送客户，正式报价 PDF 已开放</div>
+            <div className="text-sm font-bold text-success">Formal Quote 已发布</div>
             <p className="mt-1 text-sm text-foreground">
               {customerName} 现在可以在客户门户查看报价、下载 PDF，并选择接受或拒绝。
             </p>

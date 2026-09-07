@@ -27,8 +27,13 @@ const publicQuoteSelect = {
   currency: true,
   subtotal: true,
   totalAmount: true,
-  pickupAddress: true,
-  deliveryAddress: true,
+  containerQuantity: true,
+  incoterm: true,
+  pickupLocationText: true,
+  deliveryLocationText: true,
+  exportCustomsRemark: true,
+  importCustomsRemark: true,
+  customerRemarks: true,
   requestedServices: true,
   customerTerms: true,
   sentAt: true,
@@ -55,14 +60,6 @@ export class QuotesService {
 
   async create(dto: CreateQuoteDto) {
     const context = this.requireCustomerContext();
-    if (dto.requestedServices.includes('ORIGIN_LOGISTICS') && !dto.pickupAddress?.trim())
-      throw this.fieldError('QUOTE_REQUEST_INVALID', '报价需求信息不完整。', {
-        pickupAddress: ['勾选头程物流后，请填写发货地。'],
-      });
-    if (dto.requestedServices.includes('DESTINATION_LOGISTICS') && !dto.deliveryAddress?.trim())
-      throw this.fieldError('QUOTE_REQUEST_INVALID', '报价需求信息不完整。', {
-        deliveryAddress: ['勾选尾程物流后，请填写收货地。'],
-      });
     const customer = await this.prisma.customerCompany.findFirst({
       where: { id: context.customerCompanyId, tenantId: context.tenantId },
       select: {
@@ -133,12 +130,12 @@ export class QuotesService {
       customer.defaultMarkupType,
       customer.defaultMarkupValue,
     );
-    const containerQuantity = new Prisma.Decimal(dto.quantity);
+    const containerQuantity = new Prisma.Decimal(dto.containerQuantity);
     const eligibleCharges = rate.charges.filter((charge) => charge.currency === price.currency);
     const oceanFreightAmount = sellAmount.mul(containerQuantity);
     const chargeSnapshots = eligibleCharges.map((charge) => {
       const quantity = new Prisma.Decimal(
-        charge.chargeBasis === 'PER_CONTAINER' ? dto.quantity : 1,
+        charge.chargeBasis === 'PER_CONTAINER' ? dto.containerQuantity : 1,
       );
       return { ...charge, quantity, totalAmount: charge.amount.mul(quantity) };
     });
@@ -173,8 +170,13 @@ export class QuotesService {
           currency: price.currency,
           subtotal: totalAmount,
           totalAmount,
-          pickupAddress: dto.pickupAddress?.trim() || null,
-          deliveryAddress: dto.deliveryAddress?.trim() || null,
+          containerQuantity: dto.containerQuantity,
+          incoterm: dto.incoterm ?? null,
+          pickupLocationText: dto.pickupLocationText?.trim() || null,
+          deliveryLocationText: dto.deliveryLocationText?.trim() || null,
+          exportCustomsRemark: dto.exportCustomsRemark?.trim() || null,
+          importCustomsRemark: dto.importCustomsRemark?.trim() || null,
+          customerRemarks: dto.customerRemarks?.trim() || null,
           requestedServices: [...new Set(dto.requestedServices)],
           createdById: context.userId,
           updatedById: context.userId,
@@ -182,8 +184,12 @@ export class QuotesService {
             create: dto.cargoItems.map((item, index) => ({
               tenantId: context.tenantId,
               commodity: item.commodity.trim(),
-              grossWeightKg: new Prisma.Decimal(item.grossWeightKg),
-              specialRequirements: item.specialRequirements?.trim() || null,
+              estimatedGrossWeight:
+                item.estimatedGrossWeight === undefined
+                  ? null
+                  : new Prisma.Decimal(item.estimatedGrossWeight),
+              cargoNature: item.cargoNature?.trim() || null,
+              specialRequirement: item.specialRequirement?.trim() || null,
               sortOrder: index,
             })),
           },
@@ -231,16 +237,25 @@ export class QuotesService {
             quoteNo,
             sourceRateId: rate.id,
             containerType: price.containerType,
-            quantity: dto.quantity,
+            containerQuantity: dto.containerQuantity,
+            incoterm: dto.incoterm,
             totalAmount: totalAmount.toString(),
             chargeCount: eligibleCharges.length,
             currency: price.currency,
             cargoItemCount: dto.cargoItems.length,
             cargoItems: dto.cargoItems.map((item) => ({
               commodity: item.commodity.trim(),
-              grossWeightKg: String(item.grossWeightKg),
+              estimatedGrossWeight:
+                item.estimatedGrossWeight === undefined ? null : String(item.estimatedGrossWeight),
+              cargoNature: item.cargoNature?.trim() || null,
+              specialRequirement: item.specialRequirement?.trim() || null,
             })),
             requestedServices: dto.requestedServices,
+            pickupLocationText: dto.pickupLocationText,
+            deliveryLocationText: dto.deliveryLocationText,
+            exportCustomsRemark: dto.exportCustomsRemark,
+            importCustomsRemark: dto.importCustomsRemark,
+            customerRemarks: dto.customerRemarks,
           },
         },
       });
@@ -262,7 +277,7 @@ export class QuotesService {
       this.prisma.quote.count({ where }),
     ]);
     return {
-      items: items.map((item) => this.withEffectiveStatus(item)),
+      items: items.map((item) => this.toCustomerQuoteSummary(this.withEffectiveStatus(item))),
       pagination: {
         page: query.page,
         pageSize: query.pageSize,
@@ -300,17 +315,44 @@ export class QuotesService {
           select: {
             id: true,
             commodity: true,
-            grossWeightKg: true,
-            specialRequirements: true,
+            estimatedGrossWeight: true,
+            cargoNature: true,
+            specialRequirement: true,
             sortOrder: true,
           },
           orderBy: { sortOrder: 'asc' },
+        },
+        bookings: {
+          select: {
+            id: true,
+            status: true,
+            shipments: {
+              select: { id: true, status: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
         },
       },
     });
     if (!quote)
       throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
-    return quote;
+    const effectiveQuote = this.withEffectiveStatus(quote);
+    const requestContainerType =
+      effectiveQuote.items.find((item) => item.containerType)?.containerType ?? null;
+    if (!effectiveQuote.sentAt) {
+      return {
+        ...effectiveQuote,
+        subtotal: null,
+        totalAmount: null,
+        customerTerms: null,
+        items: [],
+        requestContainerType,
+      };
+    }
+    return { ...effectiveQuote, requestContainerType };
   }
 
   async accept(id: string) {
@@ -388,11 +430,25 @@ export class QuotesService {
           select: {
             id: true,
             commodity: true,
-            grossWeightKg: true,
-            specialRequirements: true,
+            estimatedGrossWeight: true,
+            cargoNature: true,
+            specialRequirement: true,
             sortOrder: true,
           },
           orderBy: { sortOrder: 'asc' },
+        },
+        bookings: {
+          select: {
+            id: true,
+            status: true,
+            shipments: {
+              select: { id: true, status: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
         },
       },
     });
@@ -738,6 +794,20 @@ export class QuotesService {
   private withEffectiveStatus<T extends { status: QuoteStatus; validUntil: Date }>(quote: T): T {
     return quote.validUntil < this.today() && expirableStatuses.includes(quote.status)
       ? { ...quote, status: QuoteStatus.EXPIRED }
+      : quote;
+  }
+
+  private toCustomerQuoteSummary<
+    T extends {
+      status: QuoteStatus;
+      subtotal: Prisma.Decimal;
+      totalAmount: Prisma.Decimal;
+      customerTerms: string | null;
+      sentAt: Date | null;
+    },
+  >(quote: T) {
+    return !quote.sentAt
+      ? { ...quote, subtotal: null, totalAmount: null, customerTerms: null }
       : quote;
   }
 
