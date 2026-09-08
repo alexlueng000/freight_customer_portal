@@ -1,5 +1,15 @@
 # Freight Customer Portal 开发进度日志
 
+## 2026-09-08 Customer Portal 品牌化入口
+
+- 新增 Tenant `portalSlug` 与精简品牌配置字段，并提供兼容历史租户的默认展示。
+- 新增公开、只读的 Tenant Branding 解析接口；未知或停用租户不返回门户信息。
+- 新增 `/t/[portalSlug]` 品牌化 Landing Page 与 `/t/[portalSlug]/login` 客户登录页，客户侧不再填写 Tenant Code。
+- 新增独立 `/admin/login` 内部员工入口；旧 `/login` 保留为兼容跳转。
+- 客户登录按 `portalSlug + email + password` 服务端解析 Tenant，并只允许 CUSTOMER 用户；错误门户、跨租户客户账号和内部账号均不能登录。
+- 客户工作台继承 Tenant 名称、Logo 与主品牌色；安全的 `/portal/*` Deep Link 登录后原路返回。
+- 补充 Branding 默认值、Deep Link 白名单与客户门户入口回归测试。
+
 > 最后更新：2026-09-03
 > 当前阶段：V1.1 基线已封板，进入 P1 试点优化
 > 当前目标：完成第一批 P1 权限、客户维护与表单错误体验优化

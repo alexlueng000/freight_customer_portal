@@ -26,7 +26,9 @@ export function AuthGate({
   useEffect(() => {
     if (!initialized) return;
     if (!user) {
-      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      const portalSlug = window.localStorage.getItem('freight.portalSlug');
+      const loginPath = area === 'portal' && portalSlug ? `/t/${portalSlug}/login` : '/admin/login';
+      router.replace(`${loginPath}?next=${encodeURIComponent(pathname)}`);
       return;
     }
     if (!correctArea || !hasRoutePermission) {

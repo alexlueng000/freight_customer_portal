@@ -9,6 +9,8 @@ const testRunId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const password = 'Correct-Horse-Battery-Staple!';
 const tenantCode = `AUTH-${testRunId}`.toUpperCase();
 const email = `auth-${testRunId}@example.test`;
+const customerEmail = `portal-auth-${testRunId}@example.test`;
+const portalSlug = `auth-${Date.now().toString(36)}`;
 const config = new ConfigService({
   AUTH_ACCESS_TOKEN_SECRET: 'test-access-secret-that-is-at-least-32-characters',
   AUTH_ACCESS_TOKEN_TTL_SECONDS: 900,
@@ -25,7 +27,7 @@ let tenantId: string;
 describe('auth database integration', () => {
   beforeAll(async () => {
     const tenant = await prisma.tenant.create({
-      data: { code: tenantCode, name: 'Auth Test Tenant', status: TenantStatus.ACTIVE },
+      data: { code: tenantCode, name: 'Auth Test Tenant', status: TenantStatus.ACTIVE, portalSlug },
     });
     tenantId = tenant.id;
     const role = await prisma.role.create({
@@ -46,6 +48,24 @@ describe('auth database integration', () => {
       },
     });
     await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
+    const customerRole = await prisma.role.create({
+      data: { tenantId, code: RoleCode.CUSTOMER_USER, name: 'Customer User' },
+    });
+    const customerCompany = await prisma.customerCompany.create({
+      data: { tenantId, code: `AUTH-C-${testRunId}`, name: 'Portal Auth Customer' },
+    });
+    const customerUser = await prisma.user.create({
+      data: {
+        tenantId,
+        customerCompanyId: customerCompany.id,
+        email: customerEmail,
+        passwordHash: await passwords.hash(password),
+        displayName: 'Portal Auth Customer',
+        userType: UserType.CUSTOMER,
+        status: UserStatus.ACTIVE,
+      },
+    });
+    await prisma.userRole.create({ data: { userId: customerUser.id, roleId: customerRole.id } });
   });
 
   afterAll(async () => {
@@ -55,6 +75,7 @@ describe('auth database integration', () => {
       await prisma.userRole.deleteMany({ where: { user: { tenantId } } });
       await prisma.rolePermission.deleteMany({ where: { role: { tenantId } } });
       await prisma.user.deleteMany({ where: { tenantId } });
+      await prisma.customerCompany.deleteMany({ where: { tenantId } });
       await prisma.role.deleteMany({ where: { tenantId } });
       await prisma.permission.deleteMany({ where: { code: `auth.test.${testRunId}` } });
       await prisma.tenant.delete({ where: { id: tenantId } });
@@ -104,5 +125,18 @@ describe('auth database integration', () => {
       auth.login({ tenantCode, email, password: 'incorrect-password' }, {}),
     ).rejects.toThrow();
     await expect(prisma.refreshSession.count({ where: { tenantId } })).resolves.toBe(before);
+  });
+
+  it('logs customer users in by portal slug and rejects the wrong portal', async () => {
+    const session = await auth.portalLogin(
+      { portalSlug, email: customerEmail, password },
+      { ipAddress: '127.0.0.1', userAgent: 'jest-portal' },
+    );
+    expect(session.user).toMatchObject({ userType: UserType.CUSTOMER, portalSlug });
+
+    await expect(
+      auth.portalLogin({ portalSlug: 'wrong-portal', email: customerEmail, password }, {}),
+    ).rejects.toThrow();
+    await expect(auth.portalLogin({ portalSlug, email, password }, {})).rejects.toThrow();
   });
 });

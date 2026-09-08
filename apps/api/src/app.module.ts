@@ -17,6 +17,7 @@ import { QuotesModule } from './modules/quotes/quotes.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { InvoicesModule } from './modules/invoices/invoices.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { BrandingModule } from './modules/branding/branding.module.js';
 import { RequestContextMiddleware } from './shared/request-context/request-context.middleware.js';
 import { RequestContextModule } from './shared/request-context/request-context.module.js';
 
@@ -39,6 +40,7 @@ import { RequestContextModule } from './shared/request-context/request-context.m
     UsersModule,
     InvoicesModule,
     NotificationsModule,
+    BrandingModule,
     HealthModule,
   ],
   providers: [

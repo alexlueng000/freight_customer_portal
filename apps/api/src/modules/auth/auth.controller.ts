@@ -16,6 +16,7 @@ import { RequestContextService } from '../../shared/request-context/request-cont
 import { AuthService } from './auth.service.js';
 import type { AuthResponse, IssuedAuthSession, SessionMetadata } from './auth.types.js';
 import { LoginDto } from './dto/login.dto.js';
+import { PortalLoginDto } from './dto/portal-login.dto.js';
 import { Public } from './public.decorator.js';
 
 const refreshCookieName = 'freight_refresh';
@@ -49,6 +50,22 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthResponse> {
     const session = await this.auth.login(dto, this.getMetadata(request));
+    this.setRefreshCookie(response, session);
+    return this.withoutRefreshToken(session);
+  }
+
+  @Public()
+  @Post('portal-login')
+  @HttpCode(200)
+  @Throttle({ default: { limit: loginRateLimit, ttl: 60_000 } })
+  @ApiOkResponse({ description: 'Customer login resolved from a tenant portal slug' })
+  @ApiUnauthorizedResponse({ description: 'Invalid portal credentials or inactive account' })
+  async portalLogin(
+    @Body() dto: PortalLoginDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthResponse> {
+    const session = await this.auth.portalLogin(dto, this.getMetadata(request));
     this.setRefreshCookie(response, session);
     return this.withoutRefreshToken(session);
   }

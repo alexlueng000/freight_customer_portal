@@ -5,6 +5,10 @@ export interface AuthenticatedUser {
   tenantId: string;
   tenantCode: string;
   tenantName: string;
+  tenantBrandName: string;
+  tenantLogoUrl?: string;
+  portalSlug?: string;
+  primaryBrandColor?: string;
   customerCompanyId?: string;
   email: string;
   displayName: string;

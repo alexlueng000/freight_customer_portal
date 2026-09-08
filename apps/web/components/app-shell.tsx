@@ -28,6 +28,8 @@ import {
   navigationPermissions,
 } from '@/lib/navigation-permissions';
 import { cn } from '@/lib/utils';
+import { brandColorStyle } from '@/lib/portal-branding';
+import { TenantMark } from '@/components/tenant-mark';
 
 export interface ShellNavItem {
   label: string;
@@ -201,10 +203,12 @@ export function AppShell({
   children,
   navGroups,
   appName,
+  branded = false,
 }: {
   children: React.ReactNode;
   navGroups: ShellNavGroup[];
   appName: string;
+  branded?: boolean;
 }) {
   const auth = useAuth();
   const pathname = usePathname();
@@ -220,7 +224,10 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div
+      className="min-h-screen bg-background"
+      style={brandColorStyle(branded ? auth.user?.primaryBrandColor : undefined)}
+    >
       <aside
         className={cn(
           'fixed inset-y-0 left-0 z-30 hidden border-r border-border bg-sidebar md:flex md:flex-col',
@@ -228,13 +235,23 @@ export function AppShell({
         )}
       >
         <div className="flex h-16 items-center gap-3 border-b border-border px-5">
-          <div className="grid size-9 place-items-center rounded bg-primary text-sm font-semibold text-surface">
-            NF
-          </div>
-          <div className={cn('min-w-0', collapsed && 'hidden')}>
-            <div className="truncate text-sm font-semibold">{auth.user?.tenantName}</div>
-            <div className="truncate text-xs text-muted">{appName}</div>
-          </div>
+          {branded ? (
+            <TenantMark
+              compact={collapsed}
+              companyName={auth.user?.tenantBrandName ?? auth.user?.tenantName ?? '客户门户'}
+              logoUrl={auth.user?.tenantLogoUrl}
+            />
+          ) : (
+            <>
+              <div className="grid size-9 place-items-center rounded bg-primary text-sm font-semibold text-surface">
+                NF
+              </div>
+              <div className={cn('min-w-0', collapsed && 'hidden')}>
+                <div className="truncate text-sm font-semibold">{auth.user?.tenantName}</div>
+                <div className="truncate text-xs text-muted">{appName}</div>
+              </div>
+            </>
+          )}
         </div>
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
           {visibleNavGroups.map((group) => (
@@ -261,7 +278,9 @@ export function AppShell({
                         'flex h-9 items-center gap-3 rounded px-3 text-sm font-medium text-muted transition hover:bg-surface hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20',
                         collapsed && 'justify-center px-0',
                         active &&
-                          'bg-primary text-surface shadow-sm hover:bg-primary hover:text-surface',
+                          (branded
+                            ? 'bg-[var(--portal-brand,#087E8B)] text-white shadow-sm hover:bg-[var(--portal-brand,#087E8B)] hover:text-white'
+                            : 'bg-primary text-surface shadow-sm hover:bg-primary hover:text-surface'),
                       )}
                       title={collapsed ? item.label : undefined}
                     >
@@ -297,8 +316,12 @@ export function AppShell({
         <header className="sticky top-0 z-20 border-b border-border bg-surface">
           <div className="flex min-h-16 items-center justify-between gap-3 px-4 py-3 lg:px-6">
             <div className="flex items-center gap-3">
-              <div className="grid size-9 place-items-center rounded bg-primary text-sm font-semibold text-surface md:hidden">
-                NF
+              <div className="md:hidden">
+                <TenantMark
+                  compact
+                  companyName={auth.user?.tenantBrandName ?? auth.user?.tenantName ?? appName}
+                  logoUrl={branded ? auth.user?.tenantLogoUrl : undefined}
+                />
               </div>
               <div>
                 <div className="text-sm font-semibold">工作台</div>
@@ -336,7 +359,10 @@ export function AppShell({
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   'flex min-w-[64px] flex-1 flex-col items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium text-muted active:bg-sidebar',
-                  active && 'bg-primary text-surface shadow-sm',
+                  active &&
+                    (branded
+                      ? 'bg-[var(--portal-brand,#087E8B)] text-white shadow-sm'
+                      : 'bg-primary text-surface shadow-sm'),
                 )}
                 href={item.href}
                 key={item.href}

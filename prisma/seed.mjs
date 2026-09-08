@@ -139,13 +139,46 @@ async function seedDemoTenant(permissionRecords) {
 
   const tenant = await prisma.tenant.upsert({
     where: { code: 'DEMO' },
-    update: {},
+    update: {
+      portalSlug: 'demo',
+      brandName: 'Northstar Freight',
+      primaryBrandColor: '#087E8B',
+      heroTitle: '让国际物流更简单',
+      heroSubtitle: '在线查询海运价格、获取正式报价，随时掌握订舱与出运进度。',
+      phone: '+86 21 5555 0188',
+      email: 'service@northstar-freight.example',
+      address: '中国上海市虹口区北外滩',
+      wechat: 'NorthstarFreight',
+      serviceTags: [
+        'OCEAN_FCL',
+        'ORIGIN_PICKUP',
+        'EXPORT_CUSTOMS',
+        'IMPORT_CUSTOMS',
+        'DESTINATION_DELIVERY',
+      ],
+    },
     create: {
       code: 'DEMO',
       name: 'Demo Freight Forwarder',
       status: 'TRIAL',
       timezone: 'Asia/Shanghai',
       defaultCurrency: 'USD',
+      portalSlug: 'demo',
+      brandName: 'Northstar Freight',
+      primaryBrandColor: '#087E8B',
+      heroTitle: '让国际物流更简单',
+      heroSubtitle: '在线查询海运价格、获取正式报价，随时掌握订舱与出运进度。',
+      phone: '+86 21 5555 0188',
+      email: 'service@northstar-freight.example',
+      address: '中国上海市虹口区北外滩',
+      wechat: 'NorthstarFreight',
+      serviceTags: [
+        'OCEAN_FCL',
+        'ORIGIN_PICKUP',
+        'EXPORT_CUSTOMS',
+        'IMPORT_CUSTOMS',
+        'DESTINATION_DELIVERY',
+      ],
     },
   });
 

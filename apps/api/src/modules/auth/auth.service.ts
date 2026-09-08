@@ -1,15 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { RoleCode, TenantStatus, UserStatus } from '@prisma/client';
+import { RoleCode, TenantStatus, UserStatus, UserType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import type { LoginDto } from './dto/login.dto.js';
+import type { PortalLoginDto } from './dto/portal-login.dto.js';
 import { PasswordService } from './password.service.js';
 import { TokenService } from './token.service.js';
-import type {
-  AuthenticatedUser,
-  IssuedAuthSession,
-  SessionMetadata,
-} from './auth.types.js';
+import type { AuthenticatedUser, IssuedAuthSession, SessionMetadata } from './auth.types.js';
 
 const loginUserInclude = {
   tenant: true,
@@ -54,6 +51,32 @@ export class AuthService {
       }),
     ]);
 
+    return session;
+  }
+
+  async portalLogin(dto: PortalLoginDto, metadata: SessionMetadata): Promise<IssuedAuthSession> {
+    const portalSlug = dto.portalSlug.trim().toLowerCase();
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        tenant: {
+          portalSlug,
+          status: { in: [TenantStatus.TRIAL, TenantStatus.ACTIVE] },
+        },
+        email: { equals: email, mode: 'insensitive' },
+        userType: UserType.CUSTOMER,
+      },
+      include: loginUserInclude,
+    });
+
+    if (!user || !(await this.passwords.verify(dto.password, user.passwordHash))) {
+      throw this.invalidCredentials();
+    }
+    this.assertUserCanAuthenticate(user.status, user.tenant.status);
+
+    const authenticatedUser = this.toAuthenticatedUser(user);
+    const session = await this.createSession(authenticatedUser, metadata);
+    await this.recordSuccessfulLogin(user.tenantId, user.id, metadata);
     return session;
   }
 
@@ -204,21 +227,61 @@ export class AuthService {
     email: string;
     displayName: string;
     userType: AuthenticatedUser['userType'];
-    tenant: { code: string; name: string };
-    userRoles: Array<{ role: { code: RoleCode; permissions: Array<{ permission: { code: string } }> } }>;
+    tenant: {
+      code: string;
+      name: string;
+      brandName: string | null;
+      logoUrl: string | null;
+      portalSlug: string | null;
+      primaryBrandColor: string | null;
+    };
+    userRoles: Array<{
+      role: { code: RoleCode; permissions: Array<{ permission: { code: string } }> };
+    }>;
   }): AuthenticatedUser {
     return {
       id: user.id,
       tenantId: user.tenantId,
       tenantCode: user.tenant.code,
       tenantName: user.tenant.name,
+      tenantBrandName: user.tenant.brandName ?? user.tenant.name,
+      tenantLogoUrl: user.tenant.logoUrl ?? undefined,
+      portalSlug: user.tenant.portalSlug ?? undefined,
+      primaryBrandColor: user.tenant.primaryBrandColor ?? undefined,
       ...(user.customerCompanyId ? { customerCompanyId: user.customerCompanyId } : {}),
       email: user.email,
       displayName: user.displayName,
       userType: user.userType,
       roles: user.userRoles.map(({ role }) => role.code),
-      permissions: [...new Set(user.userRoles.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.code)))].sort(),
+      permissions: [
+        ...new Set(
+          user.userRoles.flatMap(({ role }) =>
+            role.permissions.map(({ permission }) => permission.code),
+          ),
+        ),
+      ].sort(),
     };
+  }
+
+  private async recordSuccessfulLogin(
+    tenantId: string,
+    userId: string,
+    metadata: SessionMetadata,
+  ): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } }),
+      this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId,
+          entityType: 'USER',
+          entityId: userId,
+          action: 'LOGIN_SUCCESS',
+          ipAddress: metadata.ipAddress,
+          userAgent: metadata.userAgent,
+        },
+      }),
+    ]);
   }
 
   private assertUserCanAuthenticate(userStatus: UserStatus, tenantStatus: TenantStatus): void {

@@ -5,6 +5,10 @@ export interface AuthenticatedUser {
   tenantId: string;
   tenantCode: string;
   tenantName: string;
+  tenantBrandName: string;
+  tenantLogoUrl?: string;
+  portalSlug?: string;
+  primaryBrandColor?: string;
   customerCompanyId?: string;
   email: string;
   displayName: string;
@@ -24,6 +28,12 @@ export interface AuthResponse {
 
 export interface LoginInput {
   tenantCode: string;
+  email: string;
+  password: string;
+}
+
+export interface PortalLoginInput {
+  portalSlug: string;
   email: string;
   password: string;
 }
@@ -49,8 +59,8 @@ export function refreshAuth(): Promise<AuthResponse | undefined> {
 }
 
 export async function requestAuth(
-  path: 'login' | 'refresh' | 'logout',
-  body?: LoginInput,
+  path: 'login' | 'portal-login' | 'refresh' | 'logout',
+  body?: LoginInput | PortalLoginInput,
 ): Promise<AuthResponse | undefined> {
   const response = await fetch(`/api/v1/auth/${path}`, {
     method: 'POST',
@@ -61,8 +71,7 @@ export async function requestAuth(
 
   if (response.status === 204) return undefined;
   const payload = (await response.json().catch(() => undefined)) as
-    | (AuthResponse & { code?: string; message?: string })
-    | undefined;
+    (AuthResponse & { code?: string; message?: string }) | undefined;
   if (!response.ok) {
     if (response.status === 429) {
       const retryAfter = response.headers.get('retry-after');

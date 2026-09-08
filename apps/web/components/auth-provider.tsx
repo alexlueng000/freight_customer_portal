@@ -2,7 +2,13 @@
 
 import { useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { refreshAuth, requestAuth, type AuthenticatedUser, type LoginInput } from '@/lib/auth';
+import {
+  refreshAuth,
+  requestAuth,
+  type AuthenticatedUser,
+  type LoginInput,
+  type PortalLoginInput,
+} from '@/lib/auth';
 
 interface AuthContextValue {
   initialized: boolean;
@@ -10,6 +16,7 @@ interface AuthContextValue {
   accessToken: string | null;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   login(input: LoginInput): Promise<AuthenticatedUser>;
+  portalLogin(input: PortalLoginInput): Promise<AuthenticatedUser>;
   logout(): Promise<void>;
 }
 
@@ -57,10 +64,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAccessToken(session.accessToken);
         return send(session.accessToken);
       } catch (error) {
+        const loginPath =
+          user?.userType === 'CUSTOMER' && user.portalSlug
+            ? `/t/${user.portalSlug}/login`
+            : '/admin/login';
         setUser(null);
         setAccessToken(null);
         setInitialized(true);
-        router.replace('/login');
+        router.replace(loginPath);
         throw error;
       }
     },
@@ -81,14 +92,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setInitialized(true);
         return session.user;
       },
+      async portalLogin(input) {
+        const session = await requestAuth('portal-login', input);
+        if (!session) throw new Error('登录响应为空');
+        setUser(session.user);
+        setAccessToken(session.accessToken);
+        setInitialized(true);
+        return session.user;
+      },
       async logout() {
+        const loginPath =
+          user?.userType === 'CUSTOMER' && user.portalSlug
+            ? `/t/${user.portalSlug}/login`
+            : '/admin/login';
         try {
           await requestAuth('logout');
         } finally {
           setUser(null);
           setAccessToken(null);
           setInitialized(true);
-          router.replace('/login');
+          router.replace(loginPath);
         }
       },
     }),
