@@ -264,6 +264,21 @@ describe('users database integration', () => {
     });
   });
 
+  it('accepts six-character customer passwords and rejects shorter passwords or short staff passwords', async () => {
+    const input = {
+      displayName: 'Six character customer', email: `six-${runId}@example.test`,
+      initialPassword: 'abc123', userType: UserType.CUSTOMER, roleCode: RoleCode.CUSTOMER_USER,
+      customerCompanyId: customerAId, status: UserStatus.ACTIVE,
+    };
+    const created = await runAs(() => users.create(input));
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: created.id } });
+    expect(await passwords.verify(input.initialPassword, stored.passwordHash)).toBe(true);
+    await expect(runAs(() => users.create({ ...input, initialPassword: '12345' })))
+      .rejects.toMatchObject({ response: { code: 'INVALID_INITIAL_PASSWORD' } });
+    await expect(runAs(() => users.create({ ...input, userType: UserType.INTERNAL, roleCode: RoleCode.SALES })))
+      .rejects.toMatchObject({ response: { code: 'INVALID_INITIAL_PASSWORD' } });
+  });
+
   it('rejects cross-tenant updates and roles that do not match the user type', async () => {
     await expect(
       runAs(() => users.update(tenantBUserId, { status: UserStatus.DISABLED })),

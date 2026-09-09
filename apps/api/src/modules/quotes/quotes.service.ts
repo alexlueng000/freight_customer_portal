@@ -668,6 +668,7 @@ export class QuotesService {
           priceOverriddenAt: new Date(),
           priceOverriddenById: context.userId,
           priceOverrideReason: dto.reason.trim(),
+          ...(dto.customerTerms === undefined ? {} : { customerTerms: dto.customerTerms.trim() }),
           updatedById: context.userId,
         },
         select: publicQuoteSelect,
@@ -679,10 +680,11 @@ export class QuotesService {
           entityType: 'Quote',
           entityId: id,
           action: 'PRICE_OVERRIDE',
-          beforeData: { totalAmount: quote.totalAmount.toString(), items: beforeItems },
+          beforeData: { totalAmount: quote.totalAmount.toString(), items: beforeItems, customerTerms: quote.customerTerms },
           afterData: {
             totalAmount: total.toString(),
             reason: dto.reason.trim(),
+            customerTerms: dto.customerTerms === undefined ? quote.customerTerms : dto.customerTerms.trim(),
             items: quote.items.map((item) => ({
               id: item.id,
               unitPrice: (requested.get(item.id) ?? item.unitPrice).toString(),

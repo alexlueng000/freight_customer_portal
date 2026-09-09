@@ -9,8 +9,7 @@ const customerPassword = process.env.E2E_CUSTOMER_PASSWORD;
 
 async function login(page: Page, email: string, password: string, expectedPath: string) {
   const customer = expectedPath === '/portal';
-  await page.goto(customer ? `/t/${portalSlug}/login` : '/admin/login');
-  if (!customer) await page.getByLabel('租户代码').fill(tenantCode);
+  await page.goto(customer ? `/t/${portalSlug}/login` : `/admin/login?tenantCode=${encodeURIComponent(tenantCode)}`);
   await page.getByLabel('邮箱').fill(email);
   await page.getByLabel('密码').fill(password);
   await page.getByRole('button', { name: customer ? '登录客户中心' : '登录运营后台' }).click();

@@ -172,6 +172,13 @@ export class UsersService {
 
   async create(dto: CreateUserDto) {
     const context = this.requestContext.requireAuthenticated();
+    const minimumLength = dto.userType === UserType.CUSTOMER ? 6 : 12;
+    if (dto.initialPassword.length < minimumLength || dto.initialPassword.length > 128) {
+      throw new BadRequestException({
+        code: 'INVALID_INITIAL_PASSWORD',
+        message: `初始密码需要 ${minimumLength}–128 个字符`,
+      });
+    }
     this.validateRole(dto);
     await this.validateCustomerCompany(dto, context.tenantId);
     const role = await this.prisma.role.findUnique({

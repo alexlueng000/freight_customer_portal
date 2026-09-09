@@ -18,8 +18,10 @@ interface CustomerRate {
   id: string;
   polCode: string;
   polName: string;
+  polDisplayName?: string;
   podCode: string;
   podName: string;
+  podDisplayName?: string;
   carrierCode: string;
   serviceName: string | null;
   effectiveDate: string;
@@ -56,6 +58,16 @@ const requestedServiceOptions = [
 ] as const;
 type RequestedServiceCode = (typeof requestedServiceOptions)[number]['code'];
 const incotermOptions = ['EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'DAP', 'DDP', 'OTHER'] as const;
+const incotermLabels: Record<(typeof incotermOptions)[number], string> = {
+  EXW: 'EXW（工厂交货）',
+  FCA: 'FCA（货交承运人）',
+  FOB: 'FOB（装运港船上交货）',
+  CFR: 'CFR（成本加运费）',
+  CIF: 'CIF（成本、保险费加运费）',
+  DAP: 'DAP（目的地交货）',
+  DDP: 'DDP（完税后交货）',
+  OTHER: '其他（请在备注中说明）',
+};
 interface QuoteRequestValues {
   quantity: string;
   cargoItems: Array<{
@@ -124,7 +136,7 @@ const quoteRequestSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['pickupLocation'],
-        message: '选择起运地拖车后，请填写 Pickup Location。',
+        message: '选择起运地拖车后，请填写 提货地点。',
       });
     if (
       value.requestedServices.includes('DESTINATION_DELIVERY') &&
@@ -133,7 +145,7 @@ const quoteRequestSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['deliveryLocation'],
-        message: '选择目的地派送后，请填写 Delivery Location。',
+        message: '选择目的地派送后，请填写 派送地点。',
       });
   });
 class PortalRateApiError extends Error {
@@ -147,18 +159,8 @@ class PortalRateApiError extends Error {
 
 const searchSchema = z
   .object({
-    polCode: z
-      .string()
-      .trim()
-      .max(10)
-      .refine((value) => !value || value.length >= 3, '起运港代码至少 3 位')
-      .refine((value) => !value || /^[A-Za-z0-9]+$/.test(value), '仅支持字母和数字'),
-    podCode: z
-      .string()
-      .trim()
-      .max(10)
-      .refine((value) => !value || value.length >= 3, '目的港代码至少 3 位')
-      .refine((value) => !value || /^[A-Za-z0-9]+$/.test(value), '仅支持字母和数字'),
+    polCode: z.string().trim().max(150, '起运地不能超过 150 字'),
+    podCode: z.string().trim().max(150, '目的地不能超过 150 字'),
     etdFrom: z.string().min(1, '请选择最早离港日'),
     etdTo: z.string().min(1, '请选择最晚离港日'),
     containerType: z.string(),
@@ -254,8 +256,8 @@ export default function PortalRatesPage() {
     if (criteria) {
       query.set('etdFrom', criteria.etdFrom);
       query.set('etdTo', criteria.etdTo);
-      if (criteria.polCode) query.set('polCode', criteria.polCode.toUpperCase());
-      if (criteria.podCode) query.set('podCode', criteria.podCode.toUpperCase());
+      if (criteria.polCode) query.set('pol', criteria.polCode);
+      if (criteria.podCode) query.set('pod', criteria.podCode);
       if (criteria.containerType) query.set('containerType', criteria.containerType);
       if (criteria.carrierCode) query.set('carrierCode', criteria.carrierCode.toUpperCase());
     }
@@ -296,7 +298,7 @@ export default function PortalRatesPage() {
           <div>
             <h2 className="text-sm font-semibold">查询条件</h2>
             <p className="mt-1 text-xs text-muted">
-              港口代码建议使用 UN/LOCODE，例如 CNSHA、USLAX。
+              输入地名即可查询，例如深圳、厦门、洛杉矶，也支持英文名和港口代码。
             </p>
           </div>
           <p className="rounded-md border border-danger/20 bg-danger/5 px-2.5 py-1.5 text-xs font-medium text-foreground">
@@ -307,20 +309,22 @@ export default function PortalRatesPage() {
           className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-6"
           onSubmit={(event) => void submit(event)}
         >
-          <FormField error={errors.polCode?.message} label="起运港 POL（可选）">
+          <FormField error={errors.polCode?.message} label="起运地 / 港口（可选）">
             <input
               {...register('polCode')}
               aria-invalid={Boolean(errors.polCode)}
               className={inputClass}
-              placeholder="CNSHA"
+              placeholder="如：深圳、厦门"
+              aria-label="起运地 / 港口（可选）"
             />
           </FormField>
-          <FormField error={errors.podCode?.message} label="目的港 POD（可选）">
+          <FormField error={errors.podCode?.message} label="目的地 / 港口（可选）">
             <input
               {...register('podCode')}
               aria-invalid={Boolean(errors.podCode)}
               className={inputClass}
-              placeholder="USLAX"
+              placeholder="如：洛杉矶"
+              aria-label="目的地 / 港口（可选）"
             />
           </FormField>
           <FormField error={errors.etdFrom?.message} label="最早离港日" required>
@@ -412,10 +416,10 @@ export default function PortalRatesPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-semibold text-foreground">
-                          {rate.polCode} → {rate.podCode}
+                          {rate.polDisplayName || rate.polName || rate.polCode} → {rate.podDisplayName || rate.podName || rate.podCode}
                         </div>
                         <div className="mt-1 text-xs text-muted">
-                          {rate.polName} → {rate.podName}
+                          {rate.polCode} → {rate.podCode}
                         </div>
                       </div>
                       <div className="shrink-0 text-right">
@@ -433,7 +437,7 @@ export default function PortalRatesPage() {
                         </dd>
                       </div>
                       <div className="text-right">
-                        <dt className="text-xs text-muted">ETD / 航程</dt>
+                        <dt className="text-xs text-muted">预计离港日 / 航程</dt>
                         <dd className="mt-0.5 font-medium">
                           {rate.etd ? formatDate(rate.etd) : '待确认'} ·{' '}
                           {rate.transitDays === null ? '—' : `${rate.transitDays} 天`}
@@ -474,7 +478,7 @@ export default function PortalRatesPage() {
                     <tr className="border-b border-border bg-sidebar text-xs text-muted">
                       <th className={headerClass}>船司 / 服务</th>
                       <th className={headerClass}>航线</th>
-                      <th className={headerClass}>ETD</th>
+                      <th className={headerClass}>预计离港日</th>
                       <th className={headerClass}>航程</th>
                       <th className={headerClass}>箱型</th>
                       <th className={headerClass}>预计总价</th>
@@ -498,10 +502,10 @@ export default function PortalRatesPage() {
                         </td>
                         <td className={cellClass}>
                           <div>
-                            {rate.polCode} → {rate.podCode}
+                            {rate.polDisplayName || rate.polName || rate.polCode} → {rate.podDisplayName || rate.podName || rate.podCode}
                           </div>
                           <div className="mt-0.5 text-xs text-muted">
-                            {rate.polName} → {rate.podName}
+                            {rate.polCode} → {rate.podCode}
                           </div>
                         </td>
                         <td className={cellClass}>
@@ -715,10 +719,11 @@ function QuoteRequestDialog({
           <section className="space-y-4 rounded-md border border-border p-4">
             <h3 className="text-sm font-semibold">当前运价条件</h3>
             <div className="grid gap-x-5 gap-y-4 rounded bg-sidebar/50 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              <QuoteFact label="航线" value={`${rate.polCode} → ${rate.podCode}`} />
+              <QuoteFact label="航线" value={`${rate.polDisplayName || rate.polName || rate.polCode} → ${rate.podDisplayName || rate.podName || rate.podCode}`} />
+              <QuoteFact label="港口代码" value={`${rate.polCode} → ${rate.podCode}`} />
               <QuoteFact label="船司" value={rate.carrierCode} />
               <QuoteFact label="服务" value={rate.serviceName || '待确认'} />
-              <QuoteFact label="ETD" value={rate.etd ? formatDate(rate.etd) : '船期待确认'} />
+              <QuoteFact label="预计离港日" value={rate.etd ? formatDate(rate.etd) : '船期待确认'} />
               <QuoteFact label="有效期" value={formatDate(rate.expiryDate)} />
               <QuoteFact label="箱型" value={rate.containerType} />
             </div>
@@ -851,24 +856,9 @@ function QuoteRequestDialog({
           <section className="space-y-4 rounded-md border border-border p-4">
             <div>
               <h3 className="text-sm font-semibold">需要附加服务</h3>
-              <p className="mt-1 text-xs text-muted">按需多选；选择后可补充对应地点或备注。</p>
+              <p className="mt-1 text-xs text-muted">请选择需要货代协助办理的服务，可多选。相关费用由销售确认后列入正式报价。</p>
             </div>
-            <QuoteRequestField label="Incoterm（选填）">
-              <select
-                className={inputClass}
-                onChange={(event) =>
-                  update('incoterm', event.target.value as QuoteRequestValues['incoterm'])
-                }
-                value={values.incoterm}
-              >
-                <option value="">请选择</option>
-                {incotermOptions.map((incoterm) => (
-                  <option key={incoterm} value={incoterm}>
-                    {incoterm}
-                  </option>
-                ))}
-              </select>
-            </QuoteRequestField>
+
             <div className="grid gap-3 sm:grid-cols-2">
               {requestedServiceOptions.map((option) => (
                 <label
@@ -889,7 +879,7 @@ function QuoteRequestDialog({
               {values.requestedServices.includes('ORIGIN_PICKUP') ? (
                 <QuoteRequestField
                   error={fieldErrors.pickupLocation}
-                  label="Pickup Location"
+                  label="提货地点"
                   required
                 >
                   <textarea
@@ -904,7 +894,7 @@ function QuoteRequestDialog({
               {values.requestedServices.includes('DESTINATION_DELIVERY') ? (
                 <QuoteRequestField
                   error={fieldErrors.deliveryLocation}
-                  label="Delivery Location"
+                  label="派送地点"
                   required
                 >
                   <textarea
@@ -919,7 +909,7 @@ function QuoteRequestDialog({
               {values.requestedServices.includes('EXPORT_CUSTOMS') ? (
                 <QuoteRequestField
                   error={fieldErrors.exportCustomsRemark}
-                  label="Export Customs Remark（选填）"
+                  label="出口报关备注（选填）"
                 >
                   <textarea
                     className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
@@ -933,7 +923,7 @@ function QuoteRequestDialog({
               {values.requestedServices.includes('IMPORT_CUSTOMS') ? (
                 <QuoteRequestField
                   error={fieldErrors.importCustomsRemark}
-                  label="Import Customs Remark（选填）"
+                  label="目的港清关备注（选填）"
                 >
                   <textarea
                     className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
@@ -946,8 +936,33 @@ function QuoteRequestDialog({
               ) : null}
             </div>
           </section>
-          <section className="rounded-md border border-border p-4">
-            <QuoteRequestField error={fieldErrors.customerRemarks} label="Customer Remark（选填）">
+          <section className="space-y-4 rounded-md border border-border p-4">
+            <div>
+              <h3 className="text-sm font-semibold">补充信息（选填）</h3>
+              <p className="mt-1 text-xs text-muted">有合同约定或其他要求可在此补充，不确定可留空。</p>
+            </div>
+            <QuoteRequestField label="贸易术语（选填）">
+              <select
+                aria-label="贸易术语（选填）"
+                aria-describedby="incoterm-help"
+                className={inputClass}
+                onChange={(event) =>
+                  update('incoterm', event.target.value as QuoteRequestValues['incoterm'])
+                }
+                value={values.incoterm}
+              >
+                <option value="">暂不填写，待销售确认</option>
+                {incotermOptions.map((incoterm) => (
+                  <option key={incoterm} value={incoterm}>
+                    {incotermLabels[incoterm]}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted" id="incoterm-help">
+                已有买卖合同约定时填写，供销售确认报价范围；不会自动勾选服务或改变下方费用预估。
+              </p>
+            </QuoteRequestField>
+            <QuoteRequestField error={fieldErrors.customerRemarks} label="报价备注（选填）">
               <textarea
                 className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
                 maxLength={2000}
@@ -957,7 +972,7 @@ function QuoteRequestDialog({
               />
             </QuoteRequestField>
           </section>
-          <section className="overflow-hidden rounded-md border border-border">
+          <section aria-label="费用预估" className="overflow-hidden rounded-md border border-border">
             <div className="border-b border-border bg-sidebar px-4 py-3 text-sm font-semibold">
               费用预估
             </div>
@@ -985,11 +1000,46 @@ function QuoteRequestDialog({
                 );
               })}
             </div>
+            {values.requestedServices.length > 0 ? (
+              <div aria-live="polite" className="border-t border-border px-4 py-3">
+                <h4 className="text-sm font-semibold">待确认的服务费用</h4>
+                <p className="mt-1 text-xs text-muted">
+                  以下服务尚未计价，未计入已知费用小计；销售将核对现有费用是否已包含，避免重复收费。
+                </p>
+                <ul className="mt-3 divide-y divide-border">
+                  {requestedServiceOptions.filter((option) => values.requestedServices.includes(option.code)).map((option) => {
+                    const location = option.code === 'ORIGIN_PICKUP'
+                      ? values.pickupLocation.trim()
+                      : option.code === 'DESTINATION_DELIVERY' ? values.deliveryLocation.trim() : '';
+                    return (
+                      <li className="flex items-start justify-between gap-4 py-2 text-sm" key={option.code}>
+                        <div className="min-w-0">
+                          <span>{option.label}</span>
+                          {location ? <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted">{location}</p> : null}
+                        </div>
+                        <span className="shrink-0 font-medium">待销售报价</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between bg-primary/5 px-4 py-4">
-              <span className="font-semibold">预计总额</span>
+              <span className="font-semibold">已知费用小计</span>
               <span className="text-lg font-bold text-primary">
                 {estimate === null ? '—' : formatMoney(String(estimate), rate.currency)}
               </span>
+            </div>
+            <div className="space-y-2 border-t border-border px-4 py-3 text-sm">
+              <div className="flex items-center justify-between gap-4 font-semibold">
+                <span>全部费用</span>
+                <span>待销售确认</span>
+              </div>
+              <p className="text-xs text-muted">
+                {values.requestedServices.length > 0
+                  ? '上方小计仅包含已列明金额，所选服务费用待确认，最终金额以正式报价为准。'
+                  : '上方小计为当前运价参考金额，最终费用及包含范围以正式报价为准。'}
+              </p>
             </div>
           </section>
           <div className="rounded-md border border-warning/25 bg-warning/10 px-4 py-3 text-sm text-foreground">

@@ -4,6 +4,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
 import type { SearchCustomerRatesDto } from './dto/search-customer-rates.dto.js';
 import { CustomerRatePricingService } from './customer-rate-pricing.service.js';
+import { portDisplayName, portSearchFilter } from './port-search.js';
 
 @Injectable()
 export class CustomerRatesService {
@@ -51,6 +52,7 @@ export class CustomerRatesService {
       status: RateStatus.ACTIVE,
       ...(query.polCode ? { polCode: query.polCode } : {}),
       ...(query.podCode ? { podCode: query.podCode } : {}),
+      AND: [portSearchFilter('pol', query.pol), portSearchFilter('pod', query.pod)],
       ...(query.carrierCode ? { carrierCode: query.carrierCode } : {}),
       effectiveDate: { lte: to ?? today },
       expiryDate: { gte: from },
@@ -130,8 +132,10 @@ export class CustomerRatesService {
           id: rate.id,
           polCode: rate.polCode,
           polName: rate.polName,
+          polDisplayName: portDisplayName(rate.polCode, rate.polName),
           podCode: rate.podCode,
           podName: rate.podName,
+          podDisplayName: portDisplayName(rate.podCode, rate.podName),
           carrierCode: rate.carrierCode,
           serviceName: rate.serviceName,
           effectiveDate: rate.effectiveDate,

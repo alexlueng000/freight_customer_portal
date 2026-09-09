@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConflictResponse, ApiConsumes, ApiCreatedResponse, ApiForbiddenResponse, ApiNotFoundResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -49,4 +49,11 @@ export class RatesController {
   }
   @Get(':id') @RequirePermissions('rate.read') @ApiOkResponse({ description: 'Tenant-scoped rate detail' }) @ApiNotFoundResponse({ description: 'Rate not found in caller tenant' }) get(@Param('id') id: string) { return this.rates.getById(id); }
   @Patch(':id') @RequirePermissions('rate.manage') @ApiOkResponse({ description: 'Rate and optional price/charge sets updated' }) update(@Param('id') id: string, @Body() dto: UpdateRateDto) { return this.rates.update(id, dto); }
+  @Delete(':id')
+  @RequirePermissions('rate.manage')
+  @ApiOkResponse({ description: 'Unreferenced rate deleted together with its prices and charges; deletion audited' })
+  @ApiForbiddenResponse({ description: 'Missing rate.manage permission' })
+  @ApiNotFoundResponse({ description: 'Rate not found in caller tenant' })
+  @ApiConflictResponse({ description: 'Rate is referenced by a quote and can only be deactivated' })
+  remove(@Param('id') id: string) { return this.rates.remove(id); }
 }

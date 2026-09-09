@@ -5,6 +5,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   refreshAuth,
   requestAuth,
+  AuthApiError,
+  type UserType,
   type AuthenticatedUser,
   type LoginInput,
   type PortalLoginInput,
@@ -15,7 +17,7 @@ interface AuthContextValue {
   user: AuthenticatedUser | null;
   accessToken: string | null;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-  login(input: LoginInput): Promise<AuthenticatedUser>;
+  login(input: LoginInput, expectedUserType?: UserType): Promise<AuthenticatedUser>;
   portalLogin(input: PortalLoginInput): Promise<AuthenticatedUser>;
   logout(): Promise<void>;
 }
@@ -67,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const loginPath =
           user?.userType === 'CUSTOMER' && user.portalSlug
             ? `/t/${user.portalSlug}/login`
-            : '/admin/login';
+            : user?.tenantCode ? `/admin/login?tenantCode=${encodeURIComponent(user.tenantCode)}` : '/admin/login';
         setUser(null);
         setAccessToken(null);
         setInitialized(true);
@@ -75,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw error;
       }
     },
-    [accessToken, router],
+    [accessToken, router, user],
   );
 
   const value = useMemo<AuthContextValue>(
@@ -84,9 +86,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       accessToken,
       apiFetch,
-      async login(input) {
+      async login(input, expectedUserType) {
         const session = await requestAuth('login', input);
         if (!session) throw new Error('登录响应为空');
+        // Check the entry point before publishing a session that could trigger navigation.
+        if (expectedUserType && session.user.userType !== expectedUserType) {
+          await requestAuth('logout');
+          throw new AuthApiError(
+            '这是客户账号，请从客户门户登录；进入运营后台请使用销售或其他员工账号。',
+            'LOGIN_ACCOUNT_TYPE_MISMATCH',
+          );
+        }
         setUser(session.user);
         setAccessToken(session.accessToken);
         setInitialized(true);
@@ -104,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const loginPath =
           user?.userType === 'CUSTOMER' && user.portalSlug
             ? `/t/${user.portalSlug}/login`
-            : '/admin/login';
+            : user?.tenantCode ? `/admin/login?tenantCode=${encodeURIComponent(user.tenantCode)}` : '/admin/login';
         try {
           await requestAuth('logout');
         } finally {

@@ -1,14 +1,15 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, Download, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FieldPath, UseFormSetError } from 'react-hook-form';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
 import { hasPermission } from '@/lib/auth';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
+import { DeleteRateDialog } from '@/components/delete-rate-dialog';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { FilterBar } from '@/components/filter-bar';
@@ -22,6 +23,7 @@ type ChargeBasis = 'PER_CONTAINER' | 'PER_BL' | 'PER_SHIPMENT';
 interface RatePrice { id: string; containerType: string; costAmount: string; sellAmount: string | null; currency: string; remark: string | null }
 interface RateCharge { id: string; chargeCode: string; chargeName: string; chargeBasis: ChargeBasis; containerType: string | null; amount: string; currency: string; isIncluded: boolean }
 interface Rate {
+  _count?: { quotes: number };
   id: string; rateNo: string; polCode: string; polName: string; podCode: string; podName: string;
   carrierCode: string; serviceName: string | null; effectiveDate: string; expiryDate: string;
   etd: string | null; transitDays: number | null; supplierName: string | null; contractNo: string | null;
@@ -119,6 +121,21 @@ export default function RatesPage() {
   }, [apiFetch, carrierCode, containerType, page, podCode, polCode, search, status, validOn]);
   useEffect(() => { void load(); }, [load, reloadKey]);
   const canManage = hasPermission(user, 'rate.manage');
+  const [rateToDelete, setRateToDelete] = useState<Rate | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteRate = useCallback(async (rate: Rate) => {
+    if (deletingId) return;
+    setDeletingId(rate.id); setDeleteError(null); setNotice(null);
+    try {
+      await requestJson(apiFetch, '/api/v1/rates/' + rate.id, { method: 'DELETE' });
+      setRateToDelete(null);
+      setNotice('运价 ' + rate.rateNo + ' 已删除。');
+      if (items.length === 1 && page > 1) setPage(page - 1);
+      else setReloadKey(value => value + 1);
+    } catch (caught) { setDeleteError(localizeRateError(toRateError(caught))); }
+    finally { setDeletingId(null); }
+  }, [apiFetch, items.length, page, deletingId]);
   const columns = useMemo<DataTableColumn<Rate>[]>(() => [
     { key: 'rateNo', header: 'Rate', render: (rate) => <div><div className="font-medium">{rate.rateNo}</div><div className="mt-0.5 text-xs text-muted">{rate.serviceName ?? '未设置服务'}</div></div> },
     { key: 'route', header: '航线', render: (rate) => <div><div>{rate.polCode} → {rate.podCode}</div><div className="mt-0.5 text-xs text-muted">{rate.polName} → {rate.podName}</div></div> },
@@ -127,14 +144,15 @@ export default function RatesPage() {
     { key: 'validity', header: '有效期', render: (rate) => <div className="whitespace-nowrap">{formatDate(rate.effectiveDate)}<div className="mt-0.5 text-xs text-muted">至 {formatDate(rate.expiryDate)}</div></div> },
     { key: 'supplierName', header: '供应方 / 合约', render: (rate) => <div>{rate.supplierName ?? '—'}<div className="mt-0.5 text-xs text-muted">{rate.contractNo ?? '无合约号'}</div></div> },
     { key: 'status', header: '状态', render: (rate) => <StatusBadge tone={statusTones[rate.status]}>{statusLabels[rate.status]}</StatusBadge> },
-    ...(canManage ? [{ key: 'actions', header: '操作', className: 'w-[108px] min-w-[108px] whitespace-nowrap text-right', render: (rate: Rate) => <button aria-label={`编辑运价 ${rate.rateNo}`} className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-surface px-3.5 text-sm font-medium shadow-sm transition-colors hover:border-primary hover:bg-primary/5 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20" onClick={() => setEditingRate(rate)} type="button"><Pencil aria-hidden className="size-3.5 shrink-0" /> <span>编辑</span></button> }] : []),
-  ], [canManage]);
+    ...(canManage ? [{ key: 'actions', header: '操作', className: 'w-[190px] min-w-[190px] whitespace-nowrap text-right', render: (rate: Rate) => <div className="flex flex-wrap items-center justify-end gap-2"><button aria-label={`编辑运价 ${rate.rateNo}`} className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-surface px-3.5 text-sm font-medium shadow-sm transition-colors hover:border-primary hover:bg-primary/5 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20" onClick={() => setEditingRate(rate)} type="button"><Pencil aria-hidden className="size-3.5 shrink-0" /> <span>编辑</span></button><button aria-label={"删除运价 " + rate.rateNo} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-danger/25 px-3 text-sm font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40" disabled={Boolean(deletingId) || Boolean(rate._count?.quotes)} title={rate._count?.quotes ? "已用于报价，只能通过编辑停用" : "删除这条运价"} onClick={() => { setDeleteError(null); setRateToDelete(rate); }} type="button"><Trash2 aria-hidden className="size-3.5" />{deletingId === rate.id ? "删除中…" : "删除"}</button>{rate._count?.quotes ? <span className="w-full text-xs text-muted">已用于报价，只能停用</span> : null}</div> }] : []),
+  ], [canManage, deletingId]);
   const clearFilters = () => { setSearchInput(''); setSearch(''); setStatus(''); setPolCode(''); setPodCode(''); setCarrierCode(''); setContainerType(''); setValidOn(''); setPage(1); };
   const saved = (editing: boolean) => { setDialogOpen(false); setEditingRate(null); setNotice(editing ? '运价已更新，修改记录已写入审计日志。' : '运价创建成功。'); setPage(1); setReloadKey((value) => value + 1); };
 
   return <div className="space-y-5">
     <PageHeader actions={canManage ? <div className="flex items-center gap-2"><button className="inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-4 text-sm font-semibold hover:border-primary hover:text-primary" onClick={() => setImportOpen(true)} type="button"><Upload aria-hidden className="size-4" /> Excel 导入</button><button className="inline-flex h-9 items-center gap-2 rounded bg-primary px-4 text-sm font-semibold text-surface" onClick={() => setDialogOpen(true)} type="button"><Plus aria-hidden className="size-4" /> 新建运价</button></div> : undefined} description="维护航线、船司、有效期、箱型成本和附加费用。" eyebrow="运营后台" title="运价" />
     {notice ? <div className="flex items-center justify-between rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"><span>{notice}</span><button aria-label="关闭提示" onClick={() => setNotice(null)} type="button"><X aria-hidden className="size-4" /></button></div> : null}
+    {rateToDelete ? <DeleteRateDialog rate={rateToDelete} busy={Boolean(deletingId)} error={deleteError} onCancel={() => { if (!deletingId) { setRateToDelete(null); setDeleteError(null); } }} onConfirm={() => void deleteRate(rateToDelete)} /> : null}
     {error?.code === 'PERMISSION_DENIED' ? <PermissionDeniedState /> : <section className="overflow-hidden rounded border border-border bg-surface">
       <FilterBar onClear={clearFilters} onSearchChange={setSearchInput} placeholder="搜索运价编号、港口、供应方或合约号" searchValue={searchInput}>
         <input aria-label="起运港代码" className={filterClass} onChange={(event) => { setPolCode(event.target.value); setPage(1); }} placeholder="POL" value={polCode} />
@@ -151,133 +169,589 @@ export default function RatesPage() {
   </div>;
 }
 
-function ImportRateDialog({ apiFetch, onClose, onCompleted }: { apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; onClose: () => void; onCompleted: () => void }) {
-  const [file, setFile] = useState<File | null>(null); const [importJob, setImportJob] = useState<RateImport | null>(null); const [analysis, setAnalysis] = useState<RateImportAnalysis | null>(null); const [error, setError] = useState<string | null>(null); const [submitting, setSubmitting] = useState(false); const [analyzing, setAnalyzing] = useState(false); const [downloading, setDownloading] = useState(false);
+function ImportRateDialog({
+  apiFetch,
+  onClose,
+  onCompleted,
+}: {
+  apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  onClose: () => void;
+  onCompleted: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [importJob, setImportJob] = useState<RateImport | null>(null);
+  const [analysis, setAnalysis] = useState<RateImportAnalysis | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const busy =
+    analyzing ||
+    confirming ||
+    importJob?.status === 'PENDING' ||
+    importJob?.status === 'PROCESSING';
   useEffect(() => {
     if (!importJob || !['PENDING', 'PROCESSING'].includes(importJob.status)) return;
-    const timer = window.setInterval(() => { void requestJson<RateImport>(apiFetch, `/api/v1/rate-imports/${importJob.id}`).then((result) => { setImportJob(result); if (result.status === 'COMPLETED') { window.clearInterval(timer); onCompleted(); } }).catch((caught) => { window.clearInterval(timer); setError(toRateError(caught).message); }); }, 1000);
+    const timer = window.setInterval(() => {
+      void requestJson<RateImport>(apiFetch, `/api/v1/rate-imports/${importJob.id}`)
+        .then((result) => {
+          setImportJob(result);
+          if (result.status === 'COMPLETED') {
+            window.clearInterval(timer);
+            onCompleted();
+          }
+        })
+        .catch(() => {
+          window.clearInterval(timer);
+          setError('暂时无法获取导入进度，请重试查询，无需重新导入。');
+        });
+    }, 1000);
     return () => window.clearInterval(timer);
-  }, [apiFetch, importJob, onCompleted]);
+  }, [apiFetch, importJob, onCompleted, retryKey]);
   useEffect(() => {
     if (!file) return;
-    const analyze = async () => {
-      setAnalyzing(true); setError(null); setAnalysis(null); setImportJob(null);
-      const form = new FormData(); form.append('file', file);
-      try { setAnalysis(await requestJson<RateImportAnalysis>(apiFetch, '/api/v1/rates/import/analyze', { method: 'POST', body: form })); }
-      catch (caught) { setError(toRateError(caught).message); }
-      finally { setAnalyzing(false); }
+    let active = true;
+    setAnalyzing(true);
+    setError(null);
+    setAnalysis(null);
+    setImportJob(null);
+    const form = new FormData();
+    form.append('file', file);
+    void requestJson<RateImportAnalysis>(apiFetch, '/api/v1/rates/import/analyze', {
+      method: 'POST',
+      body: form,
+    })
+      .then((result) => {
+        if (active) setAnalysis(result);
+      })
+      .catch((caught) => {
+        if (active) setError(toRateError(caught).message);
+      })
+      .finally(() => {
+        if (active) setAnalyzing(false);
+      });
+    return () => {
+      active = false;
     };
-    void analyze();
   }, [apiFetch, file]);
-  const upload = async () => { if (!file) { setError('请选择 .xlsx 文件。'); return; } setSubmitting(true); setError(null); const form = new FormData(); form.append('file', file); try { setImportJob(await requestJson<RateImport>(apiFetch, '/api/v1/rates/import', { method: 'POST', body: form })); } catch (caught) { setError(toRateError(caught).message); } finally { setSubmitting(false); } };
-  const downloadTemplate = async () => { setDownloading(true); setError(null); try { const response = await apiFetch('/api/v1/rates/import-template'); if (!response.ok) throw new RateApiError('模板下载失败，请稍后重试。'); const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'rate-import-template-v2.xlsx'; anchor.click(); URL.revokeObjectURL(url); } catch (caught) { setError(toRateError(caught).message); } finally { setDownloading(false); } };
-  const busy = submitting || analyzing || importJob?.status === 'PENDING' || importJob?.status === 'PROCESSING';
-  return <div aria-labelledby="import-rate-title" aria-modal="true" className="fixed inset-0 z-50 flex items-start justify-end bg-foreground/30" role="dialog"><button aria-label="关闭导入表单" className="absolute inset-0" disabled={busy} onClick={onClose} type="button" /><div className="relative h-full w-full max-w-4xl overflow-y-auto border-l border-border bg-surface shadow-xl"><div className="flex items-start justify-between border-b border-border px-5 py-4"><div><h2 className="text-lg font-semibold" id="import-rate-title">导入运价</h2><p className="mt-1 text-sm text-muted">上传船公司、代理或海外同行提供的 Excel，系统会自动识别航线、箱型、价格及有效期。</p></div><button aria-label="关闭" className="grid size-9 place-items-center rounded border border-border disabled:opacity-40" disabled={busy} onClick={onClose} type="button"><X className="size-4" /></button></div><div className="space-y-5 p-5">
-    <div className="grid grid-cols-3 overflow-hidden rounded border border-border text-sm"><div className={`px-3 py-2 ${!analysis ? 'bg-primary/10 font-semibold text-primary' : 'bg-background text-muted'}`}>1 上传文件</div><div className={`border-l border-border px-3 py-2 ${analysis && !importJob ? 'bg-primary/10 font-semibold text-primary' : 'bg-background text-muted'}`}>2 确认识别结果</div><div className={`border-l border-border px-3 py-2 ${importJob ? 'bg-primary/10 font-semibold text-primary' : 'bg-background text-muted'}`}>3 导入</div></div>
-    <section className="rounded border border-border bg-background p-4"><h3 className="text-sm font-semibold">上传 Excel</h3><label className="mt-3 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded border border-dashed border-border bg-surface px-4 py-6 text-center hover:border-primary"><Upload className="size-5 text-primary" /><span className="mt-2 text-sm font-medium">{file ? file.name : '拖入 Excel 文件或选择文件'}</span><span className="mt-1 text-xs text-muted">支持 .xlsx，最大 5 MB。{file ? ` 文件大小 ${formatFileSize(file.size)}。` : ''}</span><input accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" disabled={busy} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(null); setImportJob(null); setAnalysis(null); }} type="file" /></label><div className="mt-3 flex items-center justify-between gap-3"><button className={secondaryButton} disabled={downloading || busy} onClick={() => void downloadTemplate()} type="button"><Download className="size-3.5" /> {downloading ? '下载中…' : '没有现成文件？下载标准模板'}</button>{file ? <span className="text-sm text-muted">{analyzing ? '正在自动分析…' : analysis ? '已完成分析' : '等待分析'}</span> : null}</div></section>
-    {analysis && file ? <WorkbookAnalysis analysis={analysis} apiFetch={apiFetch} file={file} onConfirmed={setImportJob} /> : null}
-    {error ? <div className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div> : null}
-    {importJob ? <ImportResultPanel importJob={importJob} /> : null}
-    <details className="rounded border border-border bg-background p-4"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><ChevronDown className="size-4" /> 旧版导入方式</summary><div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3 text-sm"><span className="text-muted">兼容历史长表文件，仅管理员排查旧模板时使用。</span><button className="h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40" disabled={!file || busy || importJob?.status === 'COMPLETED'} onClick={() => void upload()} type="button">{submitting ? '上传中…' : busy ? '处理中…' : '使用旧版导入方式'}</button></div></details>
-    <div className="flex justify-end gap-2 border-t border-border pt-4"><button className="h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40" disabled={busy} onClick={onClose} type="button">关闭</button></div>
-  </div></div></div>;
+  const chooseFile = (next?: File) => {
+    if (!next || busy) return;
+    if (!next.name.toLowerCase().endsWith('.xlsx') || next.size > 5 * 1024 * 1024 || !next.size) {
+      setError('请选择不超过 5 MB 的 .xlsx 文件。');
+      return;
+    }
+    setError(null);
+    setImportJob(null);
+    setAnalysis(null);
+    setFile(next);
+  };
+  const downloadTemplate = async () => {
+    setDownloading(true);
+    setError(null);
+    try {
+      const response = await apiFetch('/api/v1/rates/import-template');
+      if (!response.ok) throw new RateApiError('模板下载失败，请稍后重试。');
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'rate-import-template-v2.xlsx';
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(toRateError(caught).message);
+    } finally {
+      setDownloading(false);
+    }
+  };
+  return (
+    <div
+      aria-labelledby="import-rate-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-start justify-end bg-foreground/30"
+      role="dialog"
+    >
+      <button
+        aria-label="关闭导入表单"
+        className="absolute inset-0"
+        disabled={busy}
+        onClick={onClose}
+        type="button"
+      />
+      <div
+        className={`relative flex h-full w-full flex-col border-l border-border bg-surface shadow-xl ${analysis && !importJob ? 'max-w-4xl' : 'max-w-xl'}`}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold" id="import-rate-title">
+              {importJob ? '导入结果' : analysis ? '核对运价' : '从 Excel 添加运价'}
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              {importJob
+                ? '在这里查看本次导入的处理结果。'
+                : analysis
+                  ? '确认航线、价格和有效期，再导入。'
+                  : '上传手头的运价表，先预览，再决定是否导入。'}
+            </p>
+          </div>
+          <button
+            aria-label="关闭"
+            className="grid size-9 shrink-0 place-items-center rounded border border-border disabled:opacity-40"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
+          <input
+            ref={inputRef}
+            aria-label="选择运价 Excel"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="sr-only"
+            disabled={busy}
+            onChange={(event) => {
+              chooseFile(event.target.files?.[0]);
+              event.target.value = '';
+            }}
+            type="file"
+          />
+          {!file ? (
+            <>
+              <div
+                className="rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 px-5 py-10 text-center"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  chooseFile(event.dataTransfer.files[0]);
+                }}
+              >
+                <Upload aria-hidden className="mx-auto size-7 text-primary" />
+                <p className="mt-4 font-medium">把运价表拖到这里</p>
+                <button
+                  className="mt-4 h-10 rounded bg-primary px-6 text-sm font-semibold text-surface hover:bg-primary/90"
+                  onClick={() => inputRef.current?.click()}
+                  type="button"
+                >
+                  选择 Excel 文件
+                </button>
+                <p className="mt-3 text-xs text-muted">支持 .xlsx，最大 5 MB</p>
+              </div>
+              <p className="text-sm leading-6 text-muted">
+                可使用船公司、代理或同行发来的表格。读取后会显示航线和箱型价格，缺少的信息再补充。
+              </p>
+              <button
+                className="inline-flex items-center gap-2 text-sm text-primary underline-offset-4 hover:underline disabled:opacity-40"
+                disabled={downloading}
+                onClick={() => void downloadTemplate()}
+                type="button"
+              >
+                <Download className="size-4" />
+                {downloading ? '下载中…' : '还没有运价表？下载示例模板'}
+              </button>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3 rounded bg-sidebar px-3 py-2.5 text-sm">
+              <div className="min-w-0">
+                <p className="truncate font-medium" title={file.name}>
+                  {file.name}
+                </p>
+                <p className="text-xs text-muted">{formatFileSize(file.size)}</p>
+              </div>
+              {!importJob ? (
+                <button
+                  className="shrink-0 font-medium text-primary disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => inputRef.current?.click()}
+                  type="button"
+                >
+                  更换文件
+                </button>
+              ) : null}
+            </div>
+          )}
+          {analyzing ? (
+            <p role="status" className="py-8 text-center text-sm text-muted">
+              正在读取表格，整理航线和价格…
+            </p>
+          ) : null}
+          {analysis && file && !importJob ? (
+            <WorkbookAnalysis
+              analysis={analysis}
+              apiFetch={apiFetch}
+              file={file}
+              onConfirmed={setImportJob}
+              onConfirming={setConfirming}
+            />
+          ) : null}
+          {error ? (
+            <div
+              role="alert"
+              className="rounded border border-danger/20 bg-danger/10 p-3 text-sm text-danger"
+            >
+              {error}
+              {importJob ? (
+                <button
+                  className="ml-3 underline"
+                  onClick={() => {
+                    setError(null);
+                    setRetryKey((value) => value + 1);
+                  }}
+                  type="button"
+                >
+                  重试获取进度
+                </button>
+              ) : file && !analyzing ? (
+                <button
+                  className="ml-3 underline"
+                  onClick={() => setFile(new File([file], file.name, { type: file.type }))}
+                  type="button"
+                >
+                  重新读取
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {importJob ? <ImportResultPanel importJob={importJob} /> : null}
+        </div>
+        {importJob ? (
+          <footer className="flex shrink-0 justify-end border-t border-border px-6 py-4">
+            <button
+              className="h-10 rounded bg-primary px-5 text-sm font-semibold text-surface disabled:opacity-40"
+              disabled={busy && !error}
+              onClick={onClose}
+              type="button"
+            >
+              {importJob.status === 'COMPLETED' ? '完成，查看运价' : '关闭'}
+            </button>
+          </footer>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
-function WorkbookAnalysis({ analysis, apiFetch, file, onConfirmed }: { analysis: RateImportAnalysis; apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; file: File; onConfirmed: (job: RateImport) => void }) {
+function WorkbookAnalysis({
+  analysis,
+  apiFetch,
+  file,
+  onConfirmed,
+  onConfirming,
+}: {
+  analysis: RateImportAnalysis;
+  apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  file: File;
+  onConfirmed: (job: RateImport) => void;
+  onConfirming: (busy: boolean) => void;
+}) {
   const initialSheet = bestRateImportSheetIndex(analysis);
   const [sheetIndex, setSheetIndex] = useState(initialSheet);
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [mapping, setMapping] = useState<Record<number, string>>({});
-  const [profileName, setProfileName] = useState(''); const [rememberFormat, setRememberFormat] = useState(false);
-  const [defaults, setDefaults] = useState<ImportFixDefaults>({ effectiveDate: '', expiryDate: '', currency: '' });
+  const [profileName, setProfileName] = useState('');
+  const [rememberFormat, setRememberFormat] = useState(false);
+  const [defaults, setDefaults] = useState<ImportFixDefaults>({
+    effectiveDate: '',
+    expiryDate: '',
+    currency: '',
+  });
   const [saving, setSaving] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const previewRequest = useRef(0);
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState<RateImportPreview | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const sheet = analysis.sheets[sheetIndex];
   const candidate = sheet?.headerCandidates[candidateIndex];
-  const buildMappings = useCallback((source: Record<number, string>) => Object.entries(source).filter(([, targetField]) => targetField).map(([sourceColumn, targetField]) => ({ sourceColumn: Number(sourceColumn), sourceLabel: candidate?.labels[Number(sourceColumn) - 1] ?? '', targetField })), [candidate]);
-  const previewRows = useCallback(async (source = mapping, fixDefaults = defaults) => {
-    if (!sheet || !candidate) return;
-    const mappings = buildMappings(source);
-    if (!mappings.length) { setMessage('这个 Excel 暂时无法自动识别字段，请在高级设置中配置字段。'); return; }
-    setPreviewing(true); setMessage(null); const form = new FormData(); form.append('file', file); form.append('configuration', JSON.stringify({ sheetName: sheet.name, headerRow: candidate.row, headerDepth: candidate.depth, mappings, defaults: cleanDefaults(fixDefaults) }));
-    try { setPreview(await requestJson<RateImportPreview>(apiFetch, '/api/v1/rates/import/preview', { method: 'POST', body: form })); } catch (caught) { setMessage(toRateError(caught).message); } finally { setPreviewing(false); }
-  }, [apiFetch, buildMappings, candidate, defaults, file, mapping, sheet]);
+  const buildMappings = useCallback(
+    (source: Record<number, string>) =>
+      Object.entries(source)
+        .filter(([, targetField]) => targetField)
+        .map(([sourceColumn, targetField]) => ({
+          sourceColumn: Number(sourceColumn),
+          sourceLabel: candidate?.labels[Number(sourceColumn) - 1] ?? '',
+          targetField,
+        })),
+    [candidate],
+  );
+  const previewRows = useCallback(
+    async (source = mapping, fixDefaults = defaults) => {
+      if (!sheet || !candidate) return;
+      const mappings = buildMappings(source);
+      if (!mappings.length) {
+        setMessage('这个 Excel 暂时无法自动识别字段，请在“识别不对？调整工作表和列”中配置字段。');
+        return;
+      }
+      const requestId = ++previewRequest.current;
+      setPreview(null);
+      setPreviewing(true);
+      setMessage(null);
+      const form = new FormData();
+      form.append('file', file);
+      form.append(
+        'configuration',
+        JSON.stringify({
+          sheetName: sheet.name,
+          headerRow: candidate.row,
+          headerDepth: candidate.depth,
+          mappings,
+          defaults: cleanDefaults(fixDefaults),
+        }),
+      );
+      try {
+        const result = await requestJson<RateImportPreview>(
+          apiFetch,
+          '/api/v1/rates/import/preview',
+          { method: 'POST', body: form },
+        );
+        if (requestId === previewRequest.current) setPreview(result);
+      } catch (caught) {
+        if (requestId === previewRequest.current) setMessage(toRateError(caught).message);
+      } finally {
+        if (requestId === previewRequest.current) setPreviewing(false);
+      }
+    },
+    [apiFetch, buildMappings, candidate, defaults, file, mapping, sheet],
+  );
   useEffect(() => {
-    const nextMapping = Object.fromEntries((candidate?.suggestions ?? []).map((item) => [item.column, item.targetField]));
+    const nextMapping = Object.fromEntries(
+      (candidate?.suggestions ?? []).map((item) => [item.column, item.targetField]),
+    );
     setMapping(nextMapping);
     setMessage(null);
     setPreview(null);
+    setPreviewing(false);
     if (candidate) void previewRows(nextMapping);
+    return () => {
+      previewRequest.current += 1;
+    };
   }, [candidate]);
   const saveProfile = async () => {
     if (!sheet || !candidate) return;
-    if (!profileName.trim()) { setMessage('请填写格式名称。'); return; }
+    if (!profileName.trim()) {
+      setMessage('请填写格式名称。');
+      return;
+    }
     const mappings = buildMappings(mapping);
-    if (!mappings.length) { setMessage('请至少映射一个字段。'); return; }
-    setSaving(true); setMessage(null);
+    if (!mappings.length) {
+      setMessage('请至少选择一列对应的运价信息。');
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
     try {
-      await requestJson(apiFetch, '/api/v1/rate-imports/mapping-profiles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: profileName.trim(), sheetName: sheet.name, headerRow: candidate.row, headerDepth: candidate.depth, mappings }) });
+      await requestJson(apiFetch, '/api/v1/rate-imports/mapping-profiles', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: profileName.trim(),
+          sheetName: sheet.name,
+          headerRow: candidate.row,
+          headerDepth: candidate.depth,
+          mappings,
+        }),
+      });
       setMessage(`已记住「${profileName.trim()}」格式。`);
-    } catch (caught) { setMessage(toRateError(caught).message); } finally { setSaving(false); }
+    } catch (caught) {
+      setMessage(toRateError(caught).message);
+    } finally {
+      setSaving(false);
+    }
   };
-  const confidence = importRecognitionConfidence(candidate, preview);
-  const missingCoreFields = rateImportMissingCoreFields(candidate, preview);
-  return <section className="space-y-4 rounded border border-primary/20 bg-primary/5 p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">{candidate ? `已识别「${sheet?.name}」` : '还没有找到可导入的表头'}</h3><p className="mt-1 text-xs text-muted">发现 {analysis.sheets.length} 个 Sheet，当前识别 {candidate?.suggestions.length ?? 0} 个字段。{previewing ? ' 正在生成预览…' : ''}</p></div>{candidate ? <StatusBadge tone={confidence.tone}>{confidence.label}</StatusBadge> : null}</div><RateImportRecognitionGuide candidate={candidate} missingFields={missingCoreFields} sheet={sheet} />{candidate ? <RecognitionSummary candidate={candidate} preview={preview} /> : null}{preview ? <RateImportIssueActions defaults={defaults} onApply={(next) => { setDefaults(next); void previewRows(mapping, next); }} preview={preview} /> : null}{preview ? <RateImportPreviewPanel apiFetch={apiFetch} onConfirmed={onConfirmed} preview={preview} /> : null}{message ? <p className="text-sm text-muted">{message}</p> : null}<details className="rounded border border-border bg-surface p-4" open={!candidate || missingCoreFields.length > 0}><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><ChevronDown className="size-4" /> 高级设置</summary><div className="mt-4 space-y-4 border-t border-border pt-4"><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm"><span className="font-medium">数据 Sheet</span><select className={`${inputClass} mt-1.5`} onChange={(event) => { setSheetIndex(Number(event.target.value)); setCandidateIndex(0); }} value={sheetIndex}>{analysis.sheets.map((item, index) => <option key={`${item.index}-${item.name}`} value={index}>{item.name}（{item.rowCount} 行 × {item.columnCount} 列）</option>)}</select></label><label className="text-sm"><span className="font-medium">表头行</span><select className={`${inputClass} mt-1.5`} disabled={!sheet?.headerCandidates.length} onChange={(event) => setCandidateIndex(Number(event.target.value))} value={candidateIndex}>{sheet?.headerCandidates.map((item, index) => <option key={`${item.row}-${item.depth}`} value={index}>第 {item.row} 行 · {item.depth === 2 ? '双层表头' : '单层表头'} · 识别 {item.suggestions.length} 项</option>)}</select></label></div>{sheet && candidate ? <><div className="max-h-80 overflow-auto rounded border border-border bg-surface"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-sidebar"><tr><th className="px-2 py-2">Excel 列</th><th className="px-2 py-2">原字段</th><th className="px-2 py-2">导入含义</th></tr></thead><tbody>{candidate.labels.map((label, index) => label ? <tr className="border-t border-border" key={`${index}-${label}`}><td className="px-2 py-1.5">{index + 1}</td><td className="px-2 py-1.5">{label}</td><td className="px-2 py-1.5"><select aria-label={`${label} 映射字段`} className="h-8 w-full rounded border border-border bg-surface px-2" onChange={(event) => { setMapping((current) => ({ ...current, [index + 1]: event.target.value })); setPreview(null); }} value={mapping[index + 1] ?? ''}><option value="">不导入此列</option>{Object.entries(rateImportTargetLabels).map(([value, text]) => <option disabled={Object.entries(mapping).some(([column, target]) => Number(column) !== index + 1 && target === value)} key={value} value={value}>{text}</option>)}</select></td></tr> : null)}</tbody></table></div><div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-[1fr_auto]"><label className="flex items-center gap-2 text-sm"><input checked={rememberFormat} onChange={(event) => setRememberFormat(event.target.checked)} type="checkbox" /> 记住这个 Excel 格式</label><button className="h-10 rounded border border-primary px-4 text-sm font-semibold text-primary disabled:opacity-40" disabled={previewing} onClick={() => void previewRows()} type="button">{previewing ? '生成中…' : '重新预览'}</button>{rememberFormat ? <><input className={inputClass} maxLength={120} onChange={(event) => setProfileName(event.target.value)} placeholder="格式名称，例如：东方海外 FCL 运价" value={profileName} /><button className="h-10 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40" disabled={saving} onClick={() => void saveProfile()} type="button">{saving ? '保存中…' : '记住这个格式'}</button></> : null}</div></> : <p className="text-sm text-warning">该 Sheet 未识别到可用表头。请先确认选中了真正的数据 Sheet，再选择包含 POL、POD、船司、价格等列名的表头行。</p>}</div></details></section>;
-}
-
-function RateImportRecognitionGuide({ candidate, missingFields, sheet }: { candidate?: RateImportHeaderCandidate; missingFields: string[]; sheet?: RateImportAnalysis['sheets'][number] }) {
-  if (!candidate) return <div className="rounded border border-warning/30 bg-warning/10 p-3 text-sm text-warning"><div className="flex items-start gap-2"><AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">没有识别到可导入字段。</p><p className="mt-1 text-xs">先在高级设置里确认数据 Sheet 和表头行。表头至少要能映射出起运港、目的港、船司、有效期、币种和箱型价格。</p>{sheet?.sampleRows.length ? <p className="mt-2 text-xs text-muted">当前 Sheet 前几行示例：{sheet.sampleRows.slice(0, 3).map((row) => `第 ${row.row} 行`).join('、')}。如果这些是说明文字，请切换到真正的数据 Sheet。</p> : null}</div></div></div>;
-  if (!missingFields.length) return null;
-  return <div className="rounded border border-warning/30 bg-warning/10 p-3 text-sm text-warning"><div className="flex items-start gap-2"><AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">还缺 {missingFields.join('、')}，暂时不能确认导入。</p><p className="mt-1 text-xs">能在 Excel 表头里找到对应列的，请在高级设置中手动选择导入含义；如果整份文件共用同一有效期或币种，生成预览后可在问题卡里一次性补齐。</p></div></div></div>;
-}
-
-function RecognitionSummary({ candidate, preview }: { candidate: RateImportHeaderCandidate; preview: RateImportPreview | null }) {
-  const recognized = new Set(candidate.suggestions.map((item) => item.targetField));
-  const hasBlockingIssue = (fields: string[], codes: string[] = []) => preview?.issues.some((issue) => issue.severity === 'ERROR' && (fields.includes(issue.source.field ?? '') || codes.includes(issue.code))) ?? false;
-  const checks: Array<[string, boolean, boolean]> = [
-    ['起运港', (recognized.has('polCode') || recognized.has('polName')) && !hasBlockingIssue(['polCode', 'polName']), true],
-    ['目的港', (recognized.has('podCode') || recognized.has('podName')) && !hasBlockingIssue(['podCode', 'podName']), true],
-    ['船公司', recognized.has('carrierCode') && !hasBlockingIssue(['carrierCode']), true],
-    ['有效期', recognized.has('effectiveDate') && recognized.has('expiryDate') && !hasBlockingIssue(['effectiveDate', 'expiryDate']), true],
-    ['币种', (recognized.has('currency') || recognized.has('priceCurrency')) && !hasBlockingIssue(['currency']), true],
-    ['箱型价格', ['containerType', 'price20GpCost', 'price20GpSell', 'price40GpCost', 'price40GpSell', 'price40HqCost', 'price40HqSell', 'price45HqCost', 'price45HqSell'].some((field) => recognized.has(field)) && !hasBlockingIssue(['containerType', 'prices'], ['RATE_IMPORT_PRICE_REQUIRED', 'RATE_IMPORT_AMOUNT_INVALID']), true],
-    ['航线服务', recognized.has('serviceName'), recognized.has('serviceName')],
-    ['航程', recognized.has('transitDays') && !hasBlockingIssue(['transitDays']), recognized.has('transitDays')],
-    ['开船规律', recognized.has('sailingPattern') || recognized.has('etd'), recognized.has('sailingPattern') || recognized.has('etd')],
-    ['免费期', recognized.has('freeTime') || recognized.has('freeTimeDemurrage') || recognized.has('freeTimeDetention'), recognized.has('freeTime') || recognized.has('freeTimeDemurrage') || recognized.has('freeTimeDetention')],
-    ['附加费', ['surchargeBaf', 'surchargePss', 'surchargeDoc', 'surchargeSeal'].some((field) => recognized.has(field)), ['surchargeBaf', 'surchargePss', 'surchargeDoc', 'surchargeSeal'].some((field) => recognized.has(field))],
-  ];
-  return <div className="grid gap-3 rounded border border-border bg-surface p-3 text-sm sm:grid-cols-2"><div><div className="font-semibold">识别摘要</div><dl className="mt-2 grid grid-cols-3 gap-2 text-xs"><div><dt className="text-muted">运价</dt><dd className="mt-1 font-semibold">{preview?.summary.rateCount ?? '分析中'}</dd></div><div><dt className="text-muted">箱型价格</dt><dd className="mt-1 font-semibold">{preview?.summary.priceCount ?? '分析中'}</dd></div><div><dt className="text-muted">附加费</dt><dd className="mt-1 font-semibold">{preview?.summary.chargeCount ?? 0}</dd></div></dl></div><div className="grid gap-1.5 text-xs">{checks.filter(([, , show]) => show).map(([label, ok]) => <div className={ok ? 'text-success' : 'text-warning'} key={String(label)}>{ok ? '✓' : '需确认'} {label}{ok ? '已识别' : '待确认'}</div>)}</div></div>;
-}
-
-function rateImportMissingCoreFields(candidate: RateImportHeaderCandidate | undefined, preview: RateImportPreview | null) {
-  const recognized = new Set(candidate?.suggestions.map((item) => item.targetField) ?? []);
-  const hasError = (fields: string[], codes: string[] = []) => preview?.issues.some((issue) => issue.severity === 'ERROR' && (fields.includes(issue.source.field ?? '') || codes.includes(issue.code))) ?? false;
-  const missing: string[] = [];
-  if (!(recognized.has('polCode') || recognized.has('polName')) || hasError(['polCode', 'polName'])) missing.push('起运港');
-  if (!(recognized.has('podCode') || recognized.has('podName')) || hasError(['podCode', 'podName'])) missing.push('目的港');
-  if (!recognized.has('carrierCode') || hasError(['carrierCode'])) missing.push('船司');
-  if (!(recognized.has('effectiveDate') && recognized.has('expiryDate')) || hasError(['effectiveDate', 'expiryDate'], ['RATE_IMPORT_DATE_RANGE_INVALID'])) missing.push('有效期');
-  if (!(recognized.has('currency') || recognized.has('priceCurrency')) || hasError(['currency'], ['RATE_IMPORT_CURRENCY_INVALID', 'RATE_IMPORT_CURRENCY_REQUIRED_FOR_CHARGE'])) missing.push('币种');
-  if (!['containerType', 'costAmount', 'sellAmount', 'price20GpCost', 'price20GpSell', 'price40GpCost', 'price40GpSell', 'price40HqCost', 'price40HqSell', 'price45HqCost', 'price45HqSell'].some((field) => recognized.has(field)) || hasError(['containerType', 'prices'], ['RATE_IMPORT_PRICE_REQUIRED', 'RATE_IMPORT_AMOUNT_INVALID'])) missing.push('箱型价格');
-  return missing;
-}
-
-function RateImportIssueActions({ preview, defaults, onApply }: { preview: RateImportPreview; defaults: ImportFixDefaults; onApply: (defaults: ImportFixDefaults) => void }) {
-  const issues = aggregateImportIssues(preview.issues);
-  if (!issues.length) return <p className="rounded border border-success/20 bg-success/10 p-3 text-sm text-success">未发现需要处理的问题。</p>;
-  return <div className="space-y-3"><div className="text-sm font-semibold">{preview.summary.errorCount} 个问题需要处理，{preview.summary.warningCount} 项提醒</div>{issues.map((issue) => <div className="rounded border border-border bg-surface p-3" key={`${issue.type}-${issue.severity}`}><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-semibold">{issue.title}</div><p className="mt-1 text-xs text-muted">影响 {issue.affectedCount} 条运价{issue.rows.length ? `，例如第 ${issue.rows.slice(0, 4).join('、')} 行` : ''}。</p><p className="mt-2 text-xs text-foreground">{rateImportIssueActionText(issue.type)}</p></div><StatusBadge tone={issue.severity === 'ERROR' ? 'danger' : 'warning'}>{issue.severity === 'ERROR' ? '必须处理' : '提醒'}</StatusBadge></div>{issue.type === 'missing_basics' ? <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_140px_auto]"><input aria-label="生效日期" className={inputClass} onChange={(event) => onApply({ ...defaults, effectiveDate: event.target.value })} type="date" value={defaults.effectiveDate} /><input aria-label="截止日期" className={inputClass} onChange={(event) => onApply({ ...defaults, expiryDate: event.target.value })} type="date" value={defaults.expiryDate} /><select aria-label="币种" className={inputClass} onChange={(event) => onApply({ ...defaults, currency: event.target.value })} value={defaults.currency}><option value="">选择币种</option>{currencyOptions.map((currency) => <option key={currency}>{currency}</option>)}</select><button className={secondaryButton} onClick={() => onApply(defaults)} type="button">应用到全部运价</button></div> : null}</div>)}</div>;
+  return (
+    <fieldset disabled={confirmBusy} className="min-w-0 space-y-5">
+      <div className="text-sm text-muted">
+        {candidate
+          ? '当前工作表：' + sheet?.name
+          : '未找到运价数据，请选择包含航线和价格的工作表。'}
+      </div>
+      {previewing ? (
+        <p role="status" className="py-6 text-center text-sm text-muted">
+          正在整理运价预览…
+        </p>
+      ) : null}
+      {preview ? (
+        <RateImportIssueActions
+          defaults={defaults}
+          onApply={(next) => {
+            setDefaults(next);
+            void previewRows(mapping, next);
+          }}
+          preview={preview}
+        />
+      ) : null}
+      {message ? (
+        <p role="status" className="text-sm text-muted">
+          {message}
+        </p>
+      ) : null}
+      <details className="rounded border border-border bg-surface p-4" open={!candidate}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold">
+          <ChevronDown className="size-4" /> 识别不对？调整工作表和列
+        </summary>
+        <div className="mt-4 space-y-4 border-t border-border pt-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-sm">
+              <span className="font-medium">选择工作表</span>
+              <select
+                className={`${inputClass} mt-1.5`}
+                onChange={(event) => {
+                  setSheetIndex(Number(event.target.value));
+                  setCandidateIndex(0);
+                }}
+                value={sheetIndex}
+              >
+                {analysis.sheets.map((item, index) => (
+                  <option key={`${item.index}-${item.name}`} value={index}>
+                    {item.name}（{item.rowCount} 行 × {item.columnCount} 列）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="font-medium">哪一行是列标题？</span>
+              <select
+                className={`${inputClass} mt-1.5`}
+                disabled={!sheet?.headerCandidates.length}
+                onChange={(event) => setCandidateIndex(Number(event.target.value))}
+                value={candidateIndex}
+              >
+                {sheet?.headerCandidates.map((item, index) => (
+                  <option key={`${item.row}-${item.depth}`} value={index}>
+                    第 {item.row} 行 · {item.depth === 2 ? '双层表头' : '单层表头'} · 识别{' '}
+                    {item.suggestions.length} 项
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {sheet && candidate ? (
+            <>
+              <div className="max-h-80 overflow-auto rounded border border-border bg-surface">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-sidebar">
+                    <tr>
+                      <th className="px-2 py-2">Excel 列</th>
+                      <th className="px-2 py-2">表格里的列名</th>
+                      <th className="px-2 py-2">对应的运价信息</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {candidate.labels.map((label, index) =>
+                      label ? (
+                        <tr className="border-t border-border" key={`${index}-${label}`}>
+                          <td className="px-2 py-1.5">{index + 1}</td>
+                          <td className="px-2 py-1.5">{label}</td>
+                          <td className="px-2 py-1.5">
+                            <select
+                              aria-label={`${label} 映射字段`}
+                              className="h-8 w-full rounded border border-border bg-surface px-2"
+                              onChange={(event) => {
+                                previewRequest.current += 1;
+                                setPreviewing(false);
+                                setMapping((current) => ({
+                                  ...current,
+                                  [index + 1]: event.target.value,
+                                }));
+                                setPreview(null);
+                              }}
+                              value={mapping[index + 1] ?? ''}
+                            >
+                              <option value="">不导入此列</option>
+                              {Object.entries(rateImportTargetLabels).map(([value, text]) => (
+                                <option
+                                  disabled={Object.entries(mapping).some(
+                                    ([column, target]) =>
+                                      Number(column) !== index + 1 && target === value,
+                                  )}
+                                  key={value}
+                                  value={value}
+                                >
+                                  {text}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      ) : null,
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-[1fr_auto]">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    checked={rememberFormat}
+                    onChange={(event) => setRememberFormat(event.target.checked)}
+                    type="checkbox"
+                  />{' '}
+                  记住这个 Excel 格式
+                </label>
+                <button
+                  className="h-10 rounded border border-primary px-4 text-sm font-semibold text-primary disabled:opacity-40"
+                  disabled={previewing}
+                  onClick={() => void previewRows()}
+                  type="button"
+                >
+                  {previewing ? '生成中…' : '重新预览'}
+                </button>
+                {rememberFormat ? (
+                  <>
+                    <input
+                      className={inputClass}
+                      maxLength={120}
+                      onChange={(event) => setProfileName(event.target.value)}
+                      placeholder="格式名称，例如：东方海外 FCL 运价"
+                      value={profileName}
+                    />
+                    <button
+                      className="h-10 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+                      disabled={saving}
+                      onClick={() => void saveProfile()}
+                      type="button"
+                    >
+                      {saving ? '保存中…' : '记住这个格式'}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-warning">
+              没有找到列标题。请选择运价所在的工作表，以及起运港、目的港、船司和价格这些标题所在的行。
+            </p>
+          )}
+        </div>
+      </details>
+      {preview ? (
+        <RateImportPreviewPanel
+          key={preview.previewToken}
+          apiFetch={apiFetch}
+          onConfirmed={onConfirmed}
+          onConfirming={(value) => {
+            setConfirmBusy(value);
+            onConfirming(value);
+          }}
+          preview={preview}
+        />
+      ) : null}
+    </fieldset>
+  );
 }
 
 function rateImportIssueActionText(type: string) {
   const actions: Record<string, string> = {
-    missing_basics: '如果这份 Excel 所有航线共用同一有效期或币种，在下方填写一次并应用到全部运价；如果每行不同，请回到高级设置映射对应列。',
-    missing_pol: '请在高级设置中把起运港代码或起运港名称列映射为起运港；常见值如 CNSHA、上海、Shanghai。',
-    missing_pod: '请在高级设置中把目的港代码或目的港名称列映射为目的港；常见值如 USLAX、洛杉矶、Los Angeles。',
+    missing_basics:
+      '如果这份 Excel 所有航线共用同一有效期或币种，在下方填写一次并应用到全部运价；如果每行不同，请回到“识别不对？调整工作表和列”映射对应列。',
+    missing_pol:
+      '请在“识别不对？调整工作表和列”中把起运港代码或起运港名称列映射为起运港；常见值如 CNSHA、上海、Shanghai。',
+    missing_pod:
+      '请在“识别不对？调整工作表和列”中把目的港代码或目的港名称列映射为目的港；常见值如 USLAX、洛杉矶、Los Angeles。',
     missing_carrier: '请把船司、Carrier、船公司代码等列映射为船司；系统需要船司代码才能保存运价。',
-    missing_currency: '请映射币种列，或在有效期和币种补齐区选择默认币种。币种需使用 USD、CNY、EUR 这类三位代码。',
+    missing_currency:
+      '请映射币种列，或在有效期和币种补齐区选择默认币种。币种需使用 USD、CNY、EUR 这类三位代码。',
     date: '请映射生效日期和失效日期，或在有效期和币种补齐区填写统一日期后重新预览。',
     price: '请确认价格列是否映射到 20GP、40GP、40HQ 等箱型成本或售价，金额只支持非负数字。',
     container: '长表格式需要映射箱型列；宽表格式请把 20GP、40GP、40HQ 等价格列分别映射到对应箱型。',
@@ -285,23 +759,307 @@ function rateImportIssueActionText(type: string) {
   return actions[type] ?? '请检查该字段的表头映射和单元格内容，修正后重新预览。';
 }
 
-function RateImportPreviewPanel({ preview, apiFetch, onConfirmed }: { preview: RateImportPreview; apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; onConfirmed: (job: RateImport) => void }) {
-  const [acceptWarnings, setAcceptWarnings] = useState(false); const [confirming, setConfirming] = useState(false); const [confirmError, setConfirmError] = useState<string | null>(null);
-  const confirm = async () => { setConfirming(true); setConfirmError(null); try { onConfirmed(await requestJson<RateImport>(apiFetch, '/api/v1/rates/import/confirm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ previewToken: preview.previewToken, acceptWarnings }) })); } catch (caught) { setConfirmError(toRateError(caught).message); } finally { setConfirming(false); } };
-  return <div className="space-y-3 border-t border-border pt-4"><div className="flex items-center justify-between"><div><h4 className="text-sm font-semibold">预览</h4><p className="mt-1 text-xs text-muted">安全预览已保存，将于 {new Date(preview.expiresAt).toLocaleString('zh-CN')} 过期。</p></div><span className="text-xs text-muted">最多展示 100 条运价</span></div><dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">{[['运价', preview.summary.rateCount], ['箱型价格', preview.summary.priceCount], ['附加费', preview.summary.chargeCount], ['问题', preview.summary.errorCount], ['提醒', preview.summary.warningCount]].map(([label, value]) => <div className="rounded border border-border bg-surface p-2" key={String(label)}><dt className="text-xs text-muted">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>)}</dl><div className="max-h-64 overflow-auto rounded border border-border bg-surface"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-sidebar"><tr><th className="px-2 py-2">来源</th><th className="px-2 py-2">航线</th><th className="px-2 py-2">船司</th><th className="px-2 py-2">有效期</th><th className="px-2 py-2">箱型价格</th><th className="px-2 py-2">附加费</th></tr></thead><tbody>{preview.rates.map((rate) => <tr className="border-t border-border" key={`${rate.source.sheet}-${rate.source.row}`}><td className="px-2 py-2">第 {rate.source.row} 行</td><td className="px-2 py-2">{rate.polCode ?? rate.polName ?? '—'} → {rate.podCode ?? rate.podName ?? '—'}</td><td className="px-2 py-2">{rate.carrierCode ?? '—'}</td><td className="px-2 py-2">{rate.effectiveDate ?? '—'}<div className="text-muted">至 {rate.expiryDate ?? '—'}</div></td><td className="px-2 py-2">{rate.prices.length ? rate.prices.map((price) => <div key={price.containerType}>{price.containerType}: {price.currency} {price.sellAmount ?? price.costAmount ?? '—'}</div>) : '—'}</td><td className="px-2 py-2">{rate.charges?.length ? rate.charges.map((charge) => <div key={`${charge.chargeCode}-${charge.amount}-${charge.chargeBasis}`}>{charge.chargeCode}: {charge.currency} {charge.amount}/{charge.chargeBasis === 'PER_BL' ? 'BL' : charge.chargeBasis === 'PER_SHIPMENT' ? 'SHIPMENT' : 'CNTR'}</div>) : '—'}</td></tr>)}</tbody></table></div>{preview.truncated ? <p className="text-xs text-warning">预览数据超过 100 条，已截断显示；汇总和问题列表仍覆盖全部解析行。</p> : null}{preview.summary.warningCount > 0 ? <label className="flex items-start gap-2 rounded border border-warning/30 bg-warning/10 p-3 text-sm"><input checked={acceptWarnings} className="mt-0.5" onChange={(event) => setAcceptWarnings(event.target.checked)} type="checkbox" />我已检查提醒，仍然导入。</label> : null}{confirmError ? <p className="text-sm text-danger">{confirmError}</p> : null}<div className="flex justify-end"><button className="h-10 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-40" disabled={confirming || preview.summary.errorCount > 0 || (preview.summary.warningCount > 0 && !acceptWarnings)} onClick={() => void confirm()} type="button">{confirming ? '正在提交…' : preview.summary.errorCount > 0 ? '请先处理问题' : `导入 ${preview.summary.priceCount} 个箱型价格`}</button></div></div>;
+function RateImportPreviewPanel({
+  preview,
+  apiFetch,
+  onConfirmed,
+  onConfirming,
+}: {
+  preview: RateImportPreview;
+  apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  onConfirmed: (job: RateImport) => void;
+  onConfirming: (busy: boolean) => void;
+}) {
+  const [acceptWarnings, setAcceptWarnings] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const confirm = async () => {
+    setConfirming(true);
+    onConfirming(true);
+    setConfirmError(null);
+    try {
+      onConfirmed(
+        await requestJson<RateImport>(apiFetch, '/api/v1/rates/import/confirm', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ previewToken: preview.previewToken, acceptWarnings }),
+        }),
+      );
+    } catch (caught) {
+      setConfirmError(toRateError(caught).message);
+    } finally {
+      setConfirming(false);
+      onConfirming(false);
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="font-semibold">共 {preview.summary.rateCount} 条运价，核对后即可导入</h3>
+        <p className="mt-1 text-sm text-muted">
+          包含 {preview.summary.priceCount} 个箱型价格、{preview.summary.chargeCount}{' '}
+          项附加费。请与原表核对。
+        </p>
+      </div>
+      <div className="max-h-96 overflow-auto rounded border border-border">
+        <table className="w-full text-left text-xs">
+          <thead className="sticky top-0 bg-sidebar">
+            <tr>
+              <th className="px-3 py-3">Excel 行</th>
+              <th className="px-3 py-3">航线 / 船司</th>
+              <th className="px-3 py-3">有效期</th>
+              <th className="px-3 py-3">箱型价格</th>
+              <th className="px-3 py-3">附加费</th>
+            </tr>
+          </thead>
+          <tbody>
+            {preview.rates.map((rate) => (
+              <tr
+                className="border-t border-border align-top"
+                key={`${rate.source.sheet}-${rate.source.row}`}
+              >
+                <td className="px-3 py-3">{rate.source.row}</td>
+                <td className="px-3 py-3">
+                  <div className="font-medium">
+                    {rate.polCode ?? rate.polName ?? '待补充'} →{' '}
+                    {rate.podCode ?? rate.podName ?? '待补充'}
+                  </div>
+                  <div className="mt-1 text-muted">{rate.carrierCode ?? '船司待补充'}</div>
+                </td>
+                <td className="whitespace-nowrap px-3 py-3">
+                  {rate.effectiveDate ?? '待补充'}
+                  <div className="mt-1 text-muted">至 {rate.expiryDate ?? '待补充'}</div>
+                </td>
+                <td className="px-3 py-3">
+                  {rate.prices.length
+                    ? rate.prices.map((price) => (
+                        <div className="mb-2 last:mb-0" key={price.containerType}>
+                          <span className="font-semibold">
+                            {price.containerType} · {price.currency}
+                          </span>
+                          <div className="mt-1 text-muted">
+                            成本 {price.costAmount ?? '未提供'} / 售价{' '}
+                            {price.sellAmount ?? '未提供'}
+                          </div>
+                        </div>
+                      ))
+                    : '待补充'}
+                </td>
+                <td className="px-3 py-3">
+                  {rate.charges?.length
+                    ? rate.charges.map((charge, index) => (
+                        <div key={index}>
+                          {charge.chargeCode}：{charge.currency} {charge.amount}/
+                          {charge.chargeBasis === 'PER_BL'
+                            ? '提单'
+                            : charge.chargeBasis === 'PER_SHIPMENT'
+                              ? '票'
+                              : '柜'}
+                        </div>
+                      ))
+                    : '未识别到'}
+                </td>
+              </tr>
+            ))}
+            {!preview.rates.length ? (
+              <tr>
+                <td colSpan={5} className="p-6 text-center text-muted">
+                  暂时没有可导入的运价。请检查工作表和列的对应关系。
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+      {preview.truncated ? (
+        <p className="text-xs text-muted">这里只展示前 100 条，导入和问题检查覆盖全部数据。</p>
+      ) : null}
+      <div className="sticky bottom-0 space-y-3 border-t border-border bg-surface py-4">
+        {preview.summary.warningCount > 0 ? (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              checked={acceptWarnings}
+              className="mt-0.5"
+              onChange={(event) => setAcceptWarnings(event.target.checked)}
+              type="checkbox"
+            />
+            我已核对上方提醒，确认继续导入
+          </label>
+        ) : null}
+        {confirmError ? (
+          <p role="alert" className="text-sm text-danger">
+            {confirmError}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted">
+            {preview.summary.errorCount
+              ? '请先修正上方问题，再重新预览。'
+              : '确认后将保存到运价列表。'}
+          </p>
+          <button
+            className="h-10 rounded bg-primary px-5 text-sm font-semibold text-surface hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={
+              confirming ||
+              preview.summary.rateCount === 0 ||
+              preview.summary.errorCount > 0 ||
+              (preview.summary.warningCount > 0 && !acceptWarnings)
+            }
+            onClick={() => void confirm()}
+            type="button"
+          >
+            {confirming ? '正在导入…' : `确认导入 ${preview.summary.rateCount} 条运价`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function importRecognitionConfidence(candidate: RateImportHeaderCandidate | undefined, preview: RateImportPreview | null): { label: string; tone: 'success' | 'info' | 'warning' } {
-  if (!candidate) return { label: '需确认', tone: 'warning' };
-  if (!preview) return candidate.score >= 8 ? { label: '可预览', tone: 'info' } : { label: '需确认', tone: 'warning' };
-  const coreResolved = preview.rates.length > 0 && preview.rates.every((rate) => rate.polCode && rate.podCode && rate.carrierCode && rate.effectiveDate && rate.expiryDate && rate.currency && rate.prices.length > 0);
-  if (coreResolved && preview.summary.errorCount === 0) return { label: '识别度高', tone: 'success' };
-  if (preview.summary.rateCount > 0 && preview.summary.priceCount > 0) return { label: '可预览 / 需要确认', tone: 'warning' };
-  return { label: '需确认', tone: 'warning' };
+function RateImportIssueActions({
+  preview,
+  defaults,
+  onApply,
+}: {
+  preview: RateImportPreview;
+  defaults: ImportFixDefaults;
+  onApply: (defaults: ImportFixDefaults) => void;
+}) {
+  const [draft, setDraft] = useState(defaults);
+  const issues = aggregateImportIssues(preview.issues);
+  if (!issues.length) return null;
+  const needsBasics = issues.some((issue) =>
+    ['missing_basics', 'missing_currency', 'date'].includes(issue.type),
+  );
+  return (
+    <details
+      open={preview.summary.errorCount > 0}
+      className="rounded border border-warning/30 bg-warning/5 p-4"
+    >
+      <summary className="cursor-pointer text-sm font-semibold">
+        {preview.summary.errorCount
+          ? `${preview.summary.errorCount} 个问题需要处理`
+          : '没有阻止导入的问题'}
+        {preview.summary.warningCount ? ` · ${preview.summary.warningCount} 项提醒，请核对` : ''}
+      </summary>
+      <div className="mt-3 divide-y divide-border">
+        {issues.map((issue) => (
+          <div className="py-3 first:pt-0" key={`${issue.type}-${issue.severity}`}>
+            <p className="text-sm font-medium">
+              {issue.title}
+              <span className="ml-2 text-xs text-muted">
+                {issue.severity === 'ERROR' ? '需修正' : '提醒'}
+              </span>
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              涉及 {issue.affectedCount} 处
+              {issue.rows.length ? `，Excel 第 ${issue.rows.slice(0, 4).join('、')} 行等` : ''}。
+              {rateImportIssueActionText(issue.type)}
+            </p>
+          </div>
+        ))}
+      </div>
+      {needsBasics ? (
+        <div className="mt-3 border-t border-border pt-4">
+          <p className="text-sm font-medium">整张表使用相同的有效期或币种？在这里统一补充</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="text-xs">
+              生效日期
+              <input
+                className={`${inputClass} mt-1.5`}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, effectiveDate: event.target.value }))
+                }
+                type="date"
+                value={draft.effectiveDate}
+              />
+            </label>
+            <label className="text-xs">
+              截止日期
+              <input
+                className={`${inputClass} mt-1.5`}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, expiryDate: event.target.value }))
+                }
+                type="date"
+                value={draft.expiryDate}
+              />
+            </label>
+            <label className="text-xs">
+              币种
+              <select
+                className={`${inputClass} mt-1.5`}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, currency: event.target.value }))
+                }
+                value={draft.currency}
+              >
+                <option value="">不补充币种</option>
+                {currencyOptions.map((currency) => (
+                  <option key={currency}>{currency}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <button
+            className={`${secondaryButton} mt-3`}
+            onClick={() => onApply(draft)}
+            type="button"
+          >
+            应用并更新预览
+          </button>
+        </div>
+      ) : null}
+    </details>
+  );
 }
 
 function ImportResultPanel({ importJob }: { importJob: RateImport }) {
-  return <section className={`rounded border p-4 ${importJob.status === 'FAILED' ? 'border-danger/20 bg-danger/5' : importJob.status === 'COMPLETED' ? 'border-success/20 bg-success/5' : 'border-border bg-background'}`}><div className="flex items-center justify-between"><h3 className="text-sm font-semibold">{importJob.status === 'COMPLETED' ? '导入完成' : '导入进度'}</h3><StatusBadge tone={importJob.status === 'COMPLETED' ? 'success' : importJob.status === 'FAILED' ? 'danger' : 'info'}>{importJob.status === 'PENDING' ? '等待处理' : importJob.status === 'PROCESSING' ? '正在处理' : importJob.status === 'COMPLETED' ? '导入完成' : '导入失败'}</StatusBadge></div><dl className="mt-3 grid grid-cols-3 gap-3 text-sm"><div><dt className="text-muted">运价行</dt><dd className="mt-1 font-semibold">{importJob.totalRows}</dd></div><div><dt className="text-muted">成功</dt><dd className="mt-1 font-semibold text-success">{importJob.successRows}</dd></div><div><dt className="text-muted">跳过</dt><dd className="mt-1 font-semibold text-danger">{importJob.failedRows}</dd></div></dl>{importJob.errorMessage ? <p className="mt-3 text-sm text-danger">{humanizeImportJobError(importJob.errorMessage)}</p> : null}</section>;
+  return (
+    <section
+      className={`rounded border p-4 ${importJob.status === 'FAILED' ? 'border-danger/20 bg-danger/5' : importJob.status === 'COMPLETED' ? 'border-success/20 bg-success/5' : 'border-border bg-background'}`}
+    >
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">
+          {importJob.status === 'COMPLETED' ? '导入完成' : '导入进度'}
+        </h3>
+        <StatusBadge
+          tone={
+            importJob.status === 'COMPLETED'
+              ? 'success'
+              : importJob.status === 'FAILED'
+                ? 'danger'
+                : 'info'
+          }
+        >
+          {importJob.status === 'PENDING'
+            ? '等待处理'
+            : importJob.status === 'PROCESSING'
+              ? '正在处理'
+              : importJob.status === 'COMPLETED'
+                ? '导入完成'
+                : '导入失败'}
+        </StatusBadge>
+      </div>
+      <dl className="mt-3 grid grid-cols-3 gap-3 text-sm">
+        <div>
+          <dt className="text-muted">运价行</dt>
+          <dd className="mt-1 font-semibold">{importJob.totalRows}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">成功</dt>
+          <dd className="mt-1 font-semibold text-success">{importJob.successRows}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">失败</dt>
+          <dd className="mt-1 font-semibold text-danger">{importJob.failedRows}</dd>
+        </div>
+      </dl>
+      {importJob.errorMessage ? (
+        <p className="mt-3 text-sm text-danger">{humanizeImportJobError(importJob.errorMessage)}</p>
+      ) : null}
+    </section>
+  );
 }
 
 function aggregateImportIssues(issues: RateImportPreview['issues']) {
@@ -447,6 +1205,7 @@ function localizeRateError(error: RateApiError): string {
     INVALID_RATE_VALIDITY: '失效日不能早于生效日。',
     DUPLICATE_CONTAINER_TYPE: '同一运价不能重复添加相同箱型。',
     INVALID_RATE_CHARGE: '请检查附加费用的计价单位和箱型。',
+    RATE_IN_USE: '这条运价已用于报价，不能删除。请通过编辑将其停用。',
     RATE_NOT_FOUND: '运价不存在或已无法访问。',
     PERMISSION_DENIED: '你没有维护运价的权限。',
   };

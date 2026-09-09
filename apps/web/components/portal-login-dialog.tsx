@@ -102,7 +102,7 @@ export function PortalLoginDialog({
             <input
               autoComplete="current-password"
               className={inputClass}
-              minLength={8}
+              minLength={6}
               onChange={(event) => setPassword(event.target.value)}
               required
               type="password"

@@ -318,7 +318,7 @@ export default function QuoteDetailPage() {
       </section>
       {formalQuotePublished && quote.customerTerms?.trim() ? (
         <section className="rounded border border-border bg-surface p-4">
-          <h2 className="text-sm font-semibold">报价条款</h2>
+          <h2 className="text-sm font-semibold">报价说明与条款</h2>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
             {quote.customerTerms}
           </p>

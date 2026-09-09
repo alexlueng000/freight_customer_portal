@@ -119,7 +119,6 @@ export class CustomersService {
 
     const data = {
       tenantId: context.tenantId,
-      code: dto.code,
       name: dto.name,
       shortName: this.optionalText(dto.shortName),
       countryCode: dto.countryCode,
@@ -134,11 +133,41 @@ export class CustomersService {
       status: dto.status,
       createdById: context.userId,
       updatedById: context.userId,
-    } satisfies Prisma.CustomerCompanyUncheckedCreateInput;
+    } satisfies Omit<Prisma.CustomerCompanyUncheckedCreateInput, 'code'>;
 
     try {
       return await this.prisma.$transaction(async (transaction) => {
-        const customer = await transaction.customerCompany.create({ data, select: customerSelect });
+        let code = dto.code;
+        if (!code) {
+          const now = new Date();
+          const yearMonth = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+          // Increment the existing tenant counter inside the customer/audit transaction.
+          // Skip historical manually assigned codes without changing those records.
+          do {
+            const counter = await transaction.businessNumberCounter.upsert({
+              where: {
+                tenantId_type_yearMonth: {
+                  tenantId: context.tenantId,
+                  type: 'CUSTOMER',
+                  yearMonth,
+                },
+              },
+              create: { tenantId: context.tenantId, type: 'CUSTOMER', yearMonth, value: 1 },
+              update: { value: { increment: 1 } },
+              select: { value: true },
+            });
+            code = `CUS${yearMonth}${String(counter.value).padStart(6, '0')}`;
+          } while (
+            await transaction.customerCompany.findUnique({
+              where: { tenantId_code: { tenantId: context.tenantId, code } },
+              select: { id: true },
+            })
+          );
+        }
+        const customer = await transaction.customerCompany.create({
+          data: { ...data, code },
+          select: customerSelect,
+        });
         await transaction.auditLog.create({
           data: {
             tenantId: context.tenantId,

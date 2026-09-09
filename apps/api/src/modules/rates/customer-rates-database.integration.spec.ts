@@ -150,6 +150,21 @@ describe('customer rate search database integration', () => {
     );
     expect(result.items[0]?.sellAmount).toBe('1050');
   });
+  it.each(['上海', 'shanghai', 'cnsha', 'SHA'])('searches by %s with tenant isolation and localized names', async (pol) => {
+    const result = await runAs(tenantA, fixedUser, fixedCustomer, () =>
+      service.search({ ...query('40HQ'), polCode: undefined, podCode: undefined, pol, pod: '洛杉矶' }),
+    );
+    expect(result.pagination.total).toBe(1);
+    expect(result.items[0]).toMatchObject({ polCode: 'CNSHA', polDisplayName: '上海', podDisplayName: '洛杉矶' });
+  });
+  it('combines origin and destination filters and does not broaden unknown searches', async () => {
+    for (const pol of ['厦门', '深圳', '不存在的港口', '%', '_']) {
+      const result = await runAs(tenantA, fixedUser, fixedCustomer, () =>
+        service.search({ ...query('40HQ'), polCode: undefined, pol, pod: '洛杉矶' }),
+      );
+      expect(result.pagination.total).toBe(0);
+    }
+  });
   it('does not return inactive or cross-tenant rates', async () => {
     const result = await runAs(tenantA, fixedUser, fixedCustomer, () =>
       service.search(query('40HQ')),

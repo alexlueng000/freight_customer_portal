@@ -1,4 +1,5 @@
 import { CustomerStatus, MarkupType } from '@prisma/client';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsEnum,
@@ -15,12 +16,17 @@ import {
 const decimalPattern = /^\d{1,14}(?:\.\d{1,4})?$/;
 
 export class CreateCustomerDto {
+  @ApiPropertyOptional({
+    description:
+      'Omit to generate a tenant-unique customer code. Explicit codes remain supported for existing integrations.',
+  })
+  @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
   @IsString()
   @Matches(/^[A-Z0-9][A-Z0-9_-]{0,49}$/)
-  code!: string;
+  code?: string;
 
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()

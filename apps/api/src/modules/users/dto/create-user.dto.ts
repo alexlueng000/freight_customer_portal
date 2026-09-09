@@ -16,7 +16,7 @@ export class CreateUserDto {
   displayName!: string;
 
   @IsString()
-  @Length(12, 128)
+  @Length(6, 128)
   initialPassword!: string;
 
   @IsEnum(UserType)

@@ -372,11 +372,13 @@ describe('quote database integration', () => {
     const updated = await runInternal(() =>
       service.overridePrices(quoteId, {
         reason: 'Approved sales adjustment',
+        customerTerms: '增加提货服务，费用范围以本报价明细为准。',
         items: [{ itemId: item.id, unitPrice: '1400' }],
       }),
     );
     expect(updated.totalAmount.toString()).toBe('2900');
     expect(updated.version).toBe(2);
+    expect((await runInternal(() => service.getInternal(quoteId))).customerTerms).toBe('增加提货服务，费用范围以本报价明细为准。');
     const stored = await prisma.quoteItem.findUniqueOrThrow({ where: { id: item.id } });
     expect(stored.originalUnitPrice?.toString()).toBe('1300');
     expect(stored.unitPrice.toString()).toBe('1400');
@@ -391,6 +393,12 @@ describe('quote database integration', () => {
   it('enforces send, viewed and accept transitions with idempotent acceptance', async () => {
     await runInternal(() => service.send(quoteId));
     const sentQuote = await runInternal(() => service.getInternal(quoteId));
+    const visible = await runAs(tenantA, userA, customerA, () => service.get(quoteId));
+    expect(visible.customerTerms).toBe('增加提货服务，费用范围以本报价明细为准。');
+    expect(JSON.stringify(visible)).not.toContain('Approved sales adjustment');
+    const pdf = await runAs(tenantA, userA, customerA, () => service.getPdfJobData(quoteId, false));
+    expect(JSON.stringify(pdf)).toContain('增加提货服务，费用范围以本报价明细为准。');
+    expect(JSON.stringify(pdf)).not.toContain('Approved sales adjustment');
     expect(sentQuote.sentAt).toBeDefined();
     expect(sentQuote.sentBy).toMatchObject({ id: internalUser });
     try {
@@ -410,7 +418,7 @@ describe('quote database integration', () => {
     expect(viewed.status).toBe('VIEWED');
     expect(viewed.totalAmount?.toString()).toBe('2900');
     expect(viewed.items.map((item) => item.amount.toString())).toEqual(['2800', '20', '80']);
-    expect(viewed.customerTerms).toBe('Subject to space and equipment availability.');
+    expect(viewed.customerTerms).toBe('增加提货服务，费用范围以本报价明细为准。');
     const accepted = await runAs(tenantA, userA, customerA, () => service.accept(quoteId));
     expect(accepted.status).toBe('ACCEPTED');
     expect(accepted.acceptedAt).toBeDefined();

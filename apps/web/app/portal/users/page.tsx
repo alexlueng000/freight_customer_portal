@@ -49,9 +49,9 @@ class PortalUsersApiError extends Error {
 }
 
 const createUserSchema = z.object({
-  displayName: z.string().trim().min(1, '显示名称为必填项').max(150),
+  displayName: z.string().trim().min(1, '用户名为必填项').max(150),
   email: z.string().trim().email('请输入有效邮箱').max(320),
-  initialPassword: z.string().min(12, '初始密码至少需要 12 个字符').max(128),
+  initialPassword: z.string().min(6, '初始密码至少需要 6 个字符').max(128),
   roleCode: z.enum(['CUSTOMER_ADMIN', 'CUSTOMER_USER']),
   status: z.enum(['INVITED', 'ACTIVE']),
 });
@@ -379,7 +379,7 @@ function CreateCustomerUserDialog({
       </div>
       <form className="space-y-4 p-5" onSubmit={(event) => void submit(event)}>
         {submitError ? <FormError message={submitError} /> : null}
-        <FormField error={errors.displayName?.message} label="显示名称 *">
+        <FormField error={errors.displayName?.message} label="用户名 *">
           <input {...register('displayName')} className={inputClass} />
         </FormField>
         <FormField error={errors.email?.message} label="邮箱 *">
@@ -393,7 +393,7 @@ function CreateCustomerUserDialog({
             type="password"
           />
           <span className="mt-1 block text-xs text-muted">
-            至少 12 个字符；不会显示在列表或审计日志中。
+            至少 6 个字符。
           </span>
         </FormField>
         <FormField error={errors.roleCode?.message} label="角色 *">

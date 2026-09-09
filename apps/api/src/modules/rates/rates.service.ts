@@ -11,6 +11,7 @@ const rateSelect = {
   carrierCode: true, serviceName: true, effectiveDate: true, expiryDate: true, etd: true,
   transitDays: true, supplierName: true, contractNo: true, currency: true, status: true,
   createdAt: true, updatedAt: true,
+  _count: { select: { quotes: true } },
   prices: { select: { id: true, containerType: true, costAmount: true, sellAmount: true, currency: true, remark: true }, orderBy: { containerType: 'asc' as const } },
   charges: { select: { id: true, chargeCode: true, chargeName: true, chargeBasis: true, containerType: true, amount: true, currency: true, isIncluded: true }, orderBy: [{ chargeCode: 'asc' as const }, { id: 'asc' as const }] },
 } satisfies Prisma.RateSelect;
@@ -78,6 +79,27 @@ export class RatesService {
         return rate;
       });
     } catch (error) { this.rethrowConflict(error); }
+  }
+
+  async remove(id: string) {
+    const context = this.requireInternalUser();
+    return this.prisma.$transaction(async (tx) => {
+      // Block concurrent quote FK inserts until the reference check and deletion finish.
+      // The existing FK uses SET NULL, so checking without a row lock loses history in a race.
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "Rate" WHERE "id" = ${id} AND "tenantId" = ${context.tenantId} FOR UPDATE
+      `;
+      if (!locked.length) throw new NotFoundException({ code: 'RATE_NOT_FOUND', message: '运价不存在或已删除。' });
+      const existing = await tx.rate.findFirstOrThrow({ where: { id, tenantId: context.tenantId }, select: rateSelect });
+      const reference = await tx.quote.findFirst({ where: { tenantId: context.tenantId, sourceRateId: id }, select: { id: true } });
+      if (reference) throw new ConflictException({ code: 'RATE_IN_USE', message: '这条运价已用于报价，不能删除。请通过编辑将其停用。' });
+      await tx.auditLog.create({ data: {
+        tenantId: context.tenantId, actorUserId: context.userId,
+        entityType: 'Rate', entityId: id, action: 'RATE_DELETED', beforeData: this.auditData(existing),
+      } });
+      await tx.rate.delete({ where: { id, tenantId: context.tenantId } });
+      return { id, deleted: true };
+    });
   }
 
   private requireInternalUser() {

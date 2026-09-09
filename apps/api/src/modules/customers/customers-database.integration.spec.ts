@@ -57,6 +57,7 @@ describe('customers database integration', () => {
       await prisma.customerContact.deleteMany({ where: { tenantId: { in: tenantIds } } });
       await prisma.customerCompany.deleteMany({ where: { tenantId: { in: tenantIds } } });
       await prisma.role.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.businessNumberCounter.deleteMany({ where: { tenantId: { in: tenantIds } } });
       await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
     }
     await prisma.$disconnect();
@@ -132,6 +133,32 @@ describe('customers database integration', () => {
         where: { tenantId: tenantAId, entityId: customerAId, action: 'CUSTOMER_UPDATED' },
       }),
     ).resolves.toBe(3);
+  });
+
+  it('generates unique codes concurrently, skips historical codes, and persists optional tax IDs', async () => {
+    const now = new Date();
+    const month = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const historicalCode = `CUS${month}000001`;
+    const historical = await runAs(tenantAId, adminAId, undefined, () =>
+      customers.create(customerInput(historicalCode, 'Historical customer')),
+    );
+    const created = await Promise.all(Array.from({ length: 4 }, (_, index) =>
+      runAs(tenantAId, adminAId, undefined, () => customers.create({
+        ...customerInput('unused', `Generated customer ${index}`), code: undefined, taxId: 'TAX-123',
+      })),
+    ));
+    expect(new Set(created.map(customer => customer.code)).size).toBe(4);
+    for (const customer of created) {
+      expect(customer.code).toMatch(/^CUS\d{6}\d{6,}$/);
+      expect(customer.code).not.toBe(historicalCode);
+      expect(customer.taxId).toBe('TAX-123');
+      await expect(prisma.auditLog.count({ where: { tenantId: tenantAId, entityId: customer.id, action: 'CUSTOMER_CREATED' } })).resolves.toBe(1);
+    }
+    const otherTenant = await runAs(tenantBId, adminBId, undefined, () =>
+      customers.create({ ...customerInput('unused', 'Generated B'), code: undefined }),
+    );
+    expect(otherTenant.code).toBe(historicalCode);
+    await expect(prisma.customerCompany.findUnique({ where: { id: historical.id } })).resolves.toMatchObject({ code: historicalCode });
   });
 
   it('requires a sales role for the owner and assigns unowned draft quotes when binding a customer', async () => {

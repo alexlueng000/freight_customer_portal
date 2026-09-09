@@ -56,6 +56,7 @@ interface Quote {
   }>;
   customerTerms: string | null;
   internalNote: string | null;
+  priceOverrideReason: string | null;
   sentAt: string | null;
   sentBy: { id: string; displayName: string; email: string } | null;
   customer: { name: string };
@@ -86,6 +87,7 @@ export default function AdminQuoteDetailPage() {
   const [editing, setEditing] = useState(false);
   const [confirmingSend, setConfirmingSend] = useState(false);
   const [reason, setReason] = useState('');
+  const [priceExplanation, setPriceExplanation] = useState('');
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [reviewSaving, setReviewSaving] = useState(false);
   const [notice, setNotice] = useState<{ title: string; description: string } | null>(null);
@@ -185,6 +187,7 @@ export default function AdminQuoteDetailPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           reason,
+          customerTerms: priceExplanation.trim(),
           items: quote.items.map((item) => ({
             itemId: item.id,
             unitPrice: prices[item.id] ?? item.unitPrice,
@@ -196,6 +199,7 @@ export default function AdminQuoteDetailPage() {
       setEditing(false);
       setReason('');
       await load();
+      setNotice({ title: '改价与说明已保存', description: '客户说明已同步到报价条款，正式发布后客户可在报价页及 PDF 查看；内部原因仅员工可见。' });
     } catch (caught) {
       setError(errorMessage(caught, '价格调整失败。'));
     } finally {
@@ -283,6 +287,7 @@ export default function AdminQuoteDetailPage() {
                 onClick={() => {
                   setError('');
                   setReason('');
+                  setPriceExplanation(review.customerTerms);
                   setPrices(
                     Object.fromEntries(quote.items.map((item) => [item.id, item.unitPrice])),
                   );
@@ -361,104 +366,79 @@ export default function AdminQuoteDetailPage() {
           </button>
         </div>
       ) : null}
-      <section className="rounded border border-border bg-surface">
-        <div className="border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold">条款与内部信息</h2>
-        </div>
-        <div className="grid gap-4 p-4 lg:grid-cols-[220px_1fr_1fr]">
-          <label className="block rounded border border-primary/10 bg-primary/5 p-3 text-sm">
-            <span className="inline-flex rounded bg-primary/10 px-2 py-1 text-xs font-bold text-primary">
-              有效期
-            </span>
-            <input
-              className="mt-3 h-10 w-full rounded border border-primary/20 bg-surface px-3 text-sm disabled:bg-sidebar/50"
-              disabled={quote.status !== 'DRAFT' || reviewSaving}
-              max={quote.sourceRate?.expiryDate.slice(0, 10)}
-              onChange={(event) =>
-                setReview((value) => ({ ...value, validUntil: event.target.value }))
-              }
-              type="date"
-              value={review.validUntil}
-            />
-            <span className="mt-1 block text-xs text-muted">
-              不得超过 Rate Valid To {quote.sourceRate?.expiryDate.slice(0, 10) ?? '—'}
-            </span>
-          </label>
-          <label className="block rounded border border-success/15 bg-success/5 p-3 text-sm">
-            <span className="inline-flex rounded bg-success/10 px-2 py-1 text-xs font-bold text-success">
-              客户可见报价条款
-            </span>
-            <textarea
-              className="mt-3 min-h-28 w-full rounded border border-success/20 bg-surface p-3 text-sm disabled:bg-sidebar/50"
-              disabled={quote.status !== 'DRAFT' || reviewSaving}
-              maxLength={2000}
-              onChange={(event) =>
-                setReview((value) => ({ ...value, customerTerms: event.target.value }))
-              }
-              value={review.customerTerms}
-            />
-          </label>
-          <label className="block rounded border border-warning/15 bg-warning/5 p-3 text-sm">
-            <span className="inline-flex rounded bg-warning/10 px-2 py-1 text-xs font-bold text-warning">
-              内部备注
-            </span>
-            <textarea
-              className="mt-3 min-h-28 w-full rounded border border-warning/20 bg-surface p-3 text-sm disabled:bg-sidebar/50"
-              disabled={quote.status !== 'DRAFT' || reviewSaving}
-              maxLength={2000}
-              onChange={(event) =>
-                setReview((value) => ({ ...value, internalNote: event.target.value }))
-              }
-              value={review.internalNote}
-            />
-          </label>
-        </div>
-        {quote.status === 'DRAFT' ? (
-          <div className="flex justify-end border-t border-border px-4 py-3">
-            <button
-              className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
-              disabled={reviewSaving}
-              onClick={() => void saveReview()}
-              type="button"
-            >
+      <section aria-label="报价审核信息" className="rounded border border-border bg-surface">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold">报价审核信息</h2>
+            <p className="mt-1 text-xs text-muted">确认有效期与对客条款，内部沟通内容单独记录。</p>
+          </div>
+          {quote.status === 'DRAFT' ? (
+            <button className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+              disabled={reviewSaving} onClick={() => void saveReview()} type="button">
               {reviewSaving ? '保存中…' : '保存审核信息'}
             </button>
+          ) : <span className="text-xs text-muted">当前状态下审核信息只读</span>}
+        </div>
+        <div className="space-y-5 p-5">
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+            <label className="block w-full text-sm sm:w-56">
+              <span className="font-medium">报价有效期至</span>
+              <input className="mt-2 h-10 w-full rounded border border-border bg-surface px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
+                disabled={quote.status !== 'DRAFT' || reviewSaving}
+                max={quote.sourceRate?.expiryDate.slice(0, 10)}
+                onChange={(event) => setReview((value) => ({ ...value, validUntil: event.target.value }))}
+                type="date" value={review.validUntil} />
+            </label>
+            <p className="pb-2 text-xs text-muted">{quote.sourceRate
+              ? '不能晚于来源运价到期日：' + quote.sourceRate.expiryDate.slice(0, 10)
+              : '请按与客户约定的报价有效期填写。'}</p>
           </div>
-        ) : null}
-      </section>
-      <section className="overflow-hidden rounded border border-border bg-surface">
-        <SectionHeader
-          description="销售审核时用于追溯成本来源、合约和发送记录。"
-          icon={<FileSearch aria-hidden className="size-4" />}
-          title="Reference Rate（内部参考运价）"
-        />
-        <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
-          <SourceFact emphasis label="来源 Rate" value={quote.sourceRate?.rateNo ?? '—'} />
-          <SourceFact label="Service" value={quote.sourceRate?.serviceName ?? '—'} />
-          <SourceFact label="Supplier" value={quote.sourceRate?.supplierName ?? '—'} />
-          <SourceFact label="Contract" value={quote.sourceRate?.contractNo ?? '—'} />
-          <SourceFact
-            label="Rate Valid From"
-            value={quote.sourceRate?.effectiveDate.slice(0, 10) ?? '—'}
-          />
-          <SourceFact
-            emphasis
-            label="Rate Valid To"
-            value={quote.sourceRate?.expiryDate.slice(0, 10) ?? '—'}
-          />
-          <SourceFact
-            label="Transit Time"
-            value={
-              quote.sourceRate?.transitDays === null || quote.sourceRate?.transitDays === undefined
-                ? '—'
-                : `${quote.sourceRate.transitDays} 天`
-            }
-          />
-          <SourceFact label="Quote Container" value={containerSummary} />
-          <SourceFact label="Sent At" value={quote.sentAt?.slice(0, 16).replace('T', ' ') ?? '—'} />
-          <SourceFact label="Sent By" value={quote.sentBy?.displayName ?? '—'} />
+          <div className="grid gap-5 md:grid-cols-2">
+            <label className="block text-sm">
+              <span className="font-medium">客户可见报价条款</span>
+              <span className="mt-1 block text-xs text-muted">用于向客户说明费用范围、有效条件及其他约定。</span>
+              <textarea className="mt-2 min-h-32 w-full rounded border border-border bg-surface p-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
+                disabled={quote.status !== 'DRAFT' || reviewSaving} maxLength={2000}
+                placeholder="例如：包含哪些费用，哪些费用需另行确认。"
+                onChange={(event) => setReview((value) => ({ ...value, customerTerms: event.target.value }))}
+                value={review.customerTerms} />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium">内部备注</span>
+              <span className="mt-1 block text-xs text-muted">仅内部员工可见，不展示给客户。</span>
+              <textarea className="mt-2 min-h-32 w-full rounded border border-border bg-surface p-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
+                disabled={quote.status !== 'DRAFT' || reviewSaving} maxLength={2000}
+                placeholder="例如：待核实的采购成本、供应商沟通结果。"
+                onChange={(event) => setReview((value) => ({ ...value, internalNote: event.target.value }))}
+                value={review.internalNote} />
+            </label>
+          </div>
         </div>
       </section>
+      <details className="group rounded border border-border bg-surface">
+        <summary className="cursor-pointer rounded px-5 py-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <span className="font-semibold">运价来源与发送记录</span>
+          <span className="ml-3 text-xs text-muted">仅内部可见 · 展开核对供应商、合约和有效期</span>
+        </summary>
+        <div className="border-t border-border p-5">
+          {quote.sourceRate ? (
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+              <SourceFact label="来源运价编号" value={quote.sourceRate.rateNo} />
+              <SourceFact label="供应商" value={quote.sourceRate.supplierName || '未填写'} />
+              <SourceFact label="合约编号" value={quote.sourceRate.contractNo || '未填写'} />
+              <SourceFact label="服务名称" value={quote.sourceRate.serviceName || '未填写'} />
+              <SourceFact label="运价有效期" value={quote.sourceRate.effectiveDate.slice(0, 10) + ' 至 ' + quote.sourceRate.expiryDate.slice(0, 10)} />
+              <SourceFact label="预计航程" value={quote.sourceRate.transitDays == null ? '未填写' : quote.sourceRate.transitDays + ' 天'} />
+            </div>
+          ) : <p className="text-sm text-muted">这份报价未关联来源运价。</p>}
+          <p className="mt-4 text-xs text-muted">用于追溯当前关联的运价。报价成本快照及利润请查看下方费用信息。</p>
+          <div className="mt-4 border-t border-border pt-4 text-sm">
+            {quote.sentAt
+              ? '最近发送：' + new Date(quote.sentAt).toLocaleString('zh-CN') + ' · ' + (quote.sentBy?.displayName || '未记录发送人')
+              : '尚未向客户发送正式报价。'}
+          </div>
+        </div>
+      </details>
       <section className="overflow-hidden rounded border border-border bg-surface">
         <SectionHeader
           description="按币种分别汇总，避免不同币种利润被混在一起。"
@@ -522,6 +502,16 @@ export default function AdminQuoteDetailPage() {
           </table>
         </div>
       </section>
+      <section aria-label="最近一次改价原因" className="rounded border border-border bg-surface p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold">最近一次改价原因</h3>
+          <span className="text-xs text-muted">仅内部可见</span>
+        </div>
+        <p className="mt-2 whitespace-pre-wrap break-words text-sm">
+          {quote.priceOverrideReason || '暂无改价记录。'}
+        </p>
+        <p className="mt-2 text-xs text-muted">此处展示最近一次保存的原因；历次改价保留在审计日志中。</p>
+      </section>
       {editing ? (
         <div
           aria-describedby="price-adjustment-description"
@@ -548,7 +538,7 @@ export default function AdminQuoteDetailPage() {
                   调整报价价格
                 </h2>
                 <p className="mt-1 text-sm text-muted" id="price-adjustment-description">
-                  修改销售单价并填写原因。系统会保留原价、修改价、操作人与时间。
+                  调整单价后，分别填写客户可见说明和内部原因，随价格一起保存。
                 </p>
               </div>
               <button
@@ -599,7 +589,7 @@ export default function AdminQuoteDetailPage() {
                 ))}
               </div>
               <label className="mt-4 block text-sm" htmlFor="price-adjustment-reason">
-                <FieldLabel label="改价原因" required />
+                <FieldLabel label="内部改价原因" required />
                 <textarea
                   className="mt-1 min-h-24 w-full resize-y rounded border border-border bg-surface p-3 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   id="price-adjustment-reason"
@@ -609,7 +599,21 @@ export default function AdminQuoteDetailPage() {
                   value={reason}
                 />
                 <span className="mt-1 block text-xs text-muted">
-                  至少填写 3 个字符，仅内部可见。
+                  至少填写 3 个字符，仅内部可见。填写原因不会自动新增费用项，请核对上方单价。
+                </span>
+              </label>
+              <label className="mt-4 block text-sm" htmlFor="price-explanation">
+                <FieldLabel label="客户可见报价说明与条款" required />
+                <textarea
+                  className="mt-1 min-h-24 w-full resize-y rounded border border-border bg-surface p-3 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  id="price-explanation"
+                  maxLength={2000}
+                  onChange={(event) => setPriceExplanation(event.target.value)}
+                  placeholder="请说明价格调整的原因、包含的服务及费用范围。"
+                  value={priceExplanation}
+                />
+                <span className="mt-1 block text-xs text-muted">
+                  正式发布后展示在客户报价页及 PDF。这里与报价条款共用内容，请保留已有约定，不要填写内部成本或利润。
                 </span>
               </label>
               {error ? (
@@ -637,7 +641,7 @@ export default function AdminQuoteDetailPage() {
               </button>
               <button
                 className="h-10 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
-                disabled={acting || reason.trim().length < 3}
+                disabled={acting || reason.trim().length < 3 || priceExplanation.trim().length < 3}
                 onClick={() => void savePrices()}
                 type="button"
               >
@@ -935,9 +939,9 @@ function SourceFact({
   emphasis?: boolean;
 }) {
   return (
-    <div className="bg-surface px-4 py-3">
+    <div className="min-w-0">
       <div className="text-xs text-muted">{label}</div>
-      <div className={`mt-1 text-sm ${emphasis ? 'font-bold text-foreground' : 'font-semibold'}`}>
+      <div className={`mt-1 break-words text-sm ${emphasis ? 'font-bold text-foreground' : 'font-semibold'}`}>
         {value}
       </div>
     </div>

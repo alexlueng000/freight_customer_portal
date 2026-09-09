@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
+import { CreateUserDialog } from '@/components/create-user-dialog';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
 import { LoadingState } from '@/components/loading-state';
@@ -20,12 +21,7 @@ type CustomerStatus = 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
 type MarkupType = 'NONE' | 'FIXED' | 'PERCENT';
 type UserStatus = 'INVITED' | 'ACTIVE' | 'LOCKED' | 'DISABLED';
 type RoleCode =
-  | 'TENANT_ADMIN'
-  | 'SALES'
-  | 'OPERATION'
-  | 'FINANCE'
-  | 'CUSTOMER_ADMIN'
-  | 'CUSTOMER_USER';
+  'TENANT_ADMIN' | 'SALES' | 'OPERATION' | 'FINANCE' | 'CUSTOMER_ADMIN' | 'CUSTOMER_USER';
 
 interface CustomerDetail {
   id: string;
@@ -191,6 +187,9 @@ export default function CustomerDetailPage() {
   const [error, setError] = useState<CustomerDetailApiError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountsError, setAccountsError] = useState(false);
+  const [accountsLoading, setAccountsLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -217,6 +216,8 @@ export default function CustomerDetailPage() {
 
   useEffect(() => {
     if (!hasPermission(user, 'user.read')) return;
+    setAccountsLoading(true);
+    setAccountsError(false);
     const customerQuery = new URLSearchParams({
       page: '1',
       pageSize: '100',
@@ -242,10 +243,12 @@ export default function CustomerDetailPage() {
         );
       })
       .catch(() => {
+        setAccountsError(true);
         setCustomerAccounts([]);
         setSalesUsers([]);
-      });
-  }, [apiFetch, customerId, user]);
+      })
+      .finally(() => setAccountsLoading(false));
+  }, [apiFetch, customerId, user, reloadKey]);
 
   const canCreate = hasPermission(user, 'customer.manage');
 
@@ -298,14 +301,6 @@ export default function CustomerDetailPage() {
         actions={
           canCreate ? (
             <div className="flex gap-2">
-              {hasPermission(user, 'user.manage') ? (
-                <Link
-                  className="inline-flex h-9 items-center rounded border border-border px-4 text-sm font-semibold"
-                  href={`/admin/users?customerCompanyId=${customerId}&createCustomer=1`}
-                >
-                  开通客户账号
-                </Link>
-              ) : null}
               <button
                 className="inline-flex h-9 items-center gap-2 rounded border border-border px-4 text-sm font-semibold"
                 onClick={() => setEditOpen(true)}
@@ -392,15 +387,27 @@ export default function CustomerDetailPage() {
             <p className="mt-1 text-sm text-muted">该公司下可登录客户门户的账号。</p>
           </div>
           {hasPermission(user, 'user.manage') ? (
-            <Link
-              className="inline-flex h-9 items-center rounded border border-border px-4 text-sm font-semibold"
-              href={`/admin/users?customerCompanyId=${customerId}&createCustomer=1`}
+            <button
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded bg-primary px-4 text-sm font-semibold text-surface hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              onClick={() => setAccountOpen(true)}
+              type="button"
             >
-              开通账号
-            </Link>
+              <Plus aria-hidden className="size-4" />
+              开通客户账号
+            </button>
           ) : null}
         </div>
-        {customerAccounts.length === 0 ? (
+        {!hasPermission(user, 'user.read') ? (
+          <p className="p-5 text-sm text-muted">暂无查看客户账号的权限。</p>
+        ) : accountsLoading ? (
+          <LoadingState rows={2} />
+        ) : accountsError ? (
+          <ErrorState
+            title="客户账号加载失败"
+            description="请重试加载账号列表。"
+            onRetry={() => setReloadKey((value) => value + 1)}
+          />
+        ) : customerAccounts.length === 0 ? (
           <div className="p-4">
             <EmptyState title="暂无客户账号" description="开通账号后，登录用户会显示在这里。" />
           </div>
@@ -413,6 +420,19 @@ export default function CustomerDetailPage() {
         )}
       </section>
 
+      {accountOpen && hasPermission(user, 'user.manage') ? (
+        <CreateUserDialog
+          apiFetch={apiFetch}
+          lockedCustomer={customer}
+          customers={[customer]}
+          onClose={() => setAccountOpen(false)}
+          onCreated={() => {
+            setAccountOpen(false);
+            setNotice('客户账号已开通。');
+            setReloadKey((value) => value + 1);
+          }}
+        />
+      ) : null}
       {createOpen ? (
         <CreateContactDialog
           apiFetch={apiFetch}
@@ -678,7 +698,9 @@ function ContactRow({ contact }: { contact: CustomerContact }) {
       </div>
       <div className="flex flex-wrap gap-2 md:justify-end">
         {labels.length ? (
-          labels.map((label) => <StatusBadge key={label}>{label}</StatusBadge>)
+          labels.map((label) => (
+            <StatusBadge key={label} tone={label === '主要联系人' ? 'info' : label === '订舱联系人' ? 'success' : 'warning'}>{label}</StatusBadge>
+          ))
         ) : (
           <span className="text-sm text-muted">普通联系人</span>
         )}

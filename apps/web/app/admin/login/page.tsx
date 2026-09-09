@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { AuthApiError } from '@/lib/auth';
+import { canAccessPath } from '@/lib/navigation-permissions';
 
 export default function AdminLoginPage() {
   return (
@@ -24,31 +25,43 @@ function AdminLoginContent() {
   const auth = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tenantCode, setTenantCode] = useState(
-    process.env.NODE_ENV === 'development' ? 'DEMO' : '',
-  );
+  const tenantCode = (
+    searchParams.get('tenantCode') ?? (process.env.NODE_ENV === 'development' ? 'DEMO' : '')
+  )
+    .trim()
+    .toUpperCase();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    if (auth.initialized && auth.user)
-      router.replace(auth.user.userType === 'INTERNAL' ? '/admin' : '/portal');
-  }, [auth.initialized, auth.user, router]);
+    if (!auth.initialized || !auth.user) return;
+    if (auth.user.userType !== 'INTERNAL') {
+      router.replace('/portal');
+      return;
+    }
+    const next = searchParams.get('next');
+    const pathname = next?.split(/[?#]/)[0] ?? '';
+    const allowed = (pathname === '/admin' || pathname.startsWith('/admin/'))
+      && !pathname.startsWith('/admin/login')
+      && !next?.includes('\\')
+      && !pathname.includes('%')
+      && !pathname.split('/').includes('..')
+      && canAccessPath(pathname, auth.user.permissions);
+    router.replace(allowed && next ? next : '/admin');
+  }, [auth.initialized, auth.user, router, searchParams]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!tenantCode) {
+      setError('请通过公司提供的专属登录链接访问，或联系管理员。');
+      return;
+    }
     setSubmitting(true);
     setError(undefined);
     try {
-      const user = await auth.login({ tenantCode, email, password });
-      if (user.userType !== 'INTERNAL') {
-        await auth.logout();
-        return;
-      }
-      const next = searchParams.get('next');
-      router.replace(next && (next === '/admin' || next.startsWith('/admin/')) ? next : '/admin');
+      await auth.login({ tenantCode, email, password }, 'INTERNAL');
     } catch (caught) {
       setError(caught instanceof AuthApiError ? caught.message : '登录失败，请稍后重试。');
     } finally {
@@ -81,14 +94,22 @@ function AdminLoginContent() {
         <div className="w-full max-w-md">
           <p className="text-sm font-semibold text-primary">运营后台</p>
           <h2 className="mt-2 text-3xl font-semibold">员工登录</h2>
-          <p className="mt-2 text-sm text-muted">使用租户代码和企业邮箱登录。</p>
+          <p className="mt-2 text-sm text-muted">使用企业邮箱和密码登录。</p>
           <form className="mt-8 space-y-5" onSubmit={(event) => void submit(event)}>
-            <Field
-              label="租户代码"
-              value={tenantCode}
-              onChange={setTenantCode}
-              autoComplete="organization"
-            />
+            <label className="block text-sm font-medium">
+              租户代码
+              <input
+                aria-label="租户代码"
+                className="mt-2 h-11 w-full rounded border border-border bg-sidebar px-3 text-muted"
+                value={tenantCode}
+                readOnly
+              />
+              <span className="mt-1.5 block text-xs text-muted">
+                {tenantCode
+                  ? '已由公司登录入口确定，无需填写。'
+                  : '请通过公司提供的专属登录链接访问，或联系管理员。'}
+              </span>
+            </label>
             <Field
               label="邮箱"
               value={email}
@@ -114,7 +135,7 @@ function AdminLoginContent() {
             ) : null}
             <button
               className="inline-flex h-11 w-full items-center justify-center gap-2 rounded bg-primary px-4 text-sm font-semibold text-white disabled:opacity-60"
-              disabled={submitting}
+              disabled={submitting || !tenantCode}
               type="submit"
             >
               {submitting ? (

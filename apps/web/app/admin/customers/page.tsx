@@ -21,12 +21,7 @@ import { hasPermission } from '@/lib/auth';
 type CustomerStatus = 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
 type MarkupType = 'NONE' | 'FIXED' | 'PERCENT';
 type RoleCode =
-  | 'TENANT_ADMIN'
-  | 'SALES'
-  | 'OPERATION'
-  | 'FINANCE'
-  | 'CUSTOMER_ADMIN'
-  | 'CUSTOMER_USER';
+  'TENANT_ADMIN' | 'SALES' | 'OPERATION' | 'FINANCE' | 'CUSTOMER_ADMIN' | 'CUSTOMER_USER';
 
 interface Customer {
   id: string;
@@ -86,14 +81,9 @@ const optionalDecimal = z
 
 const customerSchema = z
   .object({
-    code: z
-      .string()
-      .trim()
-      .min(1, '客户代码为必填项')
-      .max(50, '客户代码不能超过 50 个字符')
-      .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, '仅支持字母、数字、下划线和连字符'),
     name: z.string().trim().min(1, '公司名称为必填项').max(200),
     shortName: z.string().trim().max(100),
+    taxId: z.string().trim().max(100, '税号不能超过 100 个字符'),
     countryCode: z
       .string()
       .trim()
@@ -209,9 +199,7 @@ export default function CustomersPage() {
     )
       .then((result) =>
         setSalesUsers(
-          result.items.filter((item) =>
-            item.userRoles.some(({ role }) => role.code === 'SALES'),
-          ),
+          result.items.filter((item) => item.userRoles.some(({ role }) => role.code === 'SALES')),
         ),
       )
       .catch(() => setSalesUsers([]));
@@ -458,7 +446,7 @@ function CreateCustomerDialog({
   } = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
-      code: '',
+      taxId: '',
       name: '',
       shortName: '',
       countryCode: '',
@@ -475,7 +463,7 @@ function CreateCustomerDialog({
   const submit = handleSubmit(async (values) => {
     setSubmitError(null);
     const payload = {
-      code: values.code.trim().toUpperCase(),
+      ...(values.taxId ? { taxId: values.taxId.trim() } : {}),
       name: values.name.trim(),
       ...(values.shortName ? { shortName: values.shortName.trim() } : {}),
       ...(values.countryCode ? { countryCode: values.countryCode.trim().toUpperCase() } : {}),
@@ -540,9 +528,6 @@ function CreateCustomerDialog({
 
           <fieldset className="grid gap-4 sm:grid-cols-2">
             <legend className="col-span-full mb-1 text-sm font-semibold">基本信息</legend>
-            <FormField error={errors.code?.message} label="客户代码 *">
-              <input {...register('code')} className={inputClass} placeholder="例如 NORTHSTAR" />
-            </FormField>
             <FormField error={errors.name?.message} label="公司名称 *">
               <input
                 {...register('name')}
@@ -559,6 +544,14 @@ function CreateCustomerDialog({
                 className={inputClass}
                 maxLength={2}
                 placeholder="CN"
+              />
+            </FormField>
+            <FormField error={errors.taxId?.message} label="税号">
+              <input
+                {...register('taxId')}
+                className={inputClass}
+                maxLength={100}
+                placeholder="选填，可稍后补充"
               />
             </FormField>
             <FormField error={errors.status?.message} label="状态">
