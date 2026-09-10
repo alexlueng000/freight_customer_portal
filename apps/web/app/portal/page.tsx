@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { formatDate } from '@/lib/formatters';
 import { shipmentStatusLabel, shipmentStatusTone } from '@/lib/shipment-status';
+import { isPilotPathAvailable, isPilotNotificationAvailable } from '@/lib/pilot-scope';
 
 interface Booking {
   id: string;
@@ -75,7 +76,7 @@ export default function PortalPage() {
       const payload = (await response.json()) as DashboardResponse & { message?: string };
       if (!response.ok) throw new Error(payload.message ?? 'Dashboard 加载失败。');
       setDashboard(payload);
-      setNotifications(payload.notifications);
+      setNotifications(payload.notifications.filter(isPilotNotificationAvailable));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -88,7 +89,7 @@ export default function PortalPage() {
   }, [load]);
 
   const actions = useMemo<ActionRow[]>(() => {
-    return (dashboard?.actions ?? []).map((action) => ({
+    return (dashboard?.actions ?? []).filter((action) => isPilotPathAvailable(action.href)).map((action) => ({
       id: action.id,
       type: action.type,
       title: action.title,
@@ -115,29 +116,28 @@ export default function PortalPage() {
   };
   const stats = [
     {
-      label: '待处理 Quote',
+      label: '待处理报价',
       value: statsData.pendingQuotes,
       href: '/portal/quotes?status=pending',
     },
     {
-      label: '待处理 Booking',
+      label: '待处理订舱',
       value: statsData.actionBookings,
       href: '/portal/bookings?status=REVISION_REQUIRED',
     },
     {
-      label: '进行中 Shipment',
+      label: '进行中运输',
       value: statsData.activeShipments,
       href: '/portal/shipments?status=DEPARTED',
     },
-    { label: '待确认账单', value: statsData.issuedInvoices, href: '/portal/billing' },
   ];
 
   return (
     <div className="space-y-5">
       <PageHeader
-        description="查看需要处理的订舱资料、在途 Shipment、账单和关键通知。"
+        description="查看待确认报价、待补充资料、运输进展和最新通知。"
         eyebrow="客户门户"
-        title="仪表盘"
+        title="首页"
         actions={
           <Link
             className="inline-flex h-9 items-center rounded bg-primary px-4 text-sm font-semibold text-surface hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -154,7 +154,7 @@ export default function PortalPage() {
         <ErrorState description={error} onRetry={() => void load()} />
       ) : (
         <>
-          <section className="grid gap-3 xl:grid-cols-4">
+          <section className="grid gap-3 sm:grid-cols-3">
             {stats.map((stat) => (
               <Link
                 className="block min-h-24 rounded border border-border bg-surface p-4 transition hover:border-primary/30 hover:bg-sidebar"
@@ -170,7 +170,7 @@ export default function PortalPage() {
           <section className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
             <div className="rounded border border-border bg-surface">
               <div className="border-b border-border px-4 py-3">
-                <h2 className="text-sm font-semibold">近期 Shipment</h2>
+                <h2 className="text-sm font-semibold">近期运输</h2>
               </div>
               {activeShipments.length ? (
                 <>
@@ -202,7 +202,7 @@ export default function PortalPage() {
                     <table className="w-full min-w-[680px] text-left text-sm">
                       <thead>
                         <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                          <th className={head}>Shipment</th>
+                          <th className={head}>运输编号</th>
                           <th className={head}>航线</th>
                           <th className={head}>ETA</th>
                           <th className={head}>状态</th>
@@ -237,8 +237,8 @@ export default function PortalPage() {
               ) : (
                 <div className="p-4">
                   <EmptyState
-                    title="当前没有进行中的 Shipment"
-                    description="SO 发布并创建 Shipment 后，运输状态会显示在这里。"
+                    title="当前没有运输记录"
+                    description="货代建立运输记录后，开船与到港进展会显示在这里。"
                   />
                 </div>
               )}
@@ -271,7 +271,7 @@ export default function PortalPage() {
                   <div className="p-4">
                     <EmptyState
                       title="当前没有待处理事项"
-                      description="待确认或待创建订舱的 Quote、需要补充的 Booking 和待确认账单会集中显示在这里。"
+                      description="待确认报价、已接受但未订舱的报价和需要补充的订舱资料会显示在这里。"
                     />
                   </div>
                 )}
@@ -300,7 +300,7 @@ export default function PortalPage() {
                   <div className="p-4">
                     <EmptyState
                       title="当前没有未读通知"
-                      description="SO 发布、Shipment 更新和 Booking 补充提醒会显示在这里。"
+                      description="SO 发布、运输更新和订舱补料提醒会显示在这里。"
                     />
                   </div>
                 )}

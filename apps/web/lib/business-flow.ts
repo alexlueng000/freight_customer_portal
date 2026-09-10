@@ -15,6 +15,7 @@ export interface BusinessFlowState {
   currentStage: BusinessFlowStage;
   currentStageComplete: boolean;
   currentStatus: string;
+  stopped?: boolean;
 }
 
 export function resolveShipmentBusinessFlow(
@@ -23,10 +24,13 @@ export function resolveShipmentBusinessFlow(
 ): BusinessFlowState {
   const currentStatus = shipmentStatusLabel(shipment.status, audience);
   if (shipment.status === 'ARRIVED') {
-    return { currentStage: 'tracking', currentStageComplete: true, currentStatus };
+    return { currentStage: 'shipment', currentStageComplete: true, currentStatus };
   }
   if (shipment.status === 'DEPARTED') {
-    return { currentStage: 'tracking', currentStageComplete: false, currentStatus };
+    return { currentStage: 'shipment', currentStageComplete: false, currentStatus };
+  }
+  if (shipment.status === 'CANCELLED') {
+    return { currentStage: 'shipment', currentStageComplete: false, currentStatus, stopped: true };
   }
   return { currentStage: 'shipment', currentStageComplete: false, currentStatus };
 }
@@ -61,6 +65,7 @@ export function resolveBookingBusinessFlow(
       audience === 'portal'
         ? customerBookingStatusLabel(booking.status)
         : bookingStatusLabel(booking.status),
+    ...(['REJECTED', 'CANCELLED'].includes(booking.status) ? { stopped: true } : {}),
   };
 }
 
@@ -75,6 +80,7 @@ export function resolveQuoteBusinessFlow(
     currentStage: quote.status === 'BOOKED' ? 'booking' : 'formalQuote',
     currentStageComplete: quote.status === 'ACCEPTED',
     currentStatus: quoteStatusText,
+    ...(['REJECTED', 'CANCELLED', 'EXPIRED'].includes(quote.status) ? { stopped: true } : {}),
   };
 }
 

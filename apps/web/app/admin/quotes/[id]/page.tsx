@@ -396,10 +396,10 @@ export default function AdminQuoteDetailPage() {
           <div className="grid gap-5 md:grid-cols-2">
             <label className="block text-sm">
               <span className="font-medium">客户可见报价条款</span>
-              <span className="mt-1 block text-xs text-muted">用于向客户说明费用范围、有效条件及其他约定。</span>
+              <span className="mt-1 block text-xs text-muted">明确包含服务、不包含服务、费用及有效条件。客户勾选的需求不代表已承诺提供。</span>
               <textarea className="mt-2 min-h-32 w-full rounded border border-border bg-surface p-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
                 disabled={quote.status !== 'DRAFT' || reviewSaving} maxLength={2000}
-                placeholder="例如：包含哪些费用，哪些费用需另行确认。"
+                placeholder="包含服务与费用：…；不包含服务与费用：…；需另行确认的条件：…"
                 onChange={(event) => setReview((value) => ({ ...value, customerTerms: event.target.value }))}
                 value={review.customerTerms} />
             </label>

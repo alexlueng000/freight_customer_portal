@@ -14,6 +14,7 @@ import { bookingStatusLabel, bookingStatusTone } from '@/lib/booking-status';
 import type { StatusTone } from '@/lib/mock-data';
 import { quoteStatusLabel, quoteStatusTone } from '@/lib/quote-status';
 import { shipmentStatusLabel, shipmentStatusTone } from '@/lib/shipment-status';
+import { isPilotPathAvailable, isPilotNotificationAvailable } from '@/lib/pilot-scope';
 
 type AdminTaskType = 'QUOTE' | 'BOOKING' | 'SHIPMENT' | 'INVOICE' | 'CUSTOMER' | 'USER';
 
@@ -123,7 +124,7 @@ export default function AdminPage() {
       const payload = (await response.json()) as DashboardResponse & { message?: string };
       if (!response.ok) throw new Error(payload.message ?? 'Dashboard 加载失败。');
       setDashboard(payload);
-      setNotifications(payload.notifications);
+      setNotifications(payload.notifications.filter(isPilotNotificationAvailable));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -136,7 +137,7 @@ export default function AdminPage() {
   }, [load]);
 
   const tasks = useMemo<TaskRow[]>(() => {
-    return (dashboard?.tasks ?? []).map((task) => ({
+    return (dashboard?.tasks ?? []).filter((task) => isPilotPathAvailable(task.href)).map((task) => ({
       id: task.id,
       type: task.type,
       item: task.type === 'SHIPMENT' ? `${task.title} · ${task.route}` : task.title,
@@ -150,8 +151,14 @@ export default function AdminPage() {
   }, [dashboard]);
 
   const unread = notifications.filter((item) => !item.readAt);
-  const roleView = dashboard?.roleView ?? fallbackRoleView;
-  const summary = dashboard?.summary ?? fallbackSummary;
+  const configuredRoleView = dashboard?.roleView ?? fallbackRoleView;
+  const roleView = isPilotPathAvailable(configuredRoleView.primaryActionHref) ? configuredRoleView : {
+    ...configuredRoleView,
+    description: '查看客户和运输信息；当前版本暂未开放独立账单工作台。',
+    primaryActionHref: '/admin/shipments',
+    primaryActionLabel: '查看运输',
+  };
+  const summary = (dashboard?.summary ?? fallbackSummary).filter((item) => isPilotPathAvailable(item.href));
 
   return (
     <div className="space-y-5">

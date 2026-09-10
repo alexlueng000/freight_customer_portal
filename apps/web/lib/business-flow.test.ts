@@ -7,15 +7,25 @@ import {
   resolveShipmentBusinessFlow,
 } from './business-flow.ts';
 
+void test('stops rejected, cancelled and expired records without completing their stage', () => {
+  for (const status of ['REJECTED', 'EXPIRED', 'CANCELLED']) {
+    const result = resolveQuoteBusinessFlow({ status, bookings: [] }, status);
+    assert.equal(result.stopped, true);
+    assert.equal(result.currentStageComplete, false);
+  }
+  assert.equal(resolveBookingBusinessFlow({ status: 'CANCELLED', shipments: [] }).stopped, true);
+  assert.equal(resolveShipmentBusinessFlow({ status: 'CANCELLED' }).stopped, true);
+});
+
 void test('uses the linked shipment as the farthest progress on quote and booking pages', () => {
   const booking = { status: 'BOOKED', shipments: [{ status: 'DEPARTED' }] };
   assert.deepEqual(resolveBookingBusinessFlow(booking), {
-    currentStage: 'tracking',
+    currentStage: 'shipment',
     currentStageComplete: false,
     currentStatus: '已开船',
   });
   assert.deepEqual(resolveQuoteBusinessFlow({ status: 'BOOKED', bookings: [booking] }, '已转订舱'), {
-    currentStage: 'tracking',
+    currentStage: 'shipment',
     currentStageComplete: false,
     currentStatus: '已开船',
   });
@@ -34,14 +44,14 @@ void test('keeps invoice active until payment is recorded', () => {
   });
 });
 
-void test('maps shipment milestones to shipment and tracking stages for customers', () => {
+void test('keeps all transport milestones in one customer stage', () => {
   assert.deepEqual(resolveShipmentBusinessFlow({ status: 'PLANNED' }, 'portal'), {
     currentStage: 'shipment',
     currentStageComplete: false,
     currentStatus: '待开船',
   });
   assert.deepEqual(resolveShipmentBusinessFlow({ status: 'ARRIVED' }, 'portal'), {
-    currentStage: 'tracking',
+    currentStage: 'shipment',
     currentStageComplete: true,
     currentStatus: '已到港',
   });

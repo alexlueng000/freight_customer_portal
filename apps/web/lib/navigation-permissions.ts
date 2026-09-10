@@ -1,3 +1,5 @@
+import { isPilotPathAvailable } from './pilot-scope.ts';
+
 export const navigationPermissions = {
   '/portal/rates': ['rate.search'],
   '/portal/quotes': ['quote.read'],
@@ -38,7 +40,8 @@ export function filterNavigationGroups<
     .map((group) => ({
       ...group,
       items: group.items.filter(
-        (item) => item.requiredPermissions?.every((permission) => granted.has(permission)) ?? true,
+        (item) => isPilotPathAvailable(item.href) &&
+          (item.requiredPermissions?.every((permission) => granted.has(permission)) ?? true),
       ),
     }))
     .filter((group) => group.items.length > 0);

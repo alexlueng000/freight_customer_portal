@@ -1,47 +1,20 @@
-import { DataTable } from '@/components/data-table';
-import { FilterBar } from '@/components/filter-bar';
+import { notFound } from 'next/navigation';
+import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
-import { StatusBadge } from '@/components/status-badge';
-import { portalShipments, type ShipmentRow } from '@/lib/mock-data';
 
-const titles: Record<string, string> = {
-  rates: '运价',
-  quotes: '报价',
-  bookings: '订舱',
-  shipments: '出运',
-  documents: '单证',
-  billing: '账单',
-  company: '公司资料',
-  users: '用户',
+const sections: Record<string, { title: string; description: string }> = {
+  company: { title: '公司资料', description: '公司资料由货代维护。如需修改公司名称、地址或联系人，请联系您的销售。客户账号可由有权限的公司管理员在用户页面管理。' },
+  documents: { title: '单证', description: '已发布 SO 和附件请在对应订舱详情查看。' },
 };
-
-const columns = [
-  { key: 'shipmentNo', header: '参考编号' },
-  { key: 'lane', header: '航线 / 对象' },
-  { key: 'carrier', header: '船司 / 负责人' },
-  { key: 'eta', header: '日期' },
-  {
-    key: 'status',
-    header: '状态',
-    render: (row: ShipmentRow) => <StatusBadge tone={row.tone}>{row.status}</StatusBadge>,
-  },
-];
 
 export default async function PortalSectionPage({ params }: { params: Promise<{ section: string }> }) {
   const { section } = await params;
-  const title = titles[section] ?? '客户门户';
-
+  const content = sections[section];
+  if (!content) notFound();
   return (
     <div className="space-y-5">
-      <PageHeader
-        description="生产级页面框架占位，当前使用类型化模拟数据。本任务不接入 API。"
-        eyebrow="客户门户"
-        title={title}
-      />
-      <section className="rounded border border-border bg-surface">
-        <FilterBar placeholder={`搜索${title}`} />
-        <DataTable columns={columns} data={portalShipments} />
-      </section>
+      <PageHeader eyebrow="客户门户" title={content.title} />
+      <EmptyState title="请联系货代维护资料" description={content.description} />
     </div>
   );
 }

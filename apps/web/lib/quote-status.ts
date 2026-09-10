@@ -13,8 +13,8 @@ export const quoteStatusLabels: Record<string, string> = {
 
 export const customerQuoteStatusLabels: Record<string, string> = {
   ...quoteStatusLabels,
-  SENT: '销售已确认',
-  VIEWED: '已查看',
+  SENT: '待您确认',
+  VIEWED: '已查看，待您确认',
 };
 
 export const quoteStatusTones: Record<string, StatusTone> = {

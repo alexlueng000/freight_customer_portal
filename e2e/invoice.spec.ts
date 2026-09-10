@@ -1,48 +1,25 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const tenantCode = process.env.E2E_TENANT_CODE ?? 'DEMO';
-const portalSlug = process.env.E2E_PORTAL_SLUG ?? 'demo';
-const adminEmail = process.env.E2E_ADMIN_EMAIL ?? 'admin@demo.freight.local';
-const customerEmail = process.env.E2E_CUSTOMER_EMAIL ?? 'customer@demo.freight.local';
-const adminPassword = process.env.E2E_ADMIN_PASSWORD;
-const customerPassword = process.env.E2E_CUSTOMER_PASSWORD;
-
-async function login(page: Page, email: string, password: string, expectedPath: string) {
-  const customer = expectedPath === '/portal';
-  await page.goto(customer ? `/t/${portalSlug}/login` : `/admin/login?tenantCode=${encodeURIComponent(tenantCode)}`);
-  await page.getByLabel('邮箱').fill(email);
-  await page.getByLabel('密码').fill(password);
-  await page.getByRole('button', { name: customer ? '登录客户中心' : '登录运营后台' }).click();
-  await expect(page).toHaveURL(new RegExp(`${expectedPath}$`), { timeout: 15_000 });
+// Invoice business rules remain covered by API integration tests; pilot UI is deliberately closed.
+for (const area of ['admin', 'portal'] as const) {
+  test(`${area} invoice deep link explains pilot scope without loading invoices`, async ({ page }) => {
+    const businessRequests: string[] = [];
+    await page.route('**/api/v1/**', async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/auth/refresh')) return route.fulfill({ json: {
+        accessToken: 'ui-test-only', accessTokenExpiresIn: 900,
+        user: { id: 'scope-test', tenantId: 'demo', tenantCode: 'DEMO', displayName: '测试用户',
+          email: 'scope@example.test', userType: area === 'portal' ? 'CUSTOMER' : 'INTERNAL',
+          roles: [area === 'portal' ? 'CUSTOMER_ADMIN' : 'TENANT_ADMIN'], permissions: ['invoice.read', 'document.read'] },
+      } });
+      if (path.includes('/invoices')) businessRequests.push(path);
+      return route.fulfill({ json: [] });
+    });
+    for (const path of [area === 'portal' ? '/portal/billing/legacy-id' : '/admin/invoices/legacy-id', `/${area}/documents`]) {
+      await page.goto(path);
+      await expect(page.getByRole('heading', { name: '此功能暂未开放' })).toBeVisible();
+      await expect(page.getByRole('link', { name: '返回首页', exact: true })).toHaveAttribute('href', `/${area}`);
+    }
+    expect(businessRequests).toEqual([]);
+  });
 }
-
-test.describe('Invoice billing', () => {
-  test.skip(
-    !adminPassword || !customerPassword,
-    'Set E2E_ADMIN_PASSWORD and E2E_CUSTOMER_PASSWORD',
-  );
-
-  test('internal user can view Invoice and access finance actions', async ({ page }) => {
-    await login(page, adminEmail, adminPassword!, '/admin');
-    await page.goto('/admin/invoices');
-    await expect(page.getByRole('heading', { name: '应收账单' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '新建 Draft Invoice' })).toBeVisible();
-    await page.getByRole('link', { name: 'INV-DEMO-ISSUED' }).click();
-    await expect(page.getByRole('heading', { name: 'INV-DEMO-ISSUED' })).toBeVisible();
-    await expect(page.getByText('OCEAN_FREIGHT')).toBeVisible();
-    await expect(page.getByRole('button', { name: '标记已收款' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '作废' })).toBeVisible();
-  });
-
-  test('customer sees only the issued billing view and confirm action', async ({ page }) => {
-    await login(page, customerEmail, customerPassword!, '/portal');
-    await page.goto('/portal/billing');
-    await expect(page.getByRole('heading', { name: '账单' })).toBeVisible();
-    await page.getByRole('link', { name: 'INV-DEMO-ISSUED' }).click();
-    await expect(page.getByRole('heading', { name: 'INV-DEMO-ISSUED' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '确认账单' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '标记已收款' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: '作废' })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: '新建 Draft Invoice' })).toHaveCount(0);
-  });
-});

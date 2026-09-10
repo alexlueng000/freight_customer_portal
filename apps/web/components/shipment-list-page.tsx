@@ -52,7 +52,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
     <div className="space-y-5">
       <PageHeader
         eyebrow={mode === 'admin' ? '运营后台' : '客户门户'}
-        title="Basic Shipment"
+        title={mode === 'portal' ? '我的运输' : 'Basic Shipment'}
         description={
           mode === 'admin'
             ? '维护 SO 后的基础出运信息、船期时间与客户可见进度。'
@@ -63,11 +63,13 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
         <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row">
           <input
             className={control}
-            placeholder="搜索 Shipment、Booking、客户或航线"
+            aria-label="搜索运输"
+            placeholder="搜索运输编号、订舱编号或航线"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
           <select
+            aria-label="运输状态"
             className={control}
             value={status}
             onChange={(event) => setStatus(event.target.value)}
@@ -89,7 +91,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
         ) : visible.length === 0 ? (
           <div className="p-4">
             <EmptyState
-              title={status || query ? '没有匹配的 Shipment' : '还没有 Shipment'}
+              title={status || query ? '没有匹配的运输记录' : '还没有运输记录'}
               description={
                 status || query
                   ? '请调整状态或关键词后重新查看。'

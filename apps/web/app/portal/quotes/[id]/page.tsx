@@ -274,9 +274,10 @@ export default function QuoteDetailPage() {
       </section>
       <section className="rounded border border-border bg-surface p-4">
         <h2 className="text-sm font-semibold">本次运输需求</h2>
+        <p className="mt-2 text-sm text-muted">以下为您申请的服务。实际包含的服务与费用以正式报价明细和条款为准；未明确的事项请联系销售确认。</p>
         <div className="mt-4 grid gap-4 border-b border-border pb-4 sm:grid-cols-2 lg:grid-cols-3">
           <Fact
-            label="委托服务"
+            label="申请服务"
             value={
               quote.requestedServices.length
                 ? quote.requestedServices.map(requestedServiceLabel).join('、')
@@ -316,11 +317,11 @@ export default function QuoteDetailPage() {
           )}
         </div>
       </section>
-      {formalQuotePublished && quote.customerTerms?.trim() ? (
+      {formalQuotePublished ? (
         <section className="rounded border border-border bg-surface p-4">
-          <h2 className="text-sm font-semibold">报价说明与条款</h2>
+          <h2 className="text-sm font-semibold" id="service-terms">服务范围与报价条款</h2>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
-            {quote.customerTerms}
+            {quote.customerTerms?.trim() || '本报价未补充服务范围说明。如需提货、报关、清关或派送，请在接受前联系销售确认包含项目及费用。'}
           </p>
         </section>
       ) : null}

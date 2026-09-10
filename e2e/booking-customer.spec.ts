@@ -109,7 +109,7 @@ test.describe('Customer booking experience', () => {
     await expect(page.getByLabel('发货人名称')).toHaveValue(`默认发货人 ${run}`);
     await expect(page.getByRole('textbox', { name: '货物品名 必填' })).toHaveValue('Furniture');
     await expect(page.getByRole('textbox', { name: '预计毛重 KG' })).toHaveValue('18000');
-    await expect(page.getByText('SO 与 Shipment')).toHaveCount(0);
+    await expect(page.getByText('SO、截止时间与运输')).toHaveCount(0);
 
     await page.getByRole('button', { name: '提交订舱' }).click();
     await expect(page.getByText('请输入货物品名。')).toHaveCount(0);

@@ -45,7 +45,7 @@ test.describe('Shipment fulfillment', () => {
   }) => {
     await login(page, customerEmail, customerPassword!, '/portal');
     await page.goto('/portal/shipments');
-    await expect(page.getByRole('heading', { name: 'Basic Shipment' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '我的运输' })).toBeVisible();
     const firstShipment = page.getByRole('link', { name: 'SHP-DEMO-BOOKED' });
     await expect(firstShipment).toBeVisible();
     await firstShipment.click();

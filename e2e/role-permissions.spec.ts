@@ -18,8 +18,6 @@ const internalRoles = [
       '报价',
       '订舱',
       '出运',
-      '单证',
-      '发票',
       '用户',
       '审计日志',
       '设置',
@@ -28,17 +26,17 @@ const internalRoles = [
   {
     email: 'sales@demo.freight.local',
     name: 'sales',
-    navigation: ['仪表盘', '客户', '运价', '报价', '订舱', '出运', '单证', '发票'],
+    navigation: ['仪表盘', '客户', '运价', '报价', '订舱', '出运'],
   },
   {
     email: 'operation@demo.freight.local',
     name: 'operation',
-    navigation: ['仪表盘', '客户', '订舱', '出运', '单证'],
+    navigation: ['仪表盘', '客户', '订舱', '出运'],
   },
   {
     email: 'finance@demo.freight.local',
     name: 'finance',
-    navigation: ['仪表盘', '客户', '出运', '单证', '发票'],
+    navigation: ['仪表盘', '客户', '出运'],
   },
 ] as const;
 
@@ -46,12 +44,12 @@ const customerRoles = [
   {
     email: 'customer@demo.freight.local',
     name: 'customer admin',
-    navigation: ['仪表盘', '运价', '报价', '订舱', '出运', '单证', '账单', '公司资料', '用户'],
+    navigation: ['首页', '查运价', '报价', '订舱', '运输', '公司资料', '用户'],
   },
   {
     email: 'customer-user@demo.freight.local',
     name: 'customer user',
-    navigation: ['仪表盘', '运价', '报价', '订舱', '出运', '单证', '账单', '公司资料'],
+    navigation: ['首页', '查运价', '报价', '订舱', '运输', '公司资料'],
   },
 ] as const;
 
@@ -78,11 +76,7 @@ test.describe('Role permissions', () => {
       '/admin',
     );
     await salesPage.goto('/admin/invoices');
-    await expect(salesPage.getByRole('heading', { name: '应收账单' })).toBeVisible();
-    await expect(salesPage.getByRole('heading', { name: '新建 Draft Invoice' })).toHaveCount(0);
-    await salesPage.getByRole('link', { name: 'INV-DEMO-ISSUED' }).click();
-    await expect(salesPage.getByRole('button', { name: '标记已收款' })).toHaveCount(0);
-    await expect(salesPage.getByRole('button', { name: '作废' })).toHaveCount(0);
+    await expect(salesPage.getByRole('heading', { name: '此功能暂未开放' })).toBeVisible();
     await salesPage.context().close();
 
     const financePage = await authenticatedPage(
@@ -92,7 +86,7 @@ test.describe('Role permissions', () => {
       '/admin',
     );
     await financePage.goto('/admin/invoices');
-    await expect(financePage.getByRole('heading', { name: '新建 Draft Invoice' })).toBeVisible();
+    await expect(financePage.getByRole('heading', { name: '此功能暂未开放' })).toBeVisible();
     await financePage.context().close();
 
     const operationPage = await authenticatedPage(

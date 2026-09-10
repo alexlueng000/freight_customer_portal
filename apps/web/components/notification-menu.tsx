@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { formatDateTime } from '@/lib/date-time';
 import { cn } from '@/lib/utils';
+import { isPilotNotificationAvailable } from '@/lib/pilot-scope';
 
 interface NotificationPayload {
   title?: string;
@@ -30,26 +31,26 @@ const typeCopy: Record<
 > = {
   SO_PUBLISHED: {
     title: 'SO 已发布',
-    actionLabel: '查看 Booking',
+    actionLabel: '查看订舱与 SO',
     href: (payload) => payload.href ?? '/portal/bookings?status=BOOKED',
   },
   SHIPMENT_CREATED: {
-    title: 'Shipment 已创建',
-    actionLabel: '查看 Shipment',
+    title: '运输记录已创建',
+    actionLabel: '查看运输',
     href: (payload) => payload.href ?? '/portal/shipments',
   },
   SHIPMENT_DEPARTED: {
-    title: 'Shipment 已开船',
+    title: '已开船',
     actionLabel: '查看货踪',
     href: (payload) => payload.href ?? '/portal/shipments?status=DEPARTED',
   },
   SHIPMENT_ARRIVED: {
-    title: 'Shipment 已到港',
+    title: '已到港',
     actionLabel: '查看货踪',
     href: (payload) => payload.href ?? '/portal/shipments?status=ARRIVED',
   },
   BOOKING_NEEDS_UPDATE: {
-    title: 'Booking 资料需要补充',
+    title: '订舱资料需要补充',
     actionLabel: '继续填写',
     href: (payload) => payload.href ?? '/portal/bookings?status=REVISION_REQUIRED',
   },
@@ -65,25 +66,29 @@ export function NotificationMenu({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
   const unreadCount = useMemo(() => items.filter((item) => !item.readAt).length, [items]);
 
   useEffect(() => {
     if (!initialized || !user) return;
     let active = true;
     setLoading(true);
+    setError('');
     void apiFetch('/api/v1/notifications')
       .then(async (response) => {
-        const payload = (await response.json().catch(() => [])) as NotificationItem[];
-        if (active && response.ok) setItems(payload);
+        if (!response.ok) throw new Error('通知加载失败');
+        const payload = (await response.json()) as NotificationItem[];
+        if (active) setItems(payload.filter(isPilotNotificationAvailable));
       })
-      .catch(() => undefined)
+      .catch(() => { if (active) setError('通知加载失败，请重试。'); })
       .finally(() => {
         if (active) setLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [apiFetch, initialized, user]);
+  }, [apiFetch, initialized, user, reload]);
 
   const markRead = async (item: NotificationItem) => {
     setOpen(false);
@@ -130,6 +135,11 @@ export function NotificationMenu({ className }: { className?: string }) {
               {[0, 1, 2].map((index) => (
                 <div className="h-14 animate-pulse rounded bg-sidebar" key={index} />
               ))}
+            </div>
+          ) : error ? (
+            <div className="p-4 text-sm" role="alert">
+              <p>{error}</p>
+              <button type="button" className="mt-2 text-primary hover:underline" onClick={() => setReload((value) => value + 1)}>重新加载通知</button>
             </div>
           ) : items.length ? (
             <div className="max-h-[440px] divide-y divide-border overflow-auto">
