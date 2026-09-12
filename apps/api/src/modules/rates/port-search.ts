@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 
 // Common locations used by the rate importer, not a complete UN/LOCODE directory.
 // Keep distinct ports distinct; aliases here only support searching, never rewriting rates.
-const ports = [
+export const ports = [
   ['CNSHA', '上海', 'Shanghai', '沪'],
   ['CNNGB', '宁波', 'Ningbo'],
   ['CNSZX', '深圳', 'Shenzhen'],

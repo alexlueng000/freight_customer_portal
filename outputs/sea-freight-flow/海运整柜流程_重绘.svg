@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1860" height="1860" viewBox="0 0 1860 1860"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#66798e"/></marker></defs><rect width="1860" height="1860" fill="#ffffff"/>
+<text x="60" y="53" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="30" fill="#173047" text-anchor="start">海运整柜业务流程</text>
+<text x="60" y="85" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="17" fill="#66798e" text-anchor="start">依据原始 Visio 流程重绘 · 按业务阶段组织，节点内标明责任方</text>
+<rect x="45" y="110" width="570" height="1240" rx="16" fill="#e9f2ff" fill-opacity="0.48"/>
+<text x="65" y="140" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="21" fill="#173047" text-anchor="start">01  产品、询价与订舱</text>
+<rect x="645" y="110" width="570" height="1240" rx="16" fill="#e9f7f1" fill-opacity="0.48"/>
+<text x="665" y="140" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="21" fill="#173047" text-anchor="start">02  装柜、出口与海运</text>
+<rect x="1245" y="110" width="570" height="1240" rx="16" fill="#fff2e4" fill-opacity="0.48"/>
+<text x="1265" y="140" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="21" fill="#173047" text-anchor="start">03  目的港、派送与对账</text>
+<polyline points="340.0,221 340.0,235.5 340.0,235.5 340.0,250" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="340.0,316 340.0,330.5 340.0,330.5 340.0,345" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="340.0,411 340.0,425.5 340.0,425.5 340.0,440" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="340.0,520 340.0,537.5 340.0,537.5 340.0,555" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="340.0" y="529.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">是</text>
+<polyline points="340.0,621 340.0,635.5 340.0,635.5 340.0,650" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="340.0,716 340.0,730.5 340.0,730.5 340.0,745" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="340.0,811 340.0,825.5 340.0,825.5 340.0,840" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="590,480.0 604,480.0 604,378.0 590,378.0" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="608" y="429.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="13" fill="#52657a" text-anchor="start">否</text>
+<polyline points="340.0,920 340.0,942.5 185.0,942.5 185.0,965" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="262.5" y="934.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">是</text>
+<polyline points="340.0,920 340.0,942.5 465.0,942.5 465.0,965" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="402.5" y="934.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">否</text>
+<polyline points="185.0,1031 185.0,1050.5 185.0,1050.5 185.0,1070" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="465.0,1031 465.0,1050.5 465.0,1050.5 465.0,1070" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,221 940.0,235.5 940.0,235.5 940.0,250" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,316 940.0,330.5 940.0,330.5 940.0,345" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,411 940.0,425.5 940.0,425.5 940.0,440" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,506 940.0,525.5 940.0,525.5 940.0,545" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="785.0,736 785.0,755.5 940.0,755.5 940.0,775" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1065.0,736 1065.0,755.5 940.0,755.5 940.0,775" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,841 940.0,855.5 940.0,855.5 940.0,870" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,936 940.0,950.5 940.0,950.5 940.0,965" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,1031 940.0,1045.5 940.0,1045.5 940.0,1060" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,1126 940.0,1140.5 940.0,1140.5 940.0,1155" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,1221 940.0,1235.5 940.0,1235.5 940.0,1250" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="940.0,625 940.0,647.5 785.0,647.5 785.0,670" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="862.5" y="639.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">是</text>
+<polyline points="940.0,625 940.0,647.5 1065.0,647.5 1065.0,670" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="1002.5" y="639.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">否</text>
+<polyline points="1540.0,221 1540.0,235.5 1540.0,235.5 1540.0,250" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1540.0,330 1540.0,352.5 1385.0,352.5 1385.0,375" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="1462.5" y="344.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">是</text>
+<polyline points="1540.0,330 1540.0,352.5 1665.0,352.5 1665.0,375" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="1602.5" y="344.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">否</text>
+<polyline points="1385.0,441 1385.0,463.0 1540.0,463.0 1540.0,485" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1665.0,441 1665.0,463.0 1540.0,463.0 1540.0,485" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1540.0,551 1540.0,565.5 1540.0,565.5 1540.0,580" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1540.0,646 1540.0,660.5 1540.0,660.5 1540.0,675" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1540.0,741 1540.0,755.5 1540.0,755.5 1540.0,770" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1540.0,836 1540.0,850.5 1540.0,850.5 1540.0,865" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1385.0,1056 1385.0,1083.0 1540.0,1083.0 1540.0,1110" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1665.0,1056 1665.0,1083.0 1540.0,1083.0 1540.0,1110" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<polyline points="1540.0,945 1540.0,967.5 1385.0,967.5 1385.0,990" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="1462.5" y="959.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">货代</text>
+<polyline points="1540.0,945 1540.0,967.5 1665.0,967.5 1665.0,990" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="1602.5" y="959.5" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">收货人</text>
+<polyline points="1540.0,1176 1540.0,1213.0 1540.0,1213.0 1540.0,1250" fill="none" stroke="#66798e" stroke-width="1.6" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
+<text x="1540.0" y="1205.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="14" fill="#52657a" text-anchor="middle">承办目的港业务时</text>
+<rect x="90" y="155" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="340.0" y="182.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">产品准备：航线资源获取 → 产品定价</text>
+<text x="340.0" y="206.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">建立航线基础数据库（原图含爬虫获取）</text>
+<rect x="90" y="250" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="340.0" y="277.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">发货人｜提出发运需求、查询船期与运价</text>
+<text x="340.0" y="301.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">提供货物、起讫地、装运时间及服务需求</text>
+<rect x="90" y="345" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="340.0" y="372.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">货代销售｜确认需求与报价</text>
+<text x="340.0" y="396.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">明确服务范围及价格有效期</text>
+<polygon points="340.0,440 590,480.0 340.0,520 90,480.0" fill="#fff4ce" stroke="#c7ad62"/>
+<text x="340.0" y="474.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">发货人｜审核价格与服务</text>
+<text x="340.0" y="498.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">是否确认？</text>
+<rect x="90" y="555" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="340.0" y="594.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">发货人｜生成订舱托运委托书</text>
+<rect x="90" y="650" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="340.0" y="677.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">货代运营 ↔ 船公司｜申请并确认舱位</text>
+<text x="340.0" y="701.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">向客户提供舱位确认单</text>
+<rect x="90" y="745" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="340.0" y="772.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">建立运输任务</text>
+<text x="340.0" y="796.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">后续进度、单证与费用持续同步</text>
+<polygon points="340.0,840 590,880.0 340.0,920 90,880.0" fill="#fff4ce" stroke="#c7ad62"/>
+<text x="340.0" y="886.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">截止时间前是否提出取消？</text>
+<rect x="60" y="965" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="185.0" y="992.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">货代运营｜申请取消</text>
+<text x="185.0" y="1016.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">船公司｜确认取消</text>
+<rect x="340" y="965" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="465.0" y="992.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">货代运营｜安排提箱、拖车</text>
+<text x="465.0" y="1016.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">准备装柜</text>
+<rect x="60" y="1070" width="250" height="66" rx="30" fill="#e9f2ff" stroke="#b5c6d5"/>
+<text x="185.0" y="1097.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">取消结果同步运输任务</text>
+<text x="185.0" y="1121.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">取消分支结束</text>
+<rect x="340" y="1070" width="250" height="66" rx="30" fill="#e9f2ff" stroke="#b5c6d5"/>
+<text x="465.0" y="1109.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">① 进入装柜与出口流程</text>
+<rect x="690" y="155" width="500" height="66" rx="30" fill="#e9f7f1" stroke="#b5c6d5"/>
+<text x="940.0" y="194.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">① 接续：提箱与装柜</text>
+<rect x="690" y="250" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="277.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">生成装运任务通知单</text>
+<text x="940.0" y="301.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">上柜时间、柜型、订舱号、订单号、车牌及司机电话</text>
+<rect x="690" y="345" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="372.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">发货人｜完成装柜并提供实际装运信息</text>
+<text x="940.0" y="396.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">生成装箱单</text>
+<rect x="690" y="440" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="467.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">发货人｜准备出口报关资料</text>
+<text x="940.0" y="491.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">报关单、商业发票、装箱单、合同、报关委托书等</text>
+<polygon points="940.0,545 1190,585.0 940.0,625 690,585.0" fill="#fff4ce" stroke="#c7ad62"/>
+<text x="940.0" y="591.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">发货人是否自行报关？</text>
+<rect x="660" y="670" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="785.0" y="697.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">发货人自行安排申报</text>
+<text x="785.0" y="721.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">配合查验（如需）</text>
+<rect x="940" y="670" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1065.0" y="697.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">货代运营安排申报</text>
+<text x="1065.0" y="721.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">配合查验（如需）</text>
+<rect x="690" y="775" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="814.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">取得海关放行信息及相关单证</text>
+<rect x="690" y="870" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="897.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">拖车运重箱至起运港码头</text>
+<text x="940.0" y="921.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">码头核对放行信息并安排进港</text>
+<rect x="690" y="965" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="992.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">码头｜集装箱装船</text>
+<text x="940.0" y="1016.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">船公司｜签发提单 B/L</text>
+<rect x="690" y="1060" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="1087.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">船公司｜确认船期、执行海上运输</text>
+<text x="940.0" y="1111.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">货代运营｜提供船期及追踪信息</text>
+<rect x="690" y="1155" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="940.0" y="1182.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">船公司｜发送到货通知 Arrival Notice</text>
+<text x="940.0" y="1206.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">到港时间、船名、提单号及换单时间</text>
+<rect x="690" y="1250" width="500" height="66" rx="30" fill="#e9f7f1" stroke="#b5c6d5"/>
+<text x="940.0" y="1289.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">② 进入目的港操作</text>
+<rect x="1290" y="155" width="500" height="66" rx="30" fill="#fff2e4" stroke="#b5c6d5"/>
+<text x="1540.0" y="194.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">② 接续：到港与通知</text>
+<polygon points="1540.0,250 1790,290.0 1540.0,330 1290,290.0" fill="#fff4ce" stroke="#c7ad62"/>
+<text x="1540.0" y="296.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">是否由发运货代跟进目的港操作？</text>
+<rect x="1260" y="375" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1385.0" y="414.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">发运货代负责后续操作</text>
+<rect x="1540" y="375" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1665.0" y="402.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">收货人自行处理</text>
+<text x="1665.0" y="426.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">或委托目的港货代</text>
+<rect x="1290" y="485" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1540.0" y="512.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">换单｜正本提单或电放资料</text>
+<text x="1540.0" y="536.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">缴纳相关费用，换取提货单 D/O</text>
+<rect x="1290" y="580" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1540.0" y="607.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">进口清关｜提交 D/O 及清关资料</text>
+<text x="1540.0" y="631.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">配合查验、缴纳进口税费，取得海关放行单</text>
+<rect x="1290" y="675" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1540.0" y="702.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">提柜｜安排拖车，凭 D/O、海关放行单及 EIR</text>
+<text x="1540.0" y="726.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">至码头／堆场提柜，验箱出场</text>
+<rect x="1290" y="770" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1540.0" y="797.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">派送｜货物送至指定地点</text>
+<text x="1540.0" y="821.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">货代承办时生成送货任务通知单</text>
+<polygon points="1540.0,865 1790,905.0 1540.0,945 1290,905.0" fill="#fff4ce" stroke="#c7ad62"/>
+<text x="1540.0" y="911.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">由谁安排还空箱？</text>
+<rect x="1260" y="990" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1385.0" y="1017.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">货代安排还空箱</text>
+<text x="1385.0" y="1041.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">归还至指定堆场</text>
+<rect x="1540" y="990" width="250" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1665.0" y="1017.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">收货人安排还空箱</text>
+<text x="1665.0" y="1041.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="15" fill="#173047" text-anchor="middle">归还至指定堆场</text>
+<rect x="1290" y="1110" width="500" height="66" rx="30" fill="#fff2e4" stroke="#b5c6d5"/>
+<text x="1540.0" y="1149.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">目的港实物流转完成</text>
+<rect x="1290" y="1250" width="500" height="66" rx="8" fill="#ffffff" stroke="#b5c6d5"/>
+<text x="1540.0" y="1277.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">财务｜生成本次承办范围的费用对账单</text>
+<text x="1540.0" y="1301.0" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#173047" text-anchor="middle">同步运输任务；对账为原图财务终点</text>
+<rect x="45" y="1390" width="1770" height="240" rx="12" fill="#f3f6fa"/>
+<text x="70" y="1425" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="19" fill="#173047" text-anchor="start">阅读说明与重绘口径</text>
+<text x="70" y="1460" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#52657a" text-anchor="start">统一信息同步｜舱位／取消、拖车、进港、船期、到货、换单、清关、提柜、还箱及对账信息 → 运输任务。</text>
+<text x="70" y="1487" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#52657a" text-anchor="start">这里的“运输任务”沿用原图用语，表示业务跟踪载体；同步不代表业务流程倒退或重新执行。</text>
+<text x="70" y="1514" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#52657a" text-anchor="start">目的港两条分支操作步骤相同，合并展示；责任方由“是否由发运货代跟进”决定，还空箱另按实际安排分工。</text>
+<text x="70" y="1541" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#52657a" text-anchor="start">财务时点：原图“不跟进目的港操作”分支可直接进入对账，不必等待收货人完成目的港流程；此处不强制串行。</text>
+<text x="70" y="1568" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#52657a" text-anchor="start">理解性整理：“自行报告”按“自行报关”，“推车”按“拖车”，“价格有限期限”按“价格有效期”处理。</text>
+<text x="70" y="1595" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="16" fill="#52657a" text-anchor="start">订舱申请与确认、海关放行措辞已按上下文顺序整理；未补充原图未覆盖的拒舱、查验异常、开票或收款流程。</text>
+</svg>

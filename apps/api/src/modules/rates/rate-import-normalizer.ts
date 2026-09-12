@@ -83,7 +83,7 @@ const widePrices = [
   { containerType: '45HQ', cost: 'price45HqCost', sell: 'price45HqSell' },
 ] as const;
 
-const portAliases = [
+export const portAliases = [
   { code: 'CNSHA', name: 'Shanghai', aliases: ['CNSHA', 'SHA', 'SHANGHAI', '上海', '沪'] },
   { code: 'CNNGB', name: 'Ningbo', aliases: ['CNNGB', 'NGB', 'NINGBO', '宁波'] },
   { code: 'CNSZX', name: 'Shenzhen', aliases: ['CNSZX', 'SZX', 'SHENZHEN', '深圳', 'YTN', 'YANTIAN', '盐田', 'SHEKOU', '蛇口'] },

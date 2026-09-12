@@ -1,3 +1,5 @@
+import { ports } from './port-search.js';
+import { portAliases } from './rate-import-normalizer.js';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConflictResponse, ApiConsumes, ApiCreatedResponse, ApiForbiddenResponse, ApiNotFoundResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
@@ -12,6 +14,17 @@ import { ConfirmRateImportDto } from './dto/confirm-rate-import.dto.js';
 @ApiTags('rates') @ApiBearerAuth() @Controller({ path: 'rates', version: '1' })
 export class RatesController {
   constructor(private readonly rates: RatesService, private readonly imports: RateImportsService) {}
+  @Get('port-mappings')
+  @RequirePermissions('rate.read')
+  @ApiOkResponse({ description: 'Read-only global built-in port directory; search and import aliases are shown separately. Contains no tenant business data.' })
+  @ApiForbiddenResponse({ description: 'Missing rate.read permission' })
+  portMappings(this: void) {
+    return { items: ports.map(([code, chineseName, englishName, ...aliases]) => ({
+      code, chineseName, englishName,
+      searchAliases: [code, code.slice(2), chineseName, englishName, ...aliases],
+      importAliases: portAliases.find((port) => port.code === code)?.aliases ?? [],
+    })) };
+  }
   @Get() @RequirePermissions('rate.read') @ApiOkResponse({ description: 'Tenant-scoped rate list for internal administration' }) @ApiForbiddenResponse({ description: 'Missing rate.read permission' }) list(@Query() query: ListRatesDto) { return this.rates.list(query); }
   @Post() @RequirePermissions('rate.manage') @ApiCreatedResponse({ description: 'Rate created with prices and charges' }) @ApiConflictResponse({ description: 'Rate number exists in tenant' }) create(@Body() dto: CreateRateDto) { return this.rates.create(dto); }
   @Post('import')
