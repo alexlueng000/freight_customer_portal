@@ -136,7 +136,7 @@ const quoteRequestSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['pickupLocation'],
-        message: '选择起运地拖车后，请填写 提货地点。',
+        message: '选择起运地拖车后，请填写提货地点。',
       });
     if (
       value.requestedServices.includes('DESTINATION_DELIVERY') &&
@@ -145,7 +145,7 @@ const quoteRequestSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['deliveryLocation'],
-        message: '选择目的地派送后，请填写 派送地点。',
+        message: '选择目的地派送后，请填写派送地点。',
       });
   });
 class PortalRateApiError extends Error {
@@ -431,7 +431,7 @@ export default function PortalRatesPage() {
                     </div>
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                       <div>
-                        <dt className="text-xs text-muted">船司 / 服务</dt>
+                        <dt className="text-xs text-muted">船司 / 航线服务</dt>
                         <dd className="mt-0.5 font-medium">
                           {rate.carrierCode} · {rate.serviceName ?? '标准服务'}
                         </dd>
@@ -476,7 +476,7 @@ export default function PortalRatesPage() {
                 <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                      <th className={headerClass}>船司 / 服务</th>
+                      <th className={headerClass}>船司 / 航线服务</th>
                       <th className={headerClass}>航线</th>
                       <th className={headerClass}>预计离港日</th>
                       <th className={headerClass}>航程</th>
@@ -722,7 +722,7 @@ function QuoteRequestDialog({
               <QuoteFact label="航线" value={`${rate.polDisplayName || rate.polName || rate.polCode} → ${rate.podDisplayName || rate.podName || rate.podCode}`} />
               <QuoteFact label="港口代码" value={`${rate.polCode} → ${rate.podCode}`} />
               <QuoteFact label="船司" value={rate.carrierCode} />
-              <QuoteFact label="服务" value={rate.serviceName || '待确认'} />
+              <QuoteFact label="航线服务" value={rate.serviceName || '待确认'} />
               <QuoteFact label="预计离港日" value={rate.etd ? formatDate(rate.etd) : '船期待确认'} />
               <QuoteFact label="有效期" value={formatDate(rate.expiryDate)} />
               <QuoteFact label="箱型" value={rate.containerType} />
@@ -1203,8 +1203,8 @@ function chargeUnitLabel(
   charge: Pick<CustomerRate['charges'][number], 'chargeBasis' | 'containerType'>,
 ) {
   if (charge.chargeBasis === 'PER_BL') return '/B/L';
-  if (charge.chargeBasis === 'PER_SHIPMENT') return '/Shipment';
-  return charge.containerType ? `/${charge.containerType}` : '/Container';
+  if (charge.chargeBasis === 'PER_SHIPMENT') return '/票';
+  return charge.containerType ? `/${charge.containerType}` : '/箱';
 }
 const inputClass =
   'h-10 w-full rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-danger/10';

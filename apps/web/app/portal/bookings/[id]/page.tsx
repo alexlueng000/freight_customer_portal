@@ -495,7 +495,7 @@ export default function BookingDetailPage() {
           </StatusBadge>
         </Fact>
         <Fact label="船司" value={booking.carrierCode ?? '—'} />
-        <Fact label="ETD" value={booking.etd?.slice(0, 10) ?? '待确认'} />
+        <Fact label="预计开船时间" value={booking.etd?.slice(0, 10) ?? '待确认'} />
         <Fact label="状态备注" value={booking.lastStatusRemark ?? '—'} />
       </section>
       <section className="rounded border border-primary/20 bg-primary/5 p-5">
@@ -517,7 +517,7 @@ export default function BookingDetailPage() {
           ) : null}
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="POL" required>
+          <Field label="起运港代码" required>
             <input
               className={input}
               disabled={!editable}
@@ -526,7 +526,7 @@ export default function BookingDetailPage() {
               onChange={(event) => change('polCode', event.target.value)}
             />
           </Field>
-          <Field label="POD" required>
+          <Field label="目的港代码" required>
             <input
               className={input}
               disabled={!editable}
@@ -535,7 +535,7 @@ export default function BookingDetailPage() {
               onChange={(event) => change('podCode', event.target.value)}
             />
           </Field>
-          <Field label="Carrier">
+          <Field label="船司">
             <input
               className={input}
               disabled={!editable}
@@ -543,7 +543,7 @@ export default function BookingDetailPage() {
               onChange={(event) => change('carrierCode', event.target.value)}
             />
           </Field>
-          <Field label="Service">
+          <Field label="航线服务">
             <input
               className={input}
               disabled={!editable}
@@ -551,7 +551,7 @@ export default function BookingDetailPage() {
               onChange={(event) => change('serviceName', event.target.value)}
             />
           </Field>
-          <Field label="ETD">
+          <Field label="预计开船时间">
             <input
               className={input}
               disabled={!editable}
@@ -560,7 +560,7 @@ export default function BookingDetailPage() {
               onChange={(event) => change('etd', event.target.value)}
             />
           </Field>
-          <Field label="Incoterm">
+          <Field label="贸易条款">
             <select
               className={input}
               disabled={!editable}
@@ -683,7 +683,7 @@ export default function BookingDetailPage() {
                   }
                 />
               </Field>
-              <Field label="Cargo Nature">
+              <Field label="货物性质">
                 <input
                   className={input}
                   disabled={!editable}
@@ -691,7 +691,7 @@ export default function BookingDetailPage() {
                   onChange={(event) => changeCargoItem(index, 'cargoNature', event.target.value)}
                 />
               </Field>
-              <Field label="Special Requirement">
+              <Field label="特殊要求">
                 <textarea
                   className={`${input} min-h-20 py-2`}
                   disabled={!editable}
@@ -771,7 +771,7 @@ export default function BookingDetailPage() {
         <div className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <h2 className="text-sm font-semibold">
-              <FieldLabel label="发货人 Shipper" required />
+              <FieldLabel label="发货人" required />
             </h2>
             <p className="mt-1 text-sm text-muted">
               可选择常用发货人自动带入，也可以新建本票发货人。
@@ -862,7 +862,7 @@ export default function BookingDetailPage() {
         </div>
         <div className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <h2 className="text-sm font-semibold">订舱联系人 Booking Contact</h2>
+            <h2 className="text-sm font-semibold">订舱联系人</h2>
             <p className="mt-1 text-sm text-muted">用于接收本票订舱进度、SO 等业务通知。</p>
           </div>
           <Field label="联系人" required error={fieldErrors.bookingContactName}>
@@ -914,7 +914,7 @@ export default function BookingDetailPage() {
             </div>
           ) : null}
         </div>
-        <Field label="Booking Remark / 特殊操作说明（选填）" wide>
+        <Field label="订舱备注 / 特殊操作说明（选填）" wide>
           <textarea
             className={`${inputClass(fieldErrors.dangerousGoodsInfo)} min-h-24 py-2`}
             disabled={!editable}
@@ -943,7 +943,7 @@ export default function BookingDetailPage() {
             </div>
             <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2 px-5 py-4 text-sm">
               <dt className="text-muted">提交给</dt>
-              <dd className="font-semibold text-primary">货代操作团队（Operation）</dd>
+              <dd className="font-semibold text-primary">货代操作团队</dd>
               <dt className="text-muted">订舱编号</dt>
               <dd className="font-medium">{booking.bookingNo}</dd>
               <dt className="text-muted">航线</dt>

@@ -122,7 +122,7 @@ export default function AdminPage() {
     try {
       const response = await apiFetch('/api/v1/dashboard/admin');
       const payload = (await response.json()) as DashboardResponse & { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? 'Dashboard 加载失败。');
+      if (!response.ok) throw new Error(payload.message ?? '工作台加载失败。');
       setDashboard(payload);
       setNotifications(payload.notifications.filter(isPilotNotificationAvailable));
     } catch (reason) {
@@ -240,7 +240,7 @@ export default function AdminPage() {
                 <div className="p-4">
                   <EmptyState
                     title="当前没有未读通知"
-                    description="SO、Shipment 和 Booking 协同事件会出现在这里。"
+                    description="SO、出运记录和订舱协同事件会出现在这里。"
                   />
                 </div>
               )}
@@ -254,8 +254,8 @@ export default function AdminPage() {
 
 const fallbackRoleView: RoleView = {
   code: 'OPERATION',
-  title: 'Operation Dashboard',
-  description: '聚焦订舱审核、SO 登记、Shipment 节点和单证履约。',
+  title: '操作工作台',
+  description: '聚焦订舱审核、SO 登记、出运记录节点和单证履约。',
   primaryActionLabel: '查看订舱',
   primaryActionHref: '/admin/bookings',
 };
@@ -266,7 +266,7 @@ const fallbackSummary: SummaryItem[] = [
     value: 0,
     href: '/admin',
     tone: 'neutral',
-    description: 'Dashboard 加载完成后会显示当前角色指标。',
+    description: '工作台加载完成后会显示当前角色指标。',
   },
 ];
 

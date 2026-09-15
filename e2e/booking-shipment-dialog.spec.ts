@@ -85,16 +85,16 @@ for (const succeeds of [true, false]) {
     });
 
     await page.goto('/admin/bookings/booking-dialog-test');
-    await page.getByRole('button', { name: '创建 Basic Shipment', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '确认创建 Basic Shipment' });
+    await page.getByRole('button', { name: '创建出运记录', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '确认创建出运记录' });
     await dialog.getByRole('button', { name: '确认创建', exact: true }).click();
     if (succeeds) {
       // Wait for refreshed details before checking: loading temporarily unmounts the dialog too.
       await expect(page.getByRole('link', { name: /SHP-DIALOG-TEST/ })).toBeVisible();
-      await expect(page.getByText('Basic Shipment 已创建', { exact: true })).toBeVisible();
+      await expect(page.getByText('出运记录已创建', { exact: true })).toBeVisible();
       await expect(dialog).toHaveCount(0);
       await expect(
-        page.getByRole('button', { name: '创建 Basic Shipment', exact: true }),
+        page.getByRole('button', { name: '创建出运记录', exact: true }),
       ).toHaveCount(0);
     } else {
       await expect(page.getByText('测试创建失败').first()).toBeVisible();

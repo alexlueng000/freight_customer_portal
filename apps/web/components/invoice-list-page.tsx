@@ -46,7 +46,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
         const shipmentPayload = (await shipmentResponse.json()) as InvoiceShipment[] & {
           message?: string;
         };
-        if (!shipmentResponse.ok) throw new Error(shipmentPayload.message ?? 'Shipment 加载失败。');
+        if (!shipmentResponse.ok) throw new Error(shipmentPayload.message ?? '出运记录加载失败。');
         setShipments(shipmentPayload);
       }
     } catch (reason) {
@@ -87,7 +87,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
       <PageHeader
         eyebrow={mode === 'admin' ? '运营后台' : '客户门户'}
         title={mode === 'admin' ? '应收账单' : '账单'}
-        description="按 Shipment 查看应收金额、到期日和确认/收款状态。"
+        description="按出运记录查看应收金额、到期日和确认/收款状态。"
       />
       {error ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -99,7 +99,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
           <h2 className="font-semibold">新建 Draft Invoice</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-4">
             <label className={label}>
-              Shipment
+              出运记录
               <select
                 className={input}
                 value={form.shipmentId}
@@ -241,7 +241,7 @@ export function InvoiceListPage({ mode }: { mode: 'admin' | 'portal' }) {
                 <tr className="border-b border-border bg-sidebar text-xs text-muted">
                   <th className={head}>账单编号</th>
                   <th className={head}>客户</th>
-                  <th className={head}>Shipment</th>
+                  <th className={head}>出运记录</th>
                   <th className={head}>金额</th>
                   <th className={head}>到期日</th>
                   <th className={head}>状态</th>

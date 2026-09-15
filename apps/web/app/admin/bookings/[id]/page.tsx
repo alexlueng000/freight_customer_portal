@@ -268,7 +268,7 @@ export default function AdminBookingDetail() {
       setOperationNotice({
         tone: 'success',
         title: 'SO 已登记成功',
-        description: `SO ${submittedSoNumber} 已保存为内部记录，现在可以创建 Basic Shipment。客户暂不可见此 SO，发布后才能查看和下载。`,
+        description: `SO ${submittedSoNumber} 已保存为内部记录，现在可以创建出运记录。客户暂不可见此 SO，发布后才能查看和下载。`,
       });
     } catch (caught) {
       const message = (caught as Error).message;
@@ -299,7 +299,7 @@ export default function AdminBookingDetail() {
       setOperationNotice({
         tone: 'success',
         title: 'SO 已发布给客户',
-        description: `SO ${soNumberToPublish ?? ''} 已设为客户可见，客户现在可以在 Booking 详情查看和下载。创建 Basic Shipment 后，客户出运列表才会显示。`,
+        description: `SO ${soNumberToPublish ?? ''} 已设为客户可见，客户现在可以在订舱详情查看和下载。创建出运记录后，客户出运列表才会显示。`,
       });
     } catch (caught) {
       const message = (caught as Error).message;
@@ -330,20 +330,20 @@ export default function AdminBookingDetail() {
         body: JSON.stringify(body),
       });
       const payload = (await response.json()) as { shipmentNo?: string; message?: string };
-      if (!response.ok) throw new Error(payload.message ?? 'Basic Shipment 创建失败。');
+      if (!response.ok) throw new Error(payload.message ?? '出运记录创建失败。');
       setDialog(null);
       await load();
       setOperationNotice({
         tone: 'success',
-        title: 'Basic Shipment 已创建',
-        description: `${payload.shipmentNo ?? '新的 Shipment'} 已关联到该 Booking，客户现在可以在出运列表查看。`,
+        title: '出运记录已创建',
+        description: `${payload.shipmentNo ?? '新的出运记录'} 已关联到该订舱，客户现在可以在出运列表查看。`,
       });
     } catch (caught) {
       const message = (caught as Error).message;
       setError(message);
       setOperationNotice({
         tone: 'danger',
-        title: 'Basic Shipment 创建失败',
+        title: '出运记录创建失败',
         description: message,
       });
     } finally {
@@ -476,21 +476,21 @@ export default function AdminBookingDetail() {
           </div>
           <div className="text-right text-sm">
             <div className="font-semibold">{b.customer.name}</div>
-            <div className="mt-1 text-muted">Source Quote {b.quote?.quoteNo ?? '—'}</div>
+            <div className="mt-1 text-muted">来源报价 {b.quote?.quoteNo ?? '—'}</div>
           </div>
         </div>
         <dl className="mt-5 grid gap-4 border-t border-border pt-4 text-sm sm:grid-cols-5">
-          <Fact label="Carrier" value={b.carrierCode ?? '—'} />
-          <Fact label="Service" value={b.quote?.sourceRate?.serviceName ?? '—'} />
-          <Fact label="ETD" value={formatDate(b.etd)} />
-          <Fact label="Cargo Ready" value={formatDate(b.cargoReadyDate)} />
-          <Fact label="Container" value={formatContainerRequests(b.containerRequests)} />
+          <Fact label="船司" value={b.carrierCode ?? '—'} />
+          <Fact label="航线服务" value={b.quote?.sourceRate?.serviceName ?? '—'} />
+          <Fact label="预计开船时间" value={formatDate(b.etd)} />
+          <Fact label="预计货好日期" value={formatDate(b.cargoReadyDate)} />
+          <Fact label="箱型 / 箱量" value={formatContainerRequests(b.containerRequests)} />
         </dl>
       </section>
       <ReviewIssues issues={reviewIssues} status={b.status} />
       <section className="grid items-start gap-4 lg:grid-cols-[1.15fr_0.95fr_1fr]">
         <InfoPanel
-          title="货物信息 Cargo"
+          title="货物信息"
           meta={`${b.cargoItems.length || (b.commodity ? 1 : 0)} 项 · ${b.isDangerousGoods ? '危险品' : '普货'}`}
         >
           {b.cargoItems.length ? (
@@ -536,20 +536,20 @@ export default function AdminBookingDetail() {
             </dl>
           </div>
         </InfoPanel>
-        <InfoPanel title="发货人 Shipper">
-          <CompactFact label="Company" value={b.shipperName ?? '—'} />
-          <CompactFact label="Address" value={b.shipperAddress ?? '—'} wide />
+        <InfoPanel title="发货人">
+          <CompactFact label="公司名称" value={b.shipperName ?? '—'} />
+          <CompactFact label="地址" value={b.shipperAddress ?? '—'} wide />
         </InfoPanel>
         <InfoPanel
-          title="订舱联系人 Booking Contact"
+          title="订舱联系人"
           meta={b.bookingContactEmail || b.bookingContactPhone ? '可联系' : '缺少联系方式'}
         >
-          <CompactFact label="Name" value={b.bookingContactName ?? '—'} />
+          <CompactFact label="姓名" value={b.bookingContactName ?? '—'} />
           {b.bookingContactEmail ? (
-            <CompactFact label="Email" value={b.bookingContactEmail} />
+            <CompactFact label="邮箱" value={b.bookingContactEmail} />
           ) : null}
           {b.bookingContactPhone ? (
-            <CompactFact label="Phone" value={b.bookingContactPhone} />
+            <CompactFact label="电话" value={b.bookingContactPhone} />
           ) : null}
           {!b.bookingContactEmail && !b.bookingContactPhone ? (
             <div className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -604,15 +604,15 @@ export default function AdminBookingDetail() {
         </div>
         <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-4">
           <Fact
-            label="Route"
+            label="航线"
             value={`${route.polName} ${b.polCode} → ${route.podName} ${b.podCode}`}
           />
-          <Fact label="Carrier" value={b.quote?.carrierCode ?? '—'} />
-          <Fact label="Service" value={b.quote?.sourceRate?.serviceName ?? '—'} />
-          <Fact label="ETD" value={formatDate(b.quote?.etd ?? null)} />
-          <Fact label="Container" value={quoteContainerSummary} />
+          <Fact label="船司" value={b.quote?.carrierCode ?? '—'} />
+          <Fact label="航线服务" value={b.quote?.sourceRate?.serviceName ?? '—'} />
+          <Fact label="预计开船时间" value={formatDate(b.quote?.etd ?? null)} />
+          <Fact label="箱型 / 箱量" value={quoteContainerSummary} />
           <Fact
-            label="Amount"
+            label="金额"
             value={b.quote ? `${b.quote.currency} ${formatMoney(b.quote.totalAmount)}` : '—'}
           />
         </dl>
@@ -662,7 +662,7 @@ export default function AdminBookingDetail() {
                   SO：{record.soNumber} · 文件：{record.document.originalFilename}
                 </div>
                 <div className="mt-1">
-                  Carrier：{record.carrierCode ?? b.carrierCode ?? '—'} · Booking Provider：
+                  船司：{record.carrierCode ?? b.carrierCode ?? '—'} · 订舱对象：
                   {record.sourceName ?? '—'}
                 </div>
               </div>
@@ -700,7 +700,7 @@ export default function AdminBookingDetail() {
                 {b.status === 'APPROVED'
                   ? '客户资料已通过审核，下一步是向承运船司或订舱对象提交订舱。'
                   : b.status === 'BOOKING_SUBMITTED'
-                    ? '订舱已提交，当前等待船司或 Agent 回复 SO。'
+                    ? '订舱已提交，当前等待船司或代理回复 SO。'
                     : 'SO 已登记在内部系统，客户可见性由发布动作单独控制。'}
               </p>
             </div>
@@ -778,20 +778,20 @@ export default function AdminBookingDetail() {
                       type="button"
                     >
                       <Ship className="h-4 w-4" aria-hidden="true" />
-                      创建 Basic Shipment
+                      创建出运记录
                     </button>
                   ) : null}
                 </div>
               </div>
               <dl className="mt-4 grid gap-4 sm:grid-cols-3">
-                <Fact label="Carrier" value={currentSo.carrierCode ?? b.carrierCode ?? '—'} />
-                <Fact label="Booking Provider" value={currentSo.sourceName ?? '—'} />
+                <Fact label="船司" value={currentSo.carrierCode ?? b.carrierCode ?? '—'} />
+                <Fact label="订舱对象" value={currentSo.sourceName ?? '—'} />
                 <Fact label="SO 来源" value={soSourceTypeLabel(currentSo.sourceType)} />
                 <Fact
-                  label="Vessel / Voyage"
+                  label="船名 / 航次"
                   value={`${currentSo.vessel ?? '—'} / ${currentSo.voyage ?? '—'}`}
                 />
-                <Fact label="Confirmed ETD" value={formatDate(currentSo.etd)} />
+                <Fact label="确认预计开船时间" value={formatDate(currentSo.etd)} />
                 <Fact label="SO 文件" value={currentSo.document.originalFilename} />
                 <Fact label="登记时间" value={formatDateTime(currentSo.createdAt)} />
                 <Fact label="登记人" value={currentSo.uploadedBy?.displayName ?? '—'} />
@@ -808,14 +808,14 @@ export default function AdminBookingDetail() {
           ) : null}
           {b.status === 'BOOKED' && !currentSo ? (
             <div className="mt-4 rounded border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
-              当前 Booking 已进入 BOOKED，但尚未加载到 SO 记录。请刷新后核对历史数据。
+              当前状态为「已订舱」，但尚未加载到 SO 记录。请刷新后核对历史数据。
             </div>
           ) : null}
         </section>
       ) : null}
       {b.shipments.length ? (
         <section className="rounded border border-border bg-surface p-5">
-          <h2 className="font-semibold">关联 Shipment</h2>
+          <h2 className="font-semibold">关联出运记录</h2>
           <div className="mt-3 space-y-2 text-sm">
             {b.shipments.map((shipment) => (
               <Link
@@ -1040,7 +1040,7 @@ function ReviewIssues({ issues, status }: { issues: ReviewIssue[]; status: strin
             <div className="font-semibold">{issue.message}</div>
             {issue.code === 'CARGO_READY_AFTER_ETD' ? (
               <div className="mt-1 text-xs">
-                Cargo Ready Date：{issue.details?.cargoReadyDate ?? '—'}，ETD：
+                预计货好日期：{issue.details?.cargoReadyDate ?? '—'}，预计开船时间：
                 {issue.details?.etd ?? '—'}
                 。当前货好时间无法满足计划船期，请确认新的船期或客户货好时间。
               </div>
@@ -1089,7 +1089,7 @@ function ActionDialog(props: {
             ? '提交订舱'
             : props.mode === 'publish-so'
               ? '确认发布 SO'
-              : '确认创建 Basic Shipment';
+              : '确认创建出运记录';
   const submitLabel =
     props.mode === 'approve'
       ? '确认通过'
@@ -1115,7 +1115,7 @@ function ActionDialog(props: {
         </h2>
         {props.mode === 'approve' ? (
           <div className="rounded border border-success/20 bg-success/10 px-3 py-2 text-sm text-foreground">
-            该 Booking
+            该订舱
             将进入待订舱阶段。请确认客户提交的货物、发货人和联系人资料已经满足实际订舱要求。
           </div>
         ) : null}
@@ -1151,18 +1151,18 @@ function ActionDialog(props: {
         {props.mode === 'create-shipment' ? (
           <div className="space-y-3">
             <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-              创建后客户将在出运列表看到该 Basic Shipment。请确认内部登记的 SO
+              创建后客户将在出运列表看到该出运记录。请确认内部登记的 SO
               已核对，船期信息可作为当前出运基础信息。SO 是否发布只影响客户查看和下载
               SO，不影响出运建档。
             </div>
             {props.shipmentPreview ? (
               <dl className="grid gap-3 rounded border border-border bg-sidebar p-3 text-sm sm:grid-cols-2">
-                <Fact label="Booking" value={props.shipmentPreview.bookingNo} />
+                <Fact label="订舱" value={props.shipmentPreview.bookingNo} />
                 <Fact label="航线" value={props.shipmentPreview.route} />
-                <Fact label="Carrier" value={props.shipmentPreview.carrier} />
-                <Fact label="Vessel / Voyage" value={props.shipmentPreview.vesselVoyage} />
-                <Fact label="ETD" value={formatDate(props.shipmentPreview.etd)} />
-                <Fact label="ETA" value={formatDate(props.shipmentPreview.eta)} />
+                <Fact label="船司" value={props.shipmentPreview.carrier} />
+                <Fact label="船名 / 航次" value={props.shipmentPreview.vesselVoyage} />
+                <Fact label="预计开船时间" value={formatDate(props.shipmentPreview.etd)} />
+                <Fact label="预计到港时间" value={formatDate(props.shipmentPreview.eta)} />
               </dl>
             ) : null}
           </div>
@@ -1287,7 +1287,7 @@ function RegisterSoDialog(props: {
           </div>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">
-              <FieldLabel label="SO No." required />
+              <FieldLabel label="SO 编号" required />
             </span>
             <input
               className={inputClass(props.errors.soNumber)}
@@ -1306,8 +1306,8 @@ function RegisterSoDialog(props: {
               value={props.sourceType}
               onChange={(event) => props.onSourceType(event.target.value)}
             >
-              <option value="CARRIER">Carrier</option>
-              <option value="AGENT">Agent</option>
+              <option value="CARRIER">船司</option>
+              <option value="AGENT">代理</option>
               <option value="OTHER">其他</option>
             </select>
             {props.errors.sourceType ? (
@@ -1327,7 +1327,7 @@ function RegisterSoDialog(props: {
             ) : null}
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block font-medium">Vessel</span>
+            <span className="mb-1 block font-medium">船名</span>
             <input
               className={inputClass(props.errors.vessel)}
               maxLength={100}
@@ -1339,7 +1339,7 @@ function RegisterSoDialog(props: {
             ) : null}
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block font-medium">Voyage</span>
+            <span className="mb-1 block font-medium">航次</span>
             <input
               className={inputClass(props.errors.voyage)}
               maxLength={50}
@@ -1351,7 +1351,7 @@ function RegisterSoDialog(props: {
             ) : null}
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block font-medium">Confirmed / Updated ETD</span>
+            <span className="mb-1 block font-medium">确认 / 更新预计开船时间</span>
             <input
               className={inputClass(props.errors.etd)}
               type="date"
@@ -1442,8 +1442,8 @@ function formatFileSize(size: number) {
 
 function soSourceTypeLabel(value: string) {
   const labels: Record<string, string> = {
-    CARRIER: 'Carrier',
-    AGENT: 'Agent',
+    CARRIER: '船司',
+    AGENT: '代理',
     OTHER: '其他',
   };
   return labels[value] ?? value;
@@ -1475,9 +1475,9 @@ function formatQuoteContainers(items: NonNullable<Booking['quote']>['items']) {
 function reviewIssueAdvice(code: string) {
   const advice: Record<string, string> = {
     MISSING_BOOKING_CONTACT: '请退回客户补充订舱联系人姓名。',
-    MISSING_CONTACT_CHANNEL: '请退回客户补充邮箱或电话，便于 Operation 跟进异常。',
+    MISSING_CONTACT_CHANNEL: '请退回客户补充邮箱或电话，便于操作人员跟进异常。',
     INVALID_GROSS_WEIGHT: '请退回客户修正货物毛重。',
-    BOOKING_QUOTE_MISMATCH: '请核对 Quote 与 Booking 快照，不要静默修复历史数据。',
+    BOOKING_QUOTE_MISMATCH: '请核对报价与订舱快照，不要静默修复历史数据。',
     DANGEROUS_GOODS_INCOMPLETE: '请退回客户补充危险品品名、UN No.、IMO Class 或 MSDS 资料状态。',
     DANGEROUS_GOODS_MANUAL_REVIEW: '继续前请人工确认危险品资料是否满足订舱要求。',
   };
@@ -1528,7 +1528,7 @@ function mapSoFieldErrors(payload: ApiErrorPayload): SoFieldErrors {
     carrierCode: ['carrierCode', '船司代码不能超过 20 个字符。'],
     vessel: ['vessel', '船名不能超过 100 个字符。'],
     voyage: ['voyage', '航次不能超过 50 个字符。'],
-    etd: ['etd', '请输入有效 ETD。'],
+    etd: ['etd', '请输入有效预计开船时间。'],
     receivedAt: ['receivedAt', 'SO 接收时间无效，请重新提交。'],
   };
   return Object.keys(fieldErrors).reduce<SoFieldErrors>((result, field) => {
@@ -1543,7 +1543,7 @@ function formatSoError(payload: ApiErrorPayload) {
     SO_FILE_REQUIRED: '请选择 SO 文件后再保存。',
     SO_FILE_TYPE_INVALID: 'SO 文件仅支持 PDF、PNG 或 JPG。',
     VALIDATION_ERROR: '请检查弹窗中的字段后重新保存。',
-    BOOKING_NOT_FOUND: '当前 Booking 状态不允许登记 SO，请刷新后重试。',
+    BOOKING_NOT_FOUND: '当前订舱状态不允许登记 SO，请刷新后重试。',
   };
   return (payload.code && messages[payload.code]) || payload.message || 'SO 内部保存失败。';
 }

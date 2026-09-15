@@ -68,12 +68,12 @@ export default function PortalBookingsPage() {
           <div className="p-4">
             <EmptyState
               title={
-                status === 'REVISION_REQUIRED' ? '当前没有需要补充资料的 Booking' : '还没有 Booking'
+                status === 'REVISION_REQUIRED' ? '当前没有需要补充资料的订舱' : '还没有订舱'
               }
               description={
                 status === 'REVISION_REQUIRED'
-                  ? '如果操作团队退回补充资料，需要处理的 Booking 会显示在这里。'
-                  : '接受报价后，可从报价详情一键创建 Booking。'
+                  ? '如果操作团队退回补充资料，需要处理的订舱会显示在这里。'
+                  : '接受报价后，可从报价详情一键创建订舱。'
               }
             />
           </div>
@@ -100,7 +100,7 @@ export default function PortalBookingsPage() {
                   </div>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                     <div>
-                      <dt className="text-xs text-muted">船司 / ETD</dt>
+                      <dt className="text-xs text-muted">船司 / 预计开船时间</dt>
                       <dd className="mt-0.5 font-medium">
                         {booking.carrierCode ?? '待确认'} · {booking.etd?.slice(0, 10) ?? '待确认'}
                       </dd>
@@ -162,7 +162,7 @@ export default function PortalBookingsPage() {
                         {booking.polCode} → {booking.podCode}
                         <div className="text-xs text-muted">
                           {booking.carrierCode ?? '船司待确认'} ·{' '}
-                          {booking.etd?.slice(0, 10) ?? 'ETD 待确认'}
+                          {booking.etd?.slice(0, 10) ?? '预计开船时间待确认'}
                         </div>
                       </td>
                       <td className={cell}>{booking.commodity ?? '待填写'}</td>

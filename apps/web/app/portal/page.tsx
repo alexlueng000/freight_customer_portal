@@ -74,7 +74,7 @@ export default function PortalPage() {
     try {
       const response = await apiFetch('/api/v1/dashboard/portal');
       const payload = (await response.json()) as DashboardResponse & { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? 'Dashboard 加载失败。');
+      if (!response.ok) throw new Error(payload.message ?? '工作台加载失败。');
       setDashboard(payload);
       setNotifications(payload.notifications.filter(isPilotNotificationAvailable));
     } catch (reason) {
@@ -188,7 +188,7 @@ export default function PortalPage() {
                               {shipment.polCode} → {shipment.podCode}
                             </div>
                             <div className="mt-1 text-xs text-muted">
-                              ETA {formatDate(shipment.eta, '待确认')}
+                              预计到港时间 {formatDate(shipment.eta, '待确认')}
                             </div>
                           </div>
                           <StatusBadge tone={shipmentStatusTone(shipment.status)}>
@@ -204,7 +204,7 @@ export default function PortalPage() {
                         <tr className="border-b border-border bg-sidebar text-xs text-muted">
                           <th className={head}>运输编号</th>
                           <th className={head}>航线</th>
-                          <th className={head}>ETA</th>
+                          <th className={head}>预计到港时间</th>
                           <th className={head}>状态</th>
                         </tr>
                       </thead>

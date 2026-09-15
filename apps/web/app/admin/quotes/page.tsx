@@ -70,7 +70,7 @@ export default function AdminQuotesPage() {
             <div className="p-4">
               <EmptyState
                 title={status === 'DRAFT' ? '当前没有待销售确认报价' : '暂无报价'}
-                description={status === 'DRAFT' ? '客户提交报价申请后，待审核的 Quote 会显示在这里。' : '客户提交报价申请后会显示在这里。'}
+                description={status === 'DRAFT' ? '客户提交报价申请后，待审核的报价会显示在这里。' : '客户提交报价申请后会显示在这里。'}
               />
             </div>
           ) : (

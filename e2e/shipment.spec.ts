@@ -25,7 +25,7 @@ test.describe('Shipment fulfillment', () => {
   test('internal user can open the real Shipment list and maintenance detail', async ({ page }) => {
     await login(page, adminEmail, adminPassword!, '/admin');
     await page.goto('/admin/shipments');
-    await expect(page.getByRole('heading', { name: 'Basic Shipment' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '出运记录' })).toBeVisible();
     const firstShipment = page.getByRole('link', { name: 'SHP-DEMO-BOOKED' });
     await expect(firstShipment).toBeVisible();
     await firstShipment.click();

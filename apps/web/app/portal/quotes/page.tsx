@@ -114,7 +114,7 @@ export default function QuotesPage() {
         ) : !visibleItems.length ? (
           <div className="p-4">
             <EmptyState
-              title={isPendingStatus || status === 'SENT' ? '当前没有待处理报价' : '还没有 Quote'}
+              title={isPendingStatus || status === 'SENT' ? '当前没有待处理报价' : '还没有报价'}
               description={
                 isPendingStatus || status === 'SENT'
                   ? '待确认或待创建订舱的正式报价会出现在这里。'
@@ -144,7 +144,7 @@ export default function QuotesPage() {
                     </div>
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                       <div>
-                        <dt className="text-xs text-muted">船司 / ETD</dt>
+                        <dt className="text-xs text-muted">船司 / 预计开船时间</dt>
                         <dd className="mt-0.5 font-medium">
                           {quote.carrierCode ?? '待确认'} ·{' '}
                           {quote.etd ? quote.etd.slice(0, 10) : '待确认'}
@@ -195,7 +195,7 @@ export default function QuotesPage() {
                   <tr className="border-b border-border bg-sidebar text-xs text-muted">
                     <th className={head}>报价编号</th>
                     <th className={head}>航线</th>
-                    <th className={head}>船司 / ETD</th>
+                    <th className={head}>船司 / 预计开船时间</th>
                     <th className={head}>金额</th>
                     <th className={head}>有效期</th>
                     <th className={head}>状态</th>

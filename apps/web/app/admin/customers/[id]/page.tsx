@@ -858,7 +858,7 @@ function CreateContactDialog({
             />
             <CheckboxField
               label="订舱联系人"
-              description="创建 Booking 时优先选择"
+              description="创建订舱时优先选择"
               register={register('isBookingContact')}
             />
             <CheckboxField

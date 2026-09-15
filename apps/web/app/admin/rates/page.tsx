@@ -99,7 +99,7 @@ const chargeOptions = [
   { code: 'VGM', name: 'VGM Fee' },
 ];
 const rateImportTargetLabels: Record<string, string> = {
-  rateNo: '运价编号', polCode: '起运港代码', polName: '起运港名称', podCode: '目的港代码', podName: '目的港名称', carrierCode: '船司代码', serviceName: '航线服务', effectiveDate: '生效日期', expiryDate: '失效日期', etd: 'ETD', transitDays: '航程天数', supplierName: '供应商', contractNo: '合约号', currency: '运价币种', status: '状态', containerType: '箱型', costAmount: '采购成本', sellAmount: '标准售价', priceCurrency: '价格币种', remark: '备注', price20GpCost: '20GP 采购成本', price20GpSell: '20GP 标准售价', price40GpCost: '40GP 采购成本', price40GpSell: '40GP 标准售价', price40HqCost: '40HQ 采购成本', price40HqSell: '40HQ 标准售价', price45HqCost: '45HQ 采购成本', price45HqSell: '45HQ 标准售价', vesselVoyage: '船名航次', sailingPattern: '开船日', freeTime: '免箱期', freeTimeDemurrage: '免堆期', freeTimeDetention: '免箱期', commodityRestriction: '品名限制', surcharge: '附加费', surchargeBaf: 'BAF', surchargePss: 'PSS', surchargeDoc: 'DOC', surchargeSeal: 'SEAL',
+  rateNo: '运价编号', polCode: '起运港代码', polName: '起运港名称', podCode: '目的港代码', podName: '目的港名称', carrierCode: '船司代码', serviceName: '航线服务', effectiveDate: '生效日期', expiryDate: '失效日期', etd: '预计开船时间', transitDays: '航程天数', supplierName: '供应商', contractNo: '合约号', currency: '运价币种', status: '状态', containerType: '箱型', costAmount: '采购成本', sellAmount: '标准售价', priceCurrency: '价格币种', remark: '备注', price20GpCost: '20GP 采购成本', price20GpSell: '20GP 标准售价', price40GpCost: '40GP 采购成本', price40GpSell: '40GP 标准售价', price40HqCost: '40HQ 采购成本', price40HqSell: '40HQ 标准售价', price45HqCost: '45HQ 采购成本', price45HqSell: '45HQ 标准售价', vesselVoyage: '船名航次', sailingPattern: '开船日', freeTime: '免箱期', freeTimeDemurrage: '免堆期', freeTimeDetention: '免箱期', commodityRestriction: '品名限制', surcharge: '附加费', surchargeBaf: 'BAF', surchargePss: 'PSS', surchargeDoc: 'DOC', surchargeSeal: 'SEAL',
 };
 
 export default function RatesPage() {
@@ -137,7 +137,7 @@ export default function RatesPage() {
     finally { setDeletingId(null); }
   }, [apiFetch, items.length, page, deletingId]);
   const columns = useMemo<DataTableColumn<Rate>[]>(() => [
-    { key: 'rateNo', header: 'Rate', render: (rate) => <div><div className="font-medium">{rate.rateNo}</div><div className="mt-0.5 text-xs text-muted">{rate.serviceName ?? '未设置服务'}</div></div> },
+    { key: 'rateNo', header: '运价编号', render: (rate) => <div><div className="font-medium">{rate.rateNo}</div><div className="mt-0.5 text-xs text-muted">{rate.serviceName ?? '未设置服务'}</div></div> },
     { key: 'route', header: '航线', render: (rate) => <div><div>{rate.polCode} → {rate.podCode}</div><div className="mt-0.5 text-xs text-muted">{rate.polName} → {rate.podName}</div></div> },
     { key: 'carrierCode', header: '船司', render: (rate) => rate.carrierCode },
     { key: 'prices', header: '箱型 / 成本', render: (rate) => <div className="space-y-1">{rate.prices.map((price) => <div key={price.id} className="whitespace-nowrap"><span className="inline-block w-12 text-xs text-muted">{price.containerType}</span> {formatMoney(price.costAmount, price.currency)}</div>)}</div> },
@@ -155,9 +155,9 @@ export default function RatesPage() {
     {rateToDelete ? <DeleteRateDialog rate={rateToDelete} busy={Boolean(deletingId)} error={deleteError} onCancel={() => { if (!deletingId) { setRateToDelete(null); setDeleteError(null); } }} onConfirm={() => void deleteRate(rateToDelete)} /> : null}
     {error?.code === 'PERMISSION_DENIED' ? <PermissionDeniedState /> : <section className="overflow-hidden rounded border border-border bg-surface">
       <FilterBar onClear={clearFilters} onSearchChange={setSearchInput} placeholder="搜索运价编号、港口、供应方或合约号" searchValue={searchInput}>
-        <input aria-label="起运港代码" className={filterClass} onChange={(event) => { setPolCode(event.target.value); setPage(1); }} placeholder="POL" value={polCode} />
-        <input aria-label="目的港代码" className={filterClass} onChange={(event) => { setPodCode(event.target.value); setPage(1); }} placeholder="POD" value={podCode} />
-        <input aria-label="船司代码" className={filterClass} onChange={(event) => { setCarrierCode(event.target.value); setPage(1); }} placeholder="Carrier" value={carrierCode} />
+        <input aria-label="起运港代码" className={filterClass} onChange={(event) => { setPolCode(event.target.value); setPage(1); }} placeholder="起运港代码" value={polCode} />
+        <input aria-label="目的港代码" className={filterClass} onChange={(event) => { setPodCode(event.target.value); setPage(1); }} placeholder="目的港代码" value={podCode} />
+        <input aria-label="船司代码" className={filterClass} onChange={(event) => { setCarrierCode(event.target.value); setPage(1); }} placeholder="船司代码" value={carrierCode} />
         <select aria-label="箱型" className={filterClass} onChange={(event) => { setContainerType(event.target.value); setPage(1); }} value={containerType}><option value="">全部箱型</option>{containerTypes.map((type) => <option key={type}>{type}</option>)}</select>
         <select aria-label="运价状态" className={filterClass} onChange={(event) => { setStatus(event.target.value as RateStatus | ''); setPage(1); }} value={status}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <label className="flex items-center gap-2 text-xs text-muted">有效日<input aria-label="有效日" className={filterClass} onChange={(event) => { setValidOn(event.target.value); setPage(1); }} type="date" value={validOn} /></label>
@@ -749,7 +749,7 @@ function rateImportIssueActionText(type: string) {
       '请在“识别不对？调整工作表和列”中把起运港代码或起运港名称列映射为起运港；常见值如 CNSHA、上海、Shanghai。',
     missing_pod:
       '请在“识别不对？调整工作表和列”中把目的港代码或目的港名称列映射为目的港；常见值如 USLAX、洛杉矶、Los Angeles。',
-    missing_carrier: '请把船司、Carrier、船公司代码等列映射为船司；系统需要船司代码才能保存运价。',
+    missing_carrier: '请把船司、船公司代码等列映射为船司；系统需要船司代码才能保存运价。',
     missing_currency:
       '请映射币种列，或在有效期和币种补齐区选择默认币种。币种需使用 USD、CNY、EUR 这类三位代码。',
     date: '请映射生效日期和失效日期，或在有效期和币种补齐区填写统一日期后重新预览。',
@@ -1131,8 +1131,8 @@ function RateDialog({ apiFetch, rate, onClose, onSaved }: { apiFetch: (input: Re
     <form className="space-y-6 p-5" onSubmit={(event) => void submit(event)}><RateFormOptionLists />{submitError ? <div className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">{submitError}</div> : null}
       <fieldset className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><legend className="col-span-full text-sm font-semibold">基础信息</legend>
         <FormField error={errors.rateNo?.message} label="运价编号 *"><input {...register('rateNo')} className={inputClass} placeholder="例如 RATE-SHA-LAX-001" /></FormField><FormField error={errors.carrierCode?.message} label="船司代码 *"><input {...carrierCodeField} className={inputClass} list="rate-carrier-options" placeholder="选择或输入船司代码" /></FormField><FormField error={errors.serviceName?.message} label="航线服务"><input {...register('serviceName')} className={inputClass} list="rate-service-options" placeholder="选择或输入服务名称" /></FormField><FormField error={errors.status?.message} label="状态 *"><select {...register('status')} className={inputClass}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
-        <FormField error={errors.polCode?.message} label="POL 代码 *"><input {...polCodeField} className={inputClass} list="rate-port-options" onBlur={(event) => { void polCodeField.onBlur(event); applyPort('polName', event.target.value); }} placeholder="选择或输入起运港" /></FormField><FormField error={errors.polName?.message} label="POL 名称 *"><input {...register('polName')} className={inputClass} placeholder="选择港口代码后自动带出" /></FormField><FormField error={errors.podCode?.message} label="POD 代码 *"><input {...podCodeField} className={inputClass} list="rate-port-options" onBlur={(event) => { void podCodeField.onBlur(event); applyPort('podName', event.target.value); }} placeholder="选择或输入目的港" /></FormField><FormField error={errors.podName?.message} label="POD 名称 *"><input {...register('podName')} className={inputClass} placeholder="选择港口代码后自动带出" /></FormField>
-        <FormField error={errors.effectiveDate?.message} label="生效日 *"><input {...register('effectiveDate')} className={inputClass} type="date" /></FormField><FormField error={errors.expiryDate?.message} label="失效日 *"><input {...register('expiryDate')} className={inputClass} type="date" /></FormField><FormField error={errors.etd?.message} label="ETD"><input {...register('etd')} className={inputClass} type="datetime-local" /></FormField><FormField error={errors.transitDays?.message} label="航程（天）"><input {...register('transitDays')} className={inputClass} inputMode="numeric" /></FormField>
+        <FormField error={errors.polCode?.message} label="起运港代码 *"><input {...polCodeField} className={inputClass} list="rate-port-options" onBlur={(event) => { void polCodeField.onBlur(event); applyPort('polName', event.target.value); }} placeholder="选择或输入起运港" /></FormField><FormField error={errors.polName?.message} label="起运港名称 *"><input {...register('polName')} className={inputClass} placeholder="选择港口代码后自动带出" /></FormField><FormField error={errors.podCode?.message} label="目的港代码 *"><input {...podCodeField} className={inputClass} list="rate-port-options" onBlur={(event) => { void podCodeField.onBlur(event); applyPort('podName', event.target.value); }} placeholder="选择或输入目的港" /></FormField><FormField error={errors.podName?.message} label="目的港名称 *"><input {...register('podName')} className={inputClass} placeholder="选择港口代码后自动带出" /></FormField>
+        <FormField error={errors.effectiveDate?.message} label="生效日 *"><input {...register('effectiveDate')} className={inputClass} type="date" /></FormField><FormField error={errors.expiryDate?.message} label="失效日 *"><input {...register('expiryDate')} className={inputClass} type="date" /></FormField><FormField error={errors.etd?.message} label="预计开船时间"><input {...register('etd')} className={inputClass} type="datetime-local" /></FormField><FormField error={errors.transitDays?.message} label="航程（天）"><input {...register('transitDays')} className={inputClass} inputMode="numeric" /></FormField>
         <FormField error={errors.supplierName?.message} label="供应方"><input {...register('supplierName')} className={inputClass} placeholder="可选，供应商或代理名称" /></FormField><FormField error={errors.contractNo?.message} label="合约号"><input {...register('contractNo')} className={inputClass} placeholder="可选" /></FormField><FormField error={errors.currency?.message} label="基础币种 *"><select {...currencyField} className={inputClass}>{currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select></FormField>
       </fieldset>
       <fieldset className="space-y-3 border-t border-border pt-5"><div className="flex items-center justify-between"><legend className="text-sm font-semibold"><FieldLabel label="箱型价格" required /></legend><button className={secondaryButton} onClick={() => prices.append({ containerType: '40HQ', costAmount: '', sellAmount: '', currency: mainCurrency || 'USD', remark: '' })} type="button"><Plus className="size-3.5" /> 添加箱型</button></div>{errors.prices?.root?.message ? <p className="text-xs text-danger">{errors.prices.root.message}</p> : null}
@@ -1176,7 +1176,7 @@ const rateRootFieldMessages: Partial<Record<keyof RateFormValues, string>> = {
   serviceName: '航线服务不能超过 150 个字符',
   effectiveDate: '请选择有效生效日',
   expiryDate: '请选择有效失效日',
-  etd: '请选择有效 ETD',
+  etd: '请选择有效预计开船时间',
   transitDays: '航程必须是 0–365 的整数',
   supplierName: '供应方不能超过 200 个字符',
   contractNo: '合约号不能超过 100 个字符',

@@ -27,7 +27,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
     try {
       const response = await apiFetch('/api/v1/shipments');
       const payload = (await response.json()) as Shipment[] & { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? 'Shipment 列表加载失败。');
+      if (!response.ok) throw new Error(payload.message ?? '出运记录列表加载失败。');
       setItems(payload);
     } catch (reason) {
       setError((reason as Error).message);
@@ -52,7 +52,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
     <div className="space-y-5">
       <PageHeader
         eyebrow={mode === 'admin' ? '运营后台' : '客户门户'}
-        title={mode === 'portal' ? '我的运输' : 'Basic Shipment'}
+        title={mode === 'portal' ? '我的运输' : '出运记录'}
         description={
           mode === 'admin'
             ? '维护 SO 后的基础出运信息、船期时间与客户可见进度。'
@@ -95,7 +95,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
               description={
                 status || query
                   ? '请调整状态或关键词后重新查看。'
-                  : 'Booking 确认并登记 SO 后，Operation 可以创建 Basic Shipment，你可以在这里查看运输进度。'
+                  : '订舱确认并登记 SO 后，操作人员可以创建出运记录，你可以在这里查看运输进度。'
               }
             />
           </div>
@@ -122,7 +122,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                     <div>
                       <dt className="text-xs text-muted">
-                        {mode === 'admin' ? '客户 / Booking' : 'Booking'}
+                        {mode === 'admin' ? '客户 / 订舱' : '订舱'}
                       </dt>
                       <dd className="mt-0.5 font-medium">
                         {mode === 'admin' ? `${item.customer.name} · ` : ''}
@@ -142,7 +142,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
                       </dd>
                     </div>
                     <div className="text-right">
-                      <dt className="text-xs text-muted">ETD / ETA</dt>
+                      <dt className="text-xs text-muted">预计开船时间 / 预计到港时间</dt>
                       <dd className="mt-0.5 font-medium">
                         {formatDate(item.etd, '待确认')} / {formatDate(item.eta, '待确认')}
                       </dd>
@@ -155,11 +155,11 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
               <table className="w-full min-w-[920px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                    <th className={head}>Shipment</th>
-                    <th className={head}>客户 / Booking</th>
+                    <th className={head}>出运记录</th>
+                    <th className={head}>客户 / 订舱</th>
                     <th className={head}>航线</th>
                     <th className={head}>船名航次</th>
-                    <th className={head}>ETD / ETA</th>
+                    <th className={head}>预计开船时间 / 预计到港时间</th>
                     <th className={head}>柜量</th>
                     <th className={head}>状态</th>
                   </tr>

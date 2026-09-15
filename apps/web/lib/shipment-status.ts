@@ -12,7 +12,7 @@ export const shipmentStatusMeta: Record<string, ShipmentStatusMeta> = {
   PLANNED: {
     label: '待开船',
     customerLabel: '待开船',
-    description: 'Shipment 已创建，等待实际离港。',
+    description: '出运记录已创建，等待实际离港。',
     customerDescription: '订舱已完成，正在等待实际开船。',
     tone: 'neutral',
   },
@@ -33,8 +33,8 @@ export const shipmentStatusMeta: Record<string, ShipmentStatusMeta> = {
   CANCELLED: {
     label: '已取消',
     customerLabel: '已取消',
-    description: '该 Shipment 已取消，不再继续更新进度。',
-    customerDescription: '该 Shipment 已取消。',
+    description: '该出运记录已取消，不再继续更新进度。',
+    customerDescription: '该出运记录已取消。',
     tone: 'danger',
   },
 };

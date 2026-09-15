@@ -40,7 +40,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
     try {
       const response = await apiFetch(`/api/v1/shipments/${id}`);
       const payload = (await response.json()) as Shipment & { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? 'Shipment 详情加载失败。');
+      if (!response.ok) throw new Error(payload.message ?? '出运记录详情加载失败。');
       setShipment(payload);
       setDetails({
         vessel: payload.vessel ?? '',
@@ -112,7 +112,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
 
   if (loading) return <LoadingState rows={8} />;
   if (!shipment)
-    return <ErrorState description={error || 'Shipment 不存在'} onRetry={() => void load()} />;
+    return <ErrorState description={error || '出运记录不存在'} onRetry={() => void load()} />;
 
   const nextAction =
     shipment.status === 'PLANNED'
@@ -126,7 +126,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   const businessFlow = resolveShipmentBusinessFlow(shipment, mode);
   const actionWarning =
     action === 'depart' && shipment.etd && occurredAt && new Date(occurredAt) < new Date(shipment.etd)
-      ? '实际开船时间早于计划 ETD，请确认时间是否正确。'
+      ? '实际开船时间早于预计开船时间，请确认时间是否正确。'
       : action === 'arrive' && shipment.atd && occurredAt && new Date(occurredAt) < new Date(shipment.atd)
         ? '实际到港时间早于实际开船时间，请确认时间是否正确。'
         : '';
@@ -134,7 +134,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
   return (
     <div className="space-y-5">
       <Link className="text-sm text-primary hover:underline" href={`/${mode}/shipments`}>
-        ← 返回 Shipment 列表
+        ← 返回出运记录列表
       </Link>
       <PageHeader
         eyebrow={shipment.customer.name}
@@ -155,7 +155,7 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
         <Fact label="船司" value={shipment.carrierCode ?? '待确认'} />
         <Fact label="箱型与数量" value={containerSummary || '—'} />
         <div>
-          <div className="text-xs text-muted">来源 Booking</div>
+          <div className="text-xs text-muted">来源订舱</div>
           <Link className="mt-1 inline-block font-semibold text-primary hover:underline" href={`/${mode}/bookings/${shipment.bookingId}`}>
             {shipment.booking.bookingNo} →
           </Link>
@@ -203,8 +203,8 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <Input label="船名" value={details.vessel} onChange={(value) => setDetails({ ...details, vessel: value })} />
             <Input label="航次" value={details.voyage} onChange={(value) => setDetails({ ...details, voyage: value })} />
-            <Input label="ETD" type="datetime-local" value={details.etd} onChange={(value) => setDetails({ ...details, etd: value })} />
-            <Input label="ETA" type="datetime-local" value={details.eta} onChange={(value) => setDetails({ ...details, eta: value })} />
+            <Input label="预计开船时间" type="datetime-local" value={details.etd} onChange={(value) => setDetails({ ...details, etd: value })} />
+            <Input label="预计到港时间" type="datetime-local" value={details.eta} onChange={(value) => setDetails({ ...details, eta: value })} />
             <div className="flex gap-2 sm:col-span-2">
               <button className={primary} disabled={busy || !detailsDirty} onClick={() => void saveDetails()}>保存航程计划</button>
               <button className={secondary} disabled={busy} onClick={() => { setEditing(false); setDetails({ vessel: shipment.vessel ?? '', voyage: shipment.voyage ?? '', etd: localDateTime(shipment.etd), eta: localDateTime(shipment.eta) }); }}>取消</button>
@@ -214,8 +214,8 @@ export function ShipmentDetailPage({ mode }: { mode: 'admin' | 'portal' }) {
           <div className="mt-4 grid gap-4 sm:grid-cols-4">
             <Fact label="船名" value={shipment.vessel ?? '—'} />
             <Fact label="航次" value={shipment.voyage ?? '—'} />
-            <Fact label="预计开船 · ETD" value={formatDateTime(shipment.etd, '待确认')} />
-            <Fact label="预计到港 · ETA" value={formatDateTime(shipment.eta, '待确认')} />
+            <Fact label="预计开船时间" value={formatDateTime(shipment.etd, '待确认')} />
+            <Fact label="预计到港时间" value={formatDateTime(shipment.eta, '待确认')} />
           </div>
         )}
       </section>

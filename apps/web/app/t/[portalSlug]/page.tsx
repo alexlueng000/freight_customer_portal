@@ -271,7 +271,7 @@ const workspaceCapabilities = [
     title: '订舱协同',
     description: '从已接受报价创建订舱，补充资料并跟进审核状态。',
   },
-  { icon: Route, title: '出运进度', description: '查看船名航次、ETD、ETA 和关键运输节点。' },
+  { icon: Route, title: '出运进度', description: '查看船名航次、预计开船时间、预计到港时间和关键运输节点。' },
   { icon: Bell, title: '关键通知', description: '报价、订舱与出运的重要变化及时提醒。' },
   {
     icon: ShieldCheck,

@@ -269,7 +269,7 @@ export default function QuoteDetailPage() {
           </StatusBadge>
         </Fact>
         <Fact label="船司" value={quote.carrierCode ?? '—'} />
-        <Fact label="ETD" value={quote.etd?.slice(0, 10) ?? '船期待确认'} />
+        <Fact label="预计开船时间" value={quote.etd?.slice(0, 10) ?? '船期待确认'} />
         <Fact label="有效期至" value={quote.validUntil.slice(0, 10)} />
       </section>
       <section className="rounded border border-border bg-surface p-4">
@@ -288,7 +288,7 @@ export default function QuoteDetailPage() {
             label="箱量"
             value={quote.containerQuantity === null ? '—' : String(quote.containerQuantity)}
           />
-          <Fact label="Incoterm" value={quote.incoterm ?? '—'} />
+          <Fact label="贸易条款" value={quote.incoterm ?? '—'} />
           <Fact label="提货地点" value={quote.pickupLocationText ?? '—'} />
           <Fact label="派送地点" value={quote.deliveryLocationText ?? '—'} />
           <Fact label="出口报关备注" value={quote.exportCustomsRemark ?? '—'} />
@@ -375,9 +375,9 @@ export default function QuoteDetailPage() {
         </section>
       ) : (
         <section className="rounded border border-warning/25 bg-warning/10 px-4 py-4">
-          <h2 className="text-sm font-semibold">Formal Quote 尚未发布</h2>
+          <h2 className="text-sm font-semibold">正式报价尚未发布</h2>
           <p className="mt-1 text-sm leading-6 text-muted">
-            当前仅显示你提交的 Quote Request。Sales
+            当前仅显示你提交的报价申请。销售人员
             发布后，此处才会显示正式报价金额、费用明细和报价条款。
           </p>
         </section>
@@ -748,10 +748,10 @@ function money(value: string | null, currency: string) {
 }
 function chargeUnitLabel(item: Pick<Item, 'chargeBasis' | 'containerType'>) {
   if (item.chargeBasis === 'PER_BL') return '/B/L';
-  if (item.chargeBasis === 'PER_SHIPMENT') return '/Shipment';
+  if (item.chargeBasis === 'PER_SHIPMENT') return '/票';
   return item.containerType
     ? `/${item.containerType} ${containerTypeLabel(item.containerType)}`
-    : '/Container';
+    : '/箱';
 }
 function summarizeContainers(items: Item[]) {
   const containers = quoteContainers(items);

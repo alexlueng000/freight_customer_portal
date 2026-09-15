@@ -266,9 +266,9 @@ export default function AdminQuoteDetailPage() {
         />
       ) : null}
       <PageHeader
-        eyebrow="Sales / Operation · Quote Review"
+        eyebrow="销售 / 操作 · 报价审核"
         title={quote.quoteNo}
-        description="核对客户需求、Reference Rate 与报价金额，确认无误后再发布 Formal Quote。"
+        description="核对客户需求、参考运价与报价金额，确认无误后再发布正式报价。"
         actions={
           <div className="flex gap-2">
             {quote.status === 'DRAFT' ? null : (
@@ -315,7 +315,7 @@ export default function AdminQuoteDetailPage() {
                 onClick={() => setConfirmingSend(true)}
                 type="button"
               >
-                发布 Formal Quote
+                发布正式报价
               </button>
             ) : null}
           </div>
@@ -330,14 +330,14 @@ export default function AdminQuoteDetailPage() {
         </Fact>
         <Fact label="客户" value={quote.customer.name} />
         <Fact
-          label="Carrier / Service"
+          label="船司 / 航线服务"
           value={
             [quote.carrierCode, quote.sourceRate?.serviceName].filter(Boolean).join(' / ') || '—'
           }
         />
-        <Fact label="ETD" value={quote.etd?.slice(0, 10) ?? '待确认'} />
-        <Fact label="Container Type × Quantity" value={containerSummary} />
-        <Fact label="Reference Rate" value={quote.sourceRate?.rateNo ?? '—'} />
+        <Fact label="预计开船时间" value={quote.etd?.slice(0, 10) ?? '待确认'} />
+        <Fact label="箱型 × 箱量" value={containerSummary} />
+        <Fact label="来源运价" value={quote.sourceRate?.rateNo ?? '—'} />
       </section>
       <RouteSummary podCode={quote.podCode} polCode={quote.polCode} quoteItems={quote.items} />
       <QuoteRequestSummary quote={quote} />
@@ -426,7 +426,7 @@ export default function AdminQuoteDetailPage() {
               <SourceFact label="来源运价编号" value={quote.sourceRate.rateNo} />
               <SourceFact label="供应商" value={quote.sourceRate.supplierName || '未填写'} />
               <SourceFact label="合约编号" value={quote.sourceRate.contractNo || '未填写'} />
-              <SourceFact label="服务名称" value={quote.sourceRate.serviceName || '未填写'} />
+              <SourceFact label="航线服务" value={quote.sourceRate.serviceName || '未填写'} />
               <SourceFact label="运价有效期" value={quote.sourceRate.effectiveDate.slice(0, 10) + ' 至 ' + quote.sourceRate.expiryDate.slice(0, 10)} />
               <SourceFact label="预计航程" value={quote.sourceRate.transitDays == null ? '未填写' : quote.sourceRate.transitDays + ' 天'} />
             </div>
@@ -455,11 +455,11 @@ export default function AdminQuoteDetailPage() {
         <SectionHeader
           description={
             quote.status === 'DRAFT'
-              ? '当前是待发布的报价草稿，仅供 Sales / Operation 审核；发布后才成为客户可见的正式报价。'
-              : '这是已发布的 Formal Quote 价格快照，客户可按当前状态查看和处理。'
+              ? '当前是待发布的报价草稿，仅供销售 / 操作审核；发布后才成为客户可见的正式报价。'
+              : '这是已发布的正式报价价格快照，客户可按当前状态查看和处理。'
           }
           icon={<FileSearch aria-hidden className="size-4" />}
-          title="Formal Quote（正式报价）"
+          title="正式报价"
         />
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
@@ -468,8 +468,8 @@ export default function AdminQuoteDetailPage() {
                 <th className={head}>费用</th>
                 <th className={head}>计费方式</th>
                 <th className={head}>计费数量</th>
-                <th className={head}>Reference Rate（成本快照）</th>
-                <th className={head}>Formal Quote 单价</th>
+                <th className={head}>参考运价（成本快照）</th>
+                <th className={head}>正式报价单价</th>
                 <th className={`${head} text-right`}>金额</th>
               </tr>
             </thead>
@@ -661,7 +661,7 @@ export default function AdminQuoteDetailPage() {
           <div className="w-full max-w-md rounded border border-border bg-surface shadow-xl">
             <div className="border-b border-border px-5 py-4">
               <h2 className="text-base font-semibold" id="send-quote-title">
-                发布 Formal Quote
+                发布正式报价
               </h2>
               <p className="mt-1 text-sm text-muted">
                 发布后状态将从待销售确认变为已发送，客户才可查看正式金额、下载 PDF、接受或拒绝报价。
@@ -717,7 +717,7 @@ function QuoteRequestSummary({ quote }: { quote: Quote }) {
           label="箱量"
           value={quote.containerQuantity === null ? '—' : String(quote.containerQuantity)}
         />
-        <Fact label="Incoterm" value={quote.incoterm ?? '—'} />
+        <Fact label="贸易条款" value={quote.incoterm ?? '—'} />
         <Fact label="提货地点" value={quote.pickupLocationText ?? '—'} />
         <Fact label="派送地点" value={quote.deliveryLocationText ?? '—'} />
         <Fact label="出口报关备注" value={quote.exportCustomsRemark ?? '—'} />
@@ -802,7 +802,7 @@ function SentBanner({
             <CheckCircle2 aria-hidden className="size-5" />
           </div>
           <div>
-            <div className="text-sm font-bold text-success">Formal Quote 已发布</div>
+            <div className="text-sm font-bold text-success">正式报价已发布</div>
             <p className="mt-1 text-sm text-foreground">
               {customerName} 现在可以在客户门户查看报价、下载 PDF，并选择接受或拒绝。
             </p>
@@ -998,10 +998,10 @@ function formatDateTime(value: string) {
 }
 function chargeUnitLabel(item: Pick<Item, 'chargeBasis' | 'containerType'>) {
   if (item.chargeBasis === 'PER_BL') return '/B/L';
-  if (item.chargeBasis === 'PER_SHIPMENT') return '/Shipment';
+  if (item.chargeBasis === 'PER_SHIPMENT') return '/票';
   return item.containerType
     ? `/${item.containerType} ${containerTypeLabel(item.containerType)}`
-    : '/Container';
+    : '/箱';
 }
 function portDisplayName(code: string) {
   const names: Record<string, string> = {

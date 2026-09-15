@@ -326,7 +326,7 @@ export function AppShell({
               </div>
               <div>
                 <div className="text-sm font-semibold">工作台</div>
-                <div className="text-xs text-muted">Dashboard</div>
+                <div className="text-xs text-muted">工作台</div>
               </div>
             </div>
             <div className="ml-auto flex items-center gap-2">
