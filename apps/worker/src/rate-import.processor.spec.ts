@@ -138,6 +138,30 @@ describe('rate import processor', () => {
     expect(generated.prices[0]?.sellAmount?.toString()).toBe('1400');
   });
 
+  it.each([
+    ['WEEKLY', undefined, 'Schedule: 每周五'],
+    ['MONTHLY', undefined, 'Schedule: 每月15日'],
+    ['EXACT', '2026-09-15T00:00:00.000Z', 'Schedule: 2026年9月15日'],
+  ])('persists %s sailing data without inventing dates', async (kind, etd, remark) => {
+    const rateNo = `SAILING-${kind}`;
+    const importJob = await prisma.rateImportJob.create({ data: { tenantId, originalFileName: '02.xlsx', createdById: actorUserId } });
+    await processRateImport(prisma, {
+      importJobId: importJob.id, tenantId, actorUserId, originalFileName: '02.xlsx', totalRows: 1,
+      normalizedRates: [{
+        source: { sheet: 'Rates', row: 5 }, sourceRows: [5], rateNo,
+        polCode: 'CNSHA', polName: 'Shanghai', podCode: 'USLAX', podName: 'Los Angeles', carrierCode: 'PIL',
+        effectiveDate: '2026-09-05', expiryDate: '2026-09-25', currency: 'USD', status: 'DRAFT', etd, remark,
+        prices: [{ containerType: '20GP', costAmount: '420', currency: 'USD', sourceColumns: [7] }],
+      }],
+    });
+    const rate = await prisma.rate.findFirstOrThrow({ where: { tenantId, rateNo }, include: { prices: true } });
+    expect(rate.etd?.toISOString()).toBe(etd);
+    expect(rate.prices[0]?.remark).toBe(remark);
+    expect(rate.status).toBe('DRAFT');
+    expect(rate.effectiveDate.toISOString().slice(0, 10)).toBe('2026-09-05');
+    expect(rate.expiryDate.toISOString().slice(0, 10)).toBe('2026-09-25');
+  });
+
   it('imports a normalized standard English FCL preview with all wide container prices', async () => {
     const importJob = await prisma.rateImportJob.create({ data: { tenantId, originalFileName: '01_standard_english_FCL.xlsx', createdById: actorUserId } });
     await processRateImport(prisma, {

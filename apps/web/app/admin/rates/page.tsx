@@ -8,6 +8,7 @@ import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
 import { hasPermission } from '@/lib/auth';
+import { rateSailingLabel } from '@/lib/rate-sailing';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
 import { DeleteRateDialog } from '@/components/delete-rate-dialog';
 import { EmptyState } from '@/components/empty-state';
@@ -25,6 +26,7 @@ interface RateCharge { id: string; chargeCode: string; chargeName: string; charg
 interface Rate {
   _count?: { quotes: number };
   id: string; rateNo: string; polCode: string; polName: string; podCode: string; podName: string;
+  polDisplayName?: string; podDisplayName?: string;
   carrierCode: string; serviceName: string | null; effectiveDate: string; expiryDate: string;
   etd: string | null; transitDays: number | null; supplierName: string | null; contractNo: string | null;
   currency: string; status: RateStatus; prices: RatePrice[]; charges: RateCharge[]; updatedAt: string;
@@ -33,7 +35,7 @@ interface RateListResponse { items: Rate[]; pagination: { page: number; pageSize
 interface RateImport { id: string; originalFileName: string; status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'; totalRows: number; successRows: number; failedRows: number; errors: Array<{ row: number; field: string; message: string }> | null; errorMessage: string | null; createdAt: string }
 interface RateImportHeaderCandidate { row: number; depth: 1 | 2; score: number; labels: string[]; suggestions: Array<{ column: number; sourceLabel: string; targetField: string; confidence: 'HIGH' | 'MEDIUM' }> }
 interface RateImportAnalysis { fileName: string; sheets: Array<{ index: number; name: string; rowCount: number; columnCount: number; mergedCellRanges: number; headerCandidates: RateImportHeaderCandidate[]; sampleRows: Array<{ row: number; values: string[] }> }> }
-interface RateImportPreview { previewToken: string; expiresAt: string; summary: { rateCount: number; priceCount: number; chargeCount: number; errorCount: number; warningCount: number }; rates: Array<{ source: { sheet: string; row: number }; rateNo?: string; polCode?: string; polName?: string; podCode?: string; podName?: string; carrierCode?: string; effectiveDate?: string; expiryDate?: string; currency?: string; status: string; prices: Array<{ containerType: string; costAmount?: string; sellAmount?: string; currency: string }>; charges?: Array<{ chargeCode: string; chargeName: string; chargeBasis: ChargeBasis; containerType?: string; amount: string; currency: string }> }>; issues: Array<{ severity: 'ERROR' | 'WARNING'; code: string; message: string; source: { sheet: string; row: number; column?: number; field?: string } }>; truncated: boolean }
+interface RateImportPreview { previewToken: string; expiresAt: string; summary: { rateCount: number; priceCount: number; chargeCount: number; errorCount: number; warningCount: number }; rates: Array<{ source: { sheet: string; row: number }; rateNo?: string; polCode?: string; polName?: string; podCode?: string; podName?: string; carrierCode?: string; effectiveDate?: string; expiryDate?: string; etd?: string; sailingPattern?: string; currency?: string; status: string; prices: Array<{ containerType: string; costAmount?: string; sellAmount?: string; currency: string }>; charges?: Array<{ chargeCode: string; chargeName: string; chargeBasis: ChargeBasis; containerType?: string; amount: string; currency: string }> }>; issues: Array<{ severity: 'ERROR' | 'WARNING'; code: string; message: string; source: { sheet: string; row: number; column?: number; field?: string } }>; truncated: boolean }
 interface ImportFixDefaults { effectiveDate: string; expiryDate: string; currency: string }
 interface ApiErrorPayload { code?: string; message?: string; details?: { errors?: string[]; fieldErrors?: Record<string, string[]> } }
 class RateApiError extends Error { constructor(message: string, readonly code?: string, readonly details?: ApiErrorPayload['details']) { super(message); } }
@@ -138,9 +140,10 @@ export default function RatesPage() {
   }, [apiFetch, items.length, page, deletingId]);
   const columns = useMemo<DataTableColumn<Rate>[]>(() => [
     { key: 'rateNo', header: '运价编号', render: (rate) => <div><div className="font-medium">{rate.rateNo}</div><div className="mt-0.5 text-xs text-muted">{rate.serviceName ?? '未设置服务'}</div></div> },
-    { key: 'route', header: '航线', render: (rate) => <div><div>{rate.polCode} → {rate.podCode}</div><div className="mt-0.5 text-xs text-muted">{rate.polName} → {rate.podName}</div></div> },
+    { key: 'route', header: '航线', render: (rate) => <div><div>{rate.polCode} → {rate.podCode}</div><div className="mt-0.5 text-xs text-muted">{rate.polDisplayName ?? rate.polName} → {rate.podDisplayName ?? rate.podName}</div></div> },
     { key: 'carrierCode', header: '船司', render: (rate) => rate.carrierCode },
     { key: 'prices', header: '箱型 / 成本', render: (rate) => <div className="space-y-1">{rate.prices.map((price) => <div key={price.id} className="whitespace-nowrap"><span className="inline-block w-12 text-xs text-muted">{price.containerType}</span> {formatMoney(price.costAmount, price.currency)}</div>)}</div> },
+    { key: 'sailing', header: '开船日', className: 'min-w-[120px]', render: rateSailingLabel },
     { key: 'validity', header: '有效期', render: (rate) => <div className="whitespace-nowrap">{formatDate(rate.effectiveDate)}<div className="mt-0.5 text-xs text-muted">至 {formatDate(rate.expiryDate)}</div></div> },
     { key: 'supplierName', header: '供应方 / 合约', render: (rate) => <div>{rate.supplierName ?? '—'}<div className="mt-0.5 text-xs text-muted">{rate.contractNo ?? '无合约号'}</div></div> },
     { key: 'status', header: '状态', render: (rate) => <StatusBadge tone={statusTones[rate.status]}>{statusLabels[rate.status]}</StatusBadge> },
@@ -825,6 +828,8 @@ function RateImportPreviewPanel({
                     {rate.podCode ?? rate.podName ?? '待补充'}
                   </div>
                   <div className="mt-1 text-muted">{rate.carrierCode ?? '船司待补充'}</div>
+                  <div className="mt-1 text-muted">开船日：{rate.etd?.slice(0, 10) ?? rate.sailingPattern ?? '未提供'}</div>
+                  <div className="mt-1 text-muted">状态：{statusLabels[rate.status as RateStatus] ?? '待修正'}</div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-3">
                   {rate.effectiveDate ?? '待补充'}

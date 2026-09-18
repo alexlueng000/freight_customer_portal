@@ -5,6 +5,7 @@ import { RequestContextService } from '../../shared/request-context/request-cont
 import type { CreateRateDto } from './dto/create-rate.dto.js';
 import type { ListRatesDto } from './dto/list-rates.dto.js';
 import type { UpdateRateDto } from './dto/update-rate.dto.js';
+import { portDisplayName } from './port-search.js';
 
 const rateSelect = {
   id: true, rateNo: true, polCode: true, polName: true, podCode: true, podName: true,
@@ -43,7 +44,11 @@ export class RatesService {
       this.prisma.rate.findMany({ where, select: rateSelect, orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }], skip: (query.page - 1) * query.pageSize, take: query.pageSize }),
       this.prisma.rate.count({ where }),
     ]);
-    return { items, pagination: { page: query.page, pageSize: query.pageSize, total, totalPages: Math.ceil(total / query.pageSize) } };
+    return { items: items.map((rate) => ({
+      ...rate,
+      polDisplayName: portDisplayName(rate.polCode, rate.polName),
+      podDisplayName: portDisplayName(rate.podCode, rate.podName),
+    })), pagination: { page: query.page, pageSize: query.pageSize, total, totalPages: Math.ceil(total / query.pageSize) } };
   }
 
   async getById(id: string) {

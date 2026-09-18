@@ -141,53 +141,29 @@ describe('rate import normalizer preview', () => {
     ]);
   });
 
-  it('previews Case 02 Chinese FCL with global validity and currency metadata', async () => {
-    const file = resolve(__dirname, '../../../../../docs/07-sample-data/02_chinese_headers_global_validity.xlsx');
-    const buffer = await readFile(file);
-    const analysis = await analyzeRateImportWorkbook('02_chinese_headers_global_validity.xlsx', buffer);
-    const sheet = analysis.sheets[0];
-    const candidate = sheet?.headerCandidates[0];
-    expect(sheet?.name).toBe('东南亚FCL特价');
-    expect(candidate).toMatchObject({ row: 4, depth: 1 });
-
-    const result = await previewRateImportWorkbook(buffer, {
-      sheetName: sheet!.name,
-      headerRow: candidate!.row,
-      headerDepth: candidate!.depth,
-      mappings: candidate!.suggestions.map((suggestion) => ({
-        sourceColumn: suggestion.column,
-        sourceLabel: suggestion.sourceLabel,
-        targetField: suggestion.targetField,
-      })),
-    });
-
-    expect(result.summary).toEqual({ rateCount: 5, priceCount: 16, chargeCount: 0, errorCount: 0, warningCount: 0 });
-    expect(result.issues).toHaveLength(0);
-    expect(result.rates).toHaveLength(5);
-    expect(result.rates.every((rate) => rate.effectiveDate === '2026-09-01')).toBe(true);
-    expect(result.rates.every((rate) => rate.expiryDate === '2026-09-20')).toBe(true);
-    expect(result.rates.every((rate) => rate.currency === 'USD')).toBe(true);
-    expect(result.rates.map((rate) => rate.polCode)).toEqual(['CNSZX', 'CNSZX', 'CNNGB', 'CNSHA', 'CNXMN']);
-    expect(result.rates.map((rate) => rate.podCode)).toEqual(['SGSIN', 'MYPKG', 'THBKK', 'VNSGN', 'IDJKT']);
-    expect(result.rates.map((rate) => rate.transitDays)).toEqual([4, 5, 8, 6, 10]);
-    expect(result.rates[0]?.prices).toEqual([
-      { containerType: '20GP', costAmount: '420', sellAmount: undefined, currency: 'USD', sourceColumns: [7] },
-      { containerType: '40GP', costAmount: '720', sellAmount: undefined, currency: 'USD', sourceColumns: [8] },
-      { containerType: '40HQ', costAmount: '720', sellAmount: undefined, currency: 'USD', sourceColumns: [9] },
+  it('previews Case 02 with mixed sailings, row validity and Chinese statuses', async () => {
+    const result = await previewFixture('02_chinese_headers_global_validity.xlsx');
+    expect(result.summary).toEqual({ rateCount: 3, priceCount: 9, chargeCount: 0, errorCount: 0, warningCount: 0 });
+    expect(result.rates.map((rate) => rate.source.row)).toEqual([5, 6, 7]);
+    expect(result.rates.map((rate) => rate.polCode)).toEqual(['CNSZX', 'CNSZX', 'CNNGB']);
+    expect(result.rates.map((rate) => rate.podCode)).toEqual(['SGSIN', 'USLAX', 'THBKK']);
+    expect(result.rates.map((rate) => rate.effectiveDate)).toEqual(['2026-09-01', '2026-09-05', '2026-09-01']);
+    expect(result.rates.map((rate) => rate.expiryDate)).toEqual(['2026-09-20', '2026-09-25', '2026-09-20']);
+    expect(result.rates.map((rate) => rate.status)).toEqual(['DRAFT', 'ACTIVE', 'DRAFT']);
+    expect(result.rates.map((rate) => rate.etd)).toEqual([undefined, undefined, '2026-09-15T00:00:00.000Z']);
+    expect(result.rates.map((rate) => rate.sailingPattern)).toEqual(['每周五', '每月15日', undefined]);
+    expect(result.rates[0]?.remark).toContain('Schedule: 每周五');
+    expect(result.rates[1]?.remark).toContain('Schedule: 每月15日');
+    expect(result.rates.flatMap((rate) => rate.prices).map((price) => `${price.containerType}:${price.costAmount}:${price.currency}`)).toEqual([
+      '20GP:420:USD', '40GP:720:USD', '40HQ:720:USD',
+      '20GP:450:USD', '40GP:750:USD', '40HQ:750:USD',
+      '20GP:530:USD', '40GP:850:USD', '40HQ:850:USD',
     ]);
-    expect(result.rates[4]?.prices).toEqual([
-      { containerType: '20GP', costAmount: '610', sellAmount: undefined, currency: 'USD', sourceColumns: [7] },
-      { containerType: '40GP', costAmount: '990', sellAmount: undefined, currency: 'USD', sourceColumns: [8] },
-      { containerType: '40HQ', costAmount: '990', sellAmount: undefined, currency: 'USD', sourceColumns: [9] },
-      { containerType: '45HQ', costAmount: '1190', sellAmount: undefined, currency: 'USD', sourceColumns: [10] },
-    ]);
-    expect(result.issues.some((issue) => issue.source.field === 'vesselVoyage' || issue.source.field === 'etd')).toBe(false);
   });
-
   describe('excel import fixture regression matrix', () => {
     const cases = [
       ['01_standard_english_FCL.xlsx', 5, 15, 0, 0],
-      ['02_chinese_headers_global_validity.xlsx', 5, 16, 0, 0],
+      ['02_chinese_headers_global_validity.xlsx', 3, 9, 0, 0],
       ['03_alias_headers_20DC_40HC.xlsx', 4, 15, 0, 0],
       ['04_header_row5_with_metadata.xlsx', 4, 12, 0, 0],
       ['06_port_alias_and_abbreviation.xlsx', 5, 15, 0, 0],

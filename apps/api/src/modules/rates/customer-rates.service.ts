@@ -5,6 +5,7 @@ import { RequestContextService } from '../../shared/request-context/request-cont
 import type { SearchCustomerRatesDto } from './dto/search-customer-rates.dto.js';
 import { CustomerRatePricingService } from './customer-rate-pricing.service.js';
 import { portDisplayName, portSearchFilter } from './port-search.js';
+import { customerSailingPattern } from './rate-sailing.js';
 
 @Injectable()
 export class CustomerRatesService {
@@ -70,6 +71,7 @@ export class CustomerRatesService {
           id: true,
           containerType: true,
           costAmount: true,
+          remark: true,
           sellAmount: true,
           currency: true,
           rate: {
@@ -141,6 +143,7 @@ export class CustomerRatesService {
           effectiveDate: rate.effectiveDate,
           expiryDate: rate.expiryDate,
           etd: rate.etd,
+          sailingPattern: customerSailingPattern(price.remark),
           transitDays: rate.transitDays,
           containerType: price.containerType,
           oceanSellAmount: oceanSellAmount.toString(),

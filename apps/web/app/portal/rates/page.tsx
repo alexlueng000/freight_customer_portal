@@ -13,6 +13,7 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 import { hasPermission } from '@/lib/auth';
+import { rateSailingLabel } from '@/lib/rate-sailing';
 
 interface CustomerRate {
   id: string;
@@ -27,6 +28,7 @@ interface CustomerRate {
   effectiveDate: string;
   expiryDate: string;
   etd: string | null;
+  sailingPattern?: string | null;
   transitDays: number | null;
   containerType: string;
   oceanSellAmount: string;
@@ -437,9 +439,9 @@ export default function PortalRatesPage() {
                         </dd>
                       </div>
                       <div className="text-right">
-                        <dt className="text-xs text-muted">预计离港日 / 航程</dt>
+                        <dt className="text-xs text-muted">开船日 / 航程</dt>
                         <dd className="mt-0.5 font-medium">
-                          {rate.etd ? formatDate(rate.etd) : '待确认'} ·{' '}
+                          {rateSailingLabel(rate)} ·{' '}
                           {rate.transitDays === null ? '—' : `${rate.transitDays} 天`}
                         </dd>
                       </div>
@@ -478,7 +480,7 @@ export default function PortalRatesPage() {
                     <tr className="border-b border-border bg-sidebar text-xs text-muted">
                       <th className={headerClass}>船司 / 航线服务</th>
                       <th className={headerClass}>航线</th>
-                      <th className={headerClass}>预计离港日</th>
+                      <th className={headerClass}>开船日</th>
                       <th className={headerClass}>航程</th>
                       <th className={headerClass}>箱型</th>
                       <th className={headerClass}>预计总价</th>
@@ -509,7 +511,7 @@ export default function PortalRatesPage() {
                           </div>
                         </td>
                         <td className={cellClass}>
-                          {rate.etd ? formatDate(rate.etd) : '船期待确认'}
+                          {rateSailingLabel(rate)}
                         </td>
                         <td className={cellClass}>
                           {rate.transitDays === null ? '—' : `${rate.transitDays} 天`}
@@ -723,8 +725,8 @@ function QuoteRequestDialog({
               <QuoteFact label="港口代码" value={`${rate.polCode} → ${rate.podCode}`} />
               <QuoteFact label="船司" value={rate.carrierCode} />
               <QuoteFact label="航线服务" value={rate.serviceName || '待确认'} />
-              <QuoteFact label="预计离港日" value={rate.etd ? formatDate(rate.etd) : '船期待确认'} />
-              <QuoteFact label="有效期" value={formatDate(rate.expiryDate)} />
+              <QuoteFact label="开船日" value={rateSailingLabel(rate)} />
+              <QuoteFact label="有效期" value={`${formatDate(rate.effectiveDate)} 至 ${formatDate(rate.expiryDate)}`} />
               <QuoteFact label="箱型" value={rate.containerType} />
             </div>
             <label className="block max-w-xs text-sm">

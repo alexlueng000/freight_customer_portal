@@ -25,7 +25,7 @@ export class RatesController {
       importAliases: portAliases.find((port) => port.code === code)?.aliases ?? [],
     })) };
   }
-  @Get() @RequirePermissions('rate.read') @ApiOkResponse({ description: 'Tenant-scoped rate list for internal administration' }) @ApiForbiddenResponse({ description: 'Missing rate.read permission' }) list(@Query() query: ListRatesDto) { return this.rates.list(query); }
+  @Get() @RequirePermissions('rate.read') @ApiOkResponse({ description: 'Tenant-scoped rate list for internal administration. Includes polDisplayName/podDisplayName from the built-in Chinese port directory, falling back to original names for unknown codes; stored names and codes are preserved.' }) @ApiForbiddenResponse({ description: 'Missing rate.read permission' }) list(@Query() query: ListRatesDto) { return this.rates.list(query); }
   @Post() @RequirePermissions('rate.manage') @ApiCreatedResponse({ description: 'Rate created with prices and charges' }) @ApiConflictResponse({ description: 'Rate number exists in tenant' }) create(@Body() dto: CreateRateDto) { return this.rates.create(dto); }
   @Post('import')
   @RequirePermissions('rate.manage')

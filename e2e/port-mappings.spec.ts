@@ -11,7 +11,7 @@ for (const width of [1440, 390]) {
           accessToken: 'ui-test-only', accessTokenExpiresIn: 900,
           user: { id: 'staff', tenantId: 'tenant', tenantCode: 'DEMO', tenantName: '测试货代',
             email: 'staff@example.test', displayName: '管理员', userType: 'INTERNAL',
-            roles: ['TENANT_ADMIN'], permissions: ['rate.read'] },
+            roles: ['TENANT_ADMIN'], permissions: ['tenant.manage', 'rate.read'] },
         } });
       } else if (path.endsWith('/rates/port-mappings')) {
         if (fail) { await route.fulfill({ status: 500, json: {} }); return; }
@@ -24,6 +24,9 @@ for (const width of [1440, 390]) {
       } else await route.fulfill({ json: { items: [], unreadCount: 0 } });
     });
     await page.goto('/admin/settings');
+    await expect(page).toHaveURL(/\/admin\/settings\/ports$/);
+    await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: '设置分类' }).getByRole('link', { name: '基础港口映射表' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('港口映射加载失败，请重试。')).toBeVisible();
     fail = false;
     await page.getByRole('button', { name: '重试', exact: true }).click();

@@ -122,7 +122,7 @@ describe('rate import workbook analyzer', () => {
     const candidate = sheet?.headerCandidates[0];
 
     expect(sheet?.name).toBe('东南亚FCL特价');
-    expect(sheet?.rowCount).toBeGreaterThanOrEqual(9);
+    expect(sheet?.rowCount).toBeGreaterThanOrEqual(7);
     expect(candidate).toMatchObject({ row: 4, depth: 1 });
     expect(candidate?.suggestions).toEqual(
       expect.arrayContaining([
@@ -132,6 +132,9 @@ describe('rate import workbook analyzer', () => {
         expect.objectContaining({ targetField: 'serviceName' }),
         expect.objectContaining({ targetField: 'transitDays' }),
         expect.objectContaining({ targetField: 'sailingPattern' }),
+        expect.objectContaining({ targetField: 'effectiveDate', column: 11 }),
+        expect.objectContaining({ targetField: 'expiryDate', column: 12 }),
+        expect.objectContaining({ targetField: 'status', column: 18 }),
         expect.objectContaining({ targetField: 'price20GpSell' }),
         expect.objectContaining({ targetField: 'price40GpSell' }),
         expect.objectContaining({ targetField: 'price40HqSell' }),
@@ -142,6 +145,6 @@ describe('rate import workbook analyzer', () => {
         expect.objectContaining({ targetField: 'remark' }),
       ]),
     );
-    expect(sheet?.sampleRows).toHaveLength(5);
+    expect(sheet?.sampleRows).toHaveLength(3);
   });
 });

@@ -11,7 +11,7 @@ export class CustomerRatesController {
   constructor(private readonly rates: CustomerRatesService) {}
   @Get()
   @RequirePermissions('rate.search')
-  @ApiOkResponse({ description: 'Customer-scoped active rates with final sell prices only' })
+  @ApiOkResponse({ description: 'Customer-scoped active rates with final sell prices, ETD, recognized sailingPattern and saved effective/expiry dates. Internal price remarks are never returned.' })
   @ApiForbiddenResponse({ description: 'Missing rate.search permission or inactive customer company' })
   search(@Query() query: SearchCustomerRatesDto) { return this.rates.search(query); }
 }

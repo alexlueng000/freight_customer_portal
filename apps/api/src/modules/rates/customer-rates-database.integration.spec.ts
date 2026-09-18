@@ -136,6 +136,7 @@ describe('customer rate search database integration', () => {
       sellAmount: '1360',
       currency: 'USD',
       containerType: '40HQ',
+      sailingPattern: '每月15日',
     });
     expect(result.items[0]?.charges).toHaveLength(2);
     const serialized = JSON.stringify(result);
@@ -143,6 +144,7 @@ describe('customer rate search database integration', () => {
     expect(serialized).not.toContain('supplier');
     expect(serialized).not.toContain('contract');
     expect(serialized).not.toContain('remark');
+    expect(serialized).not.toContain('SECRET');
   });
   it('uses customer-specific percentage markup and cost fallback', async () => {
     const result = await runAs(tenantA, percentUser, percentCustomer, () =>
@@ -281,7 +283,7 @@ function createRate(
           costAmount: new Prisma.Decimal(cost),
           sellAmount: sell ? new Prisma.Decimal(sell) : null,
           currency: 'USD',
-          remark: 'SECRET REMARK',
+          remark: 'SECRET REMARK | Schedule: 每月15日 | SECRET COST',
         },
       },
     },

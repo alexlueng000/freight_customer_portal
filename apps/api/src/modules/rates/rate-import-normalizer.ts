@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type ExcelJS from 'exceljs';
+import { isSailingPattern } from './rate-sailing.js';
 import type { RateImportColumnMappingDto } from './dto/create-rate-import-mapping-profile.dto.js';
 import {
   loadRateImportWorkbook,
@@ -58,6 +59,7 @@ export interface NormalizedRateImport {
   effectiveDate?: string;
   expiryDate?: string;
   etd?: string;
+  sailingPattern?: string;
   transitDays?: number;
   supplierName?: string;
   contractNo?: string;
@@ -147,7 +149,10 @@ export async function previewRateImportWorkbook(buffer: Buffer, config: RateImpo
     const rowCurrency = normalizeCurrency(values.currency ?? values.priceCurrency);
     const defaultCurrency = normalizeCurrency(config.defaults?.currency);
     const currency = rowCurrency ?? globalDefaults.currency ?? defaultCurrency;
-    const status = upper(values.status ?? '') || 'DRAFT';
+    const statusInput = upper(values.status ?? '');
+    const status = ({ 草稿: 'DRAFT', 启用: 'ACTIVE', 已过期: 'EXPIRED', 停用: 'INACTIVE' } as Record<string, string>)[statusInput]
+      ?? (statusInput || (columnByField.has('status') ? '' : 'DRAFT'));
+    const sailingInput = optional(values.etd) ?? optional(values.sailingPattern);
     const dateContext = {
       year: globalDefaults.year,
       quotationDate: globalDefaults.quotationDate,
@@ -159,8 +164,11 @@ export async function previewRateImportWorkbook(buffer: Buffer, config: RateImpo
       sourceRows: [rowNumber],
       rateNo: optionalUpper(values.rateNo), polCode: optionalUpper(values.polCode), polName: optional(values.polName),
       podCode: optionalUpper(values.podCode), podName: optional(values.podName), carrierCode: optionalUpper(values.carrierCode),
-      serviceName: optional(values.serviceName), effectiveDate: parseFreightDate(values.effectiveDate, dateContext) ?? globalDefaults.effectiveDate ?? parseFreightDate(config.defaults?.effectiveDate, dateContext), expiryDate: parseFreightDate(values.expiryDate, dateContext) ?? globalDefaults.expiryDate ?? parseFreightDate(config.defaults?.expiryDate, dateContext),
-      etd: parseExactDateTime(values.etd), transitDays: normalizeTransitDays(values.transitDays), supplierName: optional(values.supplierName),
+      serviceName: optional(values.serviceName),
+      effectiveDate: values.effectiveDate ? parseFreightDate(values.effectiveDate, dateContext) : globalDefaults.effectiveDate ?? parseFreightDate(config.defaults?.effectiveDate, dateContext),
+      expiryDate: values.expiryDate ? parseFreightDate(values.expiryDate, dateContext) : globalDefaults.expiryDate ?? parseFreightDate(config.defaults?.expiryDate, dateContext),
+      etd: parseExactDateTime(sailingInput), sailingPattern: isSailingPattern(sailingInput) ? sailingInput : undefined,
+      transitDays: normalizeTransitDays(values.transitDays), supplierName: optional(values.supplierName),
       contractNo: optional(values.contractNo), currency, status, remark: buildRemark(values), prices: [], charges: [],
     };
     applyBusinessAliases(rate);
@@ -170,10 +178,10 @@ export async function previewRateImportWorkbook(buffer: Buffer, config: RateImpo
     validateDate(issues, source, columnByField, values, 'effectiveDate', rate.effectiveDate, config.defaults);
     validateDate(issues, source, columnByField, values, 'expiryDate', rate.expiryDate, config.defaults);
     if (rate.effectiveDate && rate.expiryDate && rate.effectiveDate > rate.expiryDate) addIssue(issues, 'ERROR', 'RATE_IMPORT_DATE_RANGE_INVALID', '失效日期不能早于生效日期。', source, columnByField.get('expiryDate'), 'expiryDate');
-    if (values.etd && !rate.etd && !isSailingPattern(values.etd)) addIssue(issues, 'WARNING', 'RATE_IMPORT_ETD_NOT_EXACT_DATE', '开船日不是精确 ETD 日期，预览中不会写入 ETD。', source, columnByField.get('etd'), 'etd');
+    if (sailingInput && !rate.etd && !rate.sailingPattern) addIssue(issues, 'WARNING', 'RATE_IMPORT_ETD_NOT_EXACT_DATE', '开船日未识别为有效日期或周期船期，请核对；原文保留在备注中。', source, columnByField.get(values.etd ? 'etd' : 'sailingPattern'), values.etd ? 'etd' : 'sailingPattern');
     if (values.transitDays && rate.transitDays === undefined) addIssue(issues, 'ERROR', 'RATE_IMPORT_TRANSIT_DAYS_INVALID', '航程天数必须是 0–365 的整数。', source, columnByField.get('transitDays'), 'transitDays');
     if ((values.currency || values.priceCurrency || config.defaults?.currency) && !currency) addIssue(issues, 'ERROR', 'RATE_IMPORT_CURRENCY_INVALID', '币种必须为三位大写代码。', source, columnByField.get(values.currency ? 'currency' : 'priceCurrency'), 'currency');
-    if (!['DRAFT', 'ACTIVE', 'EXPIRED', 'INACTIVE'].includes(status)) addIssue(issues, 'ERROR', 'RATE_IMPORT_STATUS_INVALID', '状态必须为 DRAFT、ACTIVE、EXPIRED 或 INACTIVE。', source, columnByField.get('status'), 'status');
+    if (!['DRAFT', 'ACTIVE', 'EXPIRED', 'INACTIVE'].includes(status)) addIssue(issues, 'ERROR', 'RATE_IMPORT_STATUS_INVALID', '状态为必填项，请填写草稿、启用、已过期、停用或对应英文状态。', source, columnByField.get('status'), 'status');
     buildPrices(rate, values, columnByField, issues);
     buildCharges(rate, values, columnByField, issues);
     if (!rate.prices.length) addIssue(issues, 'ERROR', 'RATE_IMPORT_PRICE_REQUIRED', '至少需要一个有效箱型价格。', source);
@@ -387,6 +395,8 @@ function normalizeTransitDays(value?: string) {
 function parseFreightDate(value?: string, context: Pick<RateImportGlobalDefaults, 'year' | 'quotationDate' | 'effectiveDate' | 'expiryDate'> = {}) {
   if (!value) return undefined;
   const trimmed = value.trim();
+  const fullChinese = /^(\d{4})年(\d{1,2})月(\d{1,2})日?$/.exec(trimmed);
+  if (fullChinese) return validDate(Number(fullChinese[1]), Number(fullChinese[2]), Number(fullChinese[3]));
   const iso = /^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/.exec(trimmed);
   if (iso) return validDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
   const dashMonth = /^(\d{1,2})[-\s]([A-Z]{3,})[-,\s]+(\d{4})$/i.exec(trimmed);
@@ -402,11 +412,16 @@ function parseFreightDate(value?: string, context: Pick<RateImportGlobalDefaults
 }
 function parseExactDateTime(value?: string) {
   if (!value || isSailingPattern(value)) return undefined;
-  const date = new Date(value);
+  const text = value.trim();
+  const day = /^(\d{4})(?:年|[/.-])(\d{1,2})(?:月|[/.-])(\d{1,2})日?$/.exec(text);
+  if (day) {
+    const parsed = validDate(Number(day[1]), Number(day[2]), Number(day[3]));
+    return parsed ? `${parsed}T00:00:00.000Z` : undefined;
+  }
+  const timestamp = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.exec(text);
+  if (!timestamp || !validDate(Number(timestamp[1]), Number(timestamp[2]), Number(timestamp[3]))) return undefined;
+  const date = new Date(text);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
-function isSailingPattern(value?: string) {
-  return /^(SUN|MON|TUE|WED|THU|FRI|SAT|周[一二三四五六日天]|星期[一二三四五六日天]|每周[一二三四五六日天])$/i.test(value?.trim() ?? '');
 }
 function inferYear(context: Pick<RateImportGlobalDefaults, 'year' | 'quotationDate' | 'effectiveDate' | 'expiryDate'>) {
   const contextualDate = context.quotationDate ?? context.effectiveDate ?? context.expiryDate;
@@ -451,7 +466,8 @@ function parseSurchargeAmount(value?: string, defaultCurrency?: string) {
 }
 function buildRemark(values: Partial<Record<RateImportTargetField, string>>) {
   const parts = [optional(values.remark)];
-  if (values.sailingPattern) parts.push(`Schedule: ${values.sailingPattern}`);
+  const schedule = optional(values.sailingPattern) ?? optional(values.etd);
+  if (schedule) parts.push(`Schedule: ${schedule}`);
   const freeTime = [values.freeTime, values.freeTimeDemurrage ? `${values.freeTimeDemurrage} DEM` : undefined, values.freeTimeDetention ? `${values.freeTimeDetention} DET` : undefined].filter(Boolean).join(' / ');
   if (freeTime) parts.push(`Free time: ${freeTime}`);
   if (values.commodityRestriction) parts.push(`Commodity: ${values.commodityRestriction}`);

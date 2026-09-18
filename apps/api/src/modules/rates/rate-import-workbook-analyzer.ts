@@ -67,8 +67,8 @@ const aliases: Record<RateImportTargetField, string[]> = {
   podName: ['目的港', '卸港', '卸货港', 'destination', 'to', 'discharge port', 'port of discharge', 'destination port'],
   carrierCode: ['船司代码', '船公司', '船东', 'carrier', 'line', 'shipping line', 'carrier code'],
   serviceName: ['航线服务', '航线/服务', '航线', 'service', 'service name', 'product', 'svc', 'route', 'loop'],
-  effectiveDate: ['生效日期', '生效', '开始日期', '有效期起', 'valid from', 'effective date', 'valid start', 'validity from', 'validity'],
-  expiryDate: ['失效日期', '截止日期', '截止', '有效期止', 'valid to', 'expiry date', 'valid end', 'validity to', 'valid until'],
+  effectiveDate: ['有效开始日期', '生效日期', '生效', '开始日期', '有效期起', 'valid from', 'effective date', 'valid start', 'validity from', 'validity'],
+  expiryDate: ['有效结束日期', '失效日期', '截止日期', '截止', '有效期止', 'valid to', 'expiry date', 'valid end', 'validity to', 'valid until'],
   etd: ['预计开船时间', 'etd', 'sailing date'],
   transitDays: ['航程天数', '航程', '天数', 'transit days', 'transit time', 'transit', 't/t', 'tt(day)', 'transit(day)'],
   supplierName: ['供应商名称', '供应商', '代理', 'supplier', 'vendor'],
@@ -218,7 +218,7 @@ function buildCandidate(
 }
 
 function suggestField(sourceLabel: string, used: Set<RateImportTargetField>) {
-  const value = normalize(sourceLabel);
+  const value = normalize(sourceLabel.replace(/[（(]\s*必填\s*[）)]/g, ''));
   if (!value) return undefined;
   const exactMatches = RATE_IMPORT_TARGET_FIELDS.flatMap((targetField) => {
     if (used.has(targetField)) return [];

@@ -53,6 +53,10 @@ describe('rates database integration', () => {
   it('filters valid rates and replaces price sets with an audited before/after snapshot', async () => {
     const result = await runAs(tenantA, userA, () => rates.list({ page: 1, pageSize: 20, polCode: 'CNSHA', podCode: 'USLAX', containerType: '40HQ', validOn: '2026-09-15' }));
     expect(result.items.map((r) => r.id)).toContain(rateA);
+    expect(result.items.find((r) => r.id === rateA)).toMatchObject({
+      polCode: 'CNSHA', polName: 'Shanghai', polDisplayName: '上海',
+      podCode: 'USLAX', podName: 'Los Angeles', podDisplayName: '洛杉矶',
+    });
     const updated = await runAs(tenantA, userA, () => rates.update(rateA, { prices: [{ containerType: '20GP', costAmount: '900.00', currency: 'USD' }] }));
     expect(updated.prices.map((p) => p.containerType)).toEqual(['20GP']);
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { tenantId: tenantA, entityId: rateA, action: 'RATE_UPDATED' } });
