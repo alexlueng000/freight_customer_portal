@@ -39,7 +39,9 @@ for (const role of ['CUSTOMER_ADMIN', 'CUSTOMER_USER']) {
         await expect(page.getByText('2026-09-05 至 2026-09-25', { exact: true }).filter({ visible: true })).toHaveCount(3);
       }
       await page.getByRole('button', { name: '获取正式报价', exact: true }).filter({ visible: true }).nth(1).click();
-      const dialog = page.getByRole('dialog');
+      await expect(page).toHaveURL(/\/portal\/rates\/rate-1\/quote-request\?/);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      const dialog = page.getByRole('region', { name: '报价申请', exact: true });
       await expect(dialog.getByText('开船日', { exact: true })).toBeVisible();
       await expect(dialog.getByText('每月15日', { exact: true })).toBeVisible();
       await expect(dialog.getByText('2026-09-05 至 2026-09-25', { exact: true })).toBeVisible();

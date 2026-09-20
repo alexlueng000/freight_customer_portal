@@ -15,7 +15,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
-import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { hasPermission } from '@/lib/auth';
@@ -45,6 +44,7 @@ interface Quote {
   totalAmount: string | null;
   requestContainerType: string | null;
   containerQuantity: number | null;
+  factoryLoadingDate: string | null;
   incoterm: string | null;
   pickupLocationText: string | null;
   deliveryLocationText: string | null;
@@ -173,7 +173,15 @@ export default function QuoteDetailPage() {
       setCreatingBooking(false);
     }
   };
-  if (loading) return <LoadingState rows={6} />;
+  if (loading) return (
+    <div className="space-y-5" aria-busy="true">
+      <Link className="text-sm text-primary hover:underline" href="/portal/quotes">
+        ← 返回报价列表
+      </Link>
+      <PageHeader eyebrow="客户门户 / 报价" title="报价详情" />
+      <p role="status" className="py-8 text-sm text-muted">正在加载报价详情，请稍候…</p>
+    </div>
+  );
   if (error || !quote)
     return <ErrorState description={error || '报价不存在'} onRetry={() => void load()} />;
   const formalQuotePublished = quote.sentAt !== null && quote.totalAmount !== null;
@@ -290,6 +298,7 @@ export default function QuoteDetailPage() {
           />
           <Fact label="贸易条款" value={quote.incoterm ?? '—'} />
           <Fact label="提货地点" value={quote.pickupLocationText ?? '—'} />
+          <Fact label="工厂预计装货日期" value={quote.factoryLoadingDate?.slice(0, 10) ?? '未提供'} />
           <Fact label="派送地点" value={quote.deliveryLocationText ?? '—'} />
           <Fact label="出口报关备注" value={quote.exportCustomsRemark ?? '—'} />
           <Fact label="进口清关备注" value={quote.importCustomsRemark ?? '—'} />

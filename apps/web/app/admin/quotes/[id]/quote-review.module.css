@@ -1,0 +1,102 @@
+.panel {
+  --panel-ink: oklch(0.4 0.08 175);
+  --panel-tint: oklch(0.96 0.025 175);
+  --panel-border: oklch(0.87 0.035 175);
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: hsl(var(--surface));
+}
+
+.panel[data-tone='review'] {
+  --panel-ink: oklch(0.43 0.1 240);
+  --panel-tint: oklch(0.96 0.02 240);
+  --panel-border: oklch(0.87 0.035 240);
+}
+
+.panel[data-tone='profit'] {
+  --panel-ink: oklch(0.44 0.08 70);
+  --panel-tint: oklch(0.96 0.03 85);
+  --panel-border: oklch(0.88 0.05 85);
+}
+
+.panel[data-tone='quote'] {
+  --panel-ink: oklch(0.43 0.1 285);
+  --panel-tint: oklch(0.96 0.02 285);
+  --panel-border: oklch(0.88 0.035 285);
+}
+
+.panelHeader {
+  padding: 20px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-tint);
+}
+
+.heading {
+  color: var(--panel-ink);
+  font-size: 18px;
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.headerIcon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 2px;
+  border-radius: 10px;
+  color: oklch(0.99 0.005 240);
+  background: var(--panel-ink);
+}
+
+.fieldGroup {
+  display: block;
+  padding: 16px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--field-tint);
+  font-size: 14px;
+}
+
+.customerField {
+  --field-border: oklch(0.86 0.04 175);
+  --field-tint: oklch(0.975 0.015 175);
+  --field-ink: oklch(0.4 0.08 175);
+}
+
+.internalField {
+  --field-border: oklch(0.87 0.025 265);
+  --field-tint: oklch(0.97 0.015 265);
+  --field-ink: oklch(0.42 0.06 265);
+}
+
+.visibilityTag {
+  padding: 2px 7px;
+  border: 1px solid var(--field-border);
+  border-radius: 5px;
+  color: var(--field-ink);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.sourcePanel {
+  border: 1px solid oklch(0.87 0.018 245);
+  border-radius: 10px;
+  background: oklch(0.97 0.008 245);
+}
+
+.quoteTotal {
+  background: var(--panel-tint);
+}
+
+@media (max-width: 639px) {
+  .panelHeader {
+    padding: 16px;
+  }
+
+  .fieldGroup {
+    padding: 12px;
+  }
+}

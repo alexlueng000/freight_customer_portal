@@ -43,6 +43,7 @@ const cargoRequest = {
     { commodity: 'Garments' },
   ],
   incoterm: 'FOB',
+  factoryLoadingDate: '2026-09-25',
   pickupLocationText: 'Shanghai, China',
   deliveryLocationText: 'Los Angeles, USA',
   exportCustomsRemark: 'Export declaration required',
@@ -196,6 +197,12 @@ describe('quote database integration', () => {
     expect(created.quoteNo).toMatch(/^QT\d{12}$/);
     quoteId = created.id;
     expect(created.totalAmount.toString()).toBe('2700');
+    expect(created.factoryLoadingDate?.toISOString()).toBe('2026-09-25T00:00:00.000Z');
+    const savedQuote = await prisma.quote.findUniqueOrThrow({ where: { id: created.id } });
+    expect(savedQuote.factoryLoadingDate?.toISOString()).toBe('2026-09-25T00:00:00.000Z');
+    expect(savedQuote.etd).toEqual(created.etd);
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { entityId: created.id, action: 'CREATE' } });
+    expect(audit.afterData).toMatchObject({ factoryLoadingDate: '2026-09-25' });
     await expect(
       runAs(tenantA, userA, customerA, () => service.getPdfJobData(created.id, false)),
     ).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_SENT' } });
@@ -208,6 +215,9 @@ describe('quote database integration', () => {
     expect(detail.totalAmount).toBeNull();
     expect(detail.customerTerms).toBeNull();
     expect(detail.requestContainerType).toBe('40HQ');
+    expect(detail.factoryLoadingDate?.toISOString()).toBe('2026-09-25T00:00:00.000Z');
+    const internalDetail = await runInternal(() => service.getInternal(created.id));
+    expect(internalDetail.factoryLoadingDate?.toISOString()).toBe('2026-09-25T00:00:00.000Z');
     expect(detail).toMatchObject({
       containerQuantity: 2,
       incoterm: 'FOB',
@@ -302,6 +312,7 @@ describe('quote database integration', () => {
       id: historical.id,
       cargoItems: [],
       containerQuantity: null,
+      factoryLoadingDate: null,
       incoterm: null,
       pickupLocationText: null,
       deliveryLocationText: null,

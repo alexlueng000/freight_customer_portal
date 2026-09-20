@@ -28,6 +28,7 @@ const publicQuoteSelect = {
   subtotal: true,
   totalAmount: true,
   containerQuantity: true,
+  factoryLoadingDate: true,
   incoterm: true,
   pickupLocationText: true,
   deliveryLocationText: true,
@@ -171,6 +172,7 @@ export class QuotesService {
           subtotal: totalAmount,
           totalAmount,
           containerQuantity: dto.containerQuantity,
+          factoryLoadingDate: dto.factoryLoadingDate ? new Date(`${dto.factoryLoadingDate}T00:00:00.000Z`) : null,
           incoterm: dto.incoterm ?? null,
           pickupLocationText: dto.pickupLocationText?.trim() || null,
           deliveryLocationText: dto.deliveryLocationText?.trim() || null,
@@ -238,6 +240,7 @@ export class QuotesService {
             sourceRateId: rate.id,
             containerType: price.containerType,
             containerQuantity: dto.containerQuantity,
+            factoryLoadingDate: dto.factoryLoadingDate ?? null,
             incoterm: dto.incoterm,
             totalAmount: totalAmount.toString(),
             chargeCount: eligibleCharges.length,
@@ -616,10 +619,13 @@ export class QuotesService {
 
   async overridePrices(id: string, dto: OverrideQuotePricesDto) {
     const context = this.requireInternalContext();
+    const validUntil = dto.validUntil ? this.businessDate(dto.validUntil) : undefined;
+    if (dto.validUntil && !validUntil)
+      throw this.fieldError('QUOTE_REVIEW_INVALID', '报价有效期不正确。', { validUntil: ['请填写有效日期。'] });
     return this.prisma.$transaction(async (tx) => {
       const quote = await tx.quote.findFirst({
         where: { id, ...this.internalWhere(context) },
-        include: { items: { orderBy: { sortOrder: 'asc' } } },
+        include: { items: { orderBy: { sortOrder: 'asc' } }, sourceRate: { select: { expiryDate: true } } },
       });
       if (!quote)
         throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
@@ -632,6 +638,10 @@ export class QuotesService {
       const requested = new Map(
         dto.items.map((item) => [item.itemId, new Prisma.Decimal(item.unitPrice)]),
       );
+      if (validUntil && quote.sourceRate?.expiryDate && validUntil > quote.sourceRate.expiryDate)
+        throw this.fieldError('QUOTE_VALID_UNTIL_EXCEEDS_RATE', '该报价有效期不能超过来源运价有效期。', {
+          validUntil: ['该报价有效期不能超过来源运价有效期。'],
+        });
       if (
         requested.size !== dto.items.length ||
         [...requested.keys()].some((itemId) => !quote.items.some((item) => item.id === itemId))
@@ -668,6 +678,8 @@ export class QuotesService {
           priceOverriddenAt: new Date(),
           priceOverriddenById: context.userId,
           priceOverrideReason: dto.reason.trim(),
+          ...(validUntil ? { validUntil } : {}),
+          ...(dto.internalNote === undefined ? {} : { internalNote: dto.internalNote.trim() || null }),
           ...(dto.customerTerms === undefined ? {} : { customerTerms: dto.customerTerms.trim() }),
           updatedById: context.userId,
         },
@@ -680,10 +692,12 @@ export class QuotesService {
           entityType: 'Quote',
           entityId: id,
           action: 'PRICE_OVERRIDE',
-          beforeData: { totalAmount: quote.totalAmount.toString(), items: beforeItems, customerTerms: quote.customerTerms },
+          beforeData: { totalAmount: quote.totalAmount.toString(), items: beforeItems, customerTerms: quote.customerTerms, validUntil: quote.validUntil.toISOString().slice(0, 10), internalNote: quote.internalNote },
           afterData: {
             totalAmount: total.toString(),
             reason: dto.reason.trim(),
+            validUntil: (validUntil ?? quote.validUntil).toISOString().slice(0, 10),
+            internalNote: dto.internalNote === undefined ? quote.internalNote : dto.internalNote.trim() || null,
             customerTerms: dto.customerTerms === undefined ? quote.customerTerms : dto.customerTerms.trim(),
             items: quote.items.map((item) => ({
               id: item.id,

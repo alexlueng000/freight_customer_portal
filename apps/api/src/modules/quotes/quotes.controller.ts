@@ -18,7 +18,7 @@ export class QuotesController {
   ) {}
   @Post()
   @RequirePermissions('quote.create')
-  @ApiCreatedResponse({ description: 'Customer quote created from an active rate snapshot' })
+  @ApiCreatedResponse({ description: 'Customer quote created from an active rate snapshot, preserving optional factoryLoadingDate separately from ETD. Pickup and delivery locations are always required, independently of requested services.' })
   create(@Body() dto: CreateQuoteDto) {
     return this.quotes.create(dto);
   }

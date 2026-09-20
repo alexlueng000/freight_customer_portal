@@ -5,6 +5,8 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 const upper = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
 export class SearchCustomerRatesDto {
+  @ApiPropertyOptional({ description: '按运价 ID 加载报价申请页面，仍执行租户、客户、有效期及销售价限制', maxLength: 100 })
+  @IsOptional() @IsString() @Matches(/\S/) @MaxLength(100) rateId?: string;
   @ApiPropertyOptional({ description: '起运地中文名、英文名或港口代码；与 polCode 同时提供时取交集', example: '深圳', maxLength: 150 })
   @IsOptional() @IsString() @MaxLength(150) pol?: string;
   @ApiPropertyOptional({ description: '目的地中文名、英文名或港口代码；与 podCode 同时提供时取交集', example: '洛杉矶', maxLength: 150 })

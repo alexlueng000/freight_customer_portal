@@ -2,6 +2,8 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsDateString,
+  IsOptional,
   IsString,
   ValidateIf,
   Matches,
@@ -21,6 +23,16 @@ class OverrideQuoteItemPriceDto {
   unitPrice!: string;
 }
 export class OverrideQuotePricesDto {
+  @ApiPropertyOptional({ description: '与价格在同一事务保存的报价有效期', format: 'date' })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  validUntil?: string;
+
+  @ApiPropertyOptional({ description: '与价格一起保存，仅内部可见', maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  internalNote?: string;
   @ApiPropertyOptional({ description: '客户可见报价说明与条款，随改价保存；省略时保留已有内容', maxLength: 2000 })
   @ValidateIf((_object, value) => value !== undefined)
   @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value)

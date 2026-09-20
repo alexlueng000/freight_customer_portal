@@ -1,14 +1,15 @@
 import { Transform, Type } from 'class-transformer';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsDateString,
   IsIn,
   IsInt,
   IsNumber,
   IsOptional,
   IsString,
-  ValidateIf,
   ValidateNested,
   Matches,
   Max,
@@ -70,6 +71,12 @@ export class CreateQuoteDto {
   @Max(999, { message: 'containerQuantity 不能超过 999。' })
   containerQuantity!: number;
 
+  @ApiPropertyOptional({ type: String, format: 'date', example: '2026-09-25', description: '工厂预计装货日期，选填，与船舶 ETD 独立，不限制过去或未来日期。' })
+  @IsOptional()
+  @Matches(/^(?!0000)\d{4}-\d{2}-\d{2}$/, { message: 'factoryLoadingDate 工厂预计装货日期须为 YYYY-MM-DD。' })
+  @IsDateString({ strict: true }, { message: 'factoryLoadingDate 请选择有效的工厂预计装货日期。' })
+  factoryLoadingDate?: string;
+
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
@@ -84,24 +91,15 @@ export class CreateQuoteDto {
   @Type(() => CreateQuoteCargoItemDto)
   cargoItems!: CreateQuoteCargoItemDto[];
 
-  @ValidateIf(
-    (dto: CreateQuoteDto) =>
-      dto.requestedServices?.includes('ORIGIN_PICKUP') || dto.pickupLocationText !== undefined,
-  )
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString({ message: 'pickupLocationText 必须是文本。' })
-  @MinLength(1, { message: '选择起运地拖车后，请填写 Pickup Location。' })
+  @IsString({ message: 'pickupLocationText 请填写提货地点。' })
+  @MinLength(1, { message: 'pickupLocationText 请填写提货地点。' })
   @MaxLength(1000, { message: 'pickupLocationText 不能超过 1000 个字符。' })
   pickupLocationText?: string;
 
-  @ValidateIf(
-    (dto: CreateQuoteDto) =>
-      dto.requestedServices?.includes('DESTINATION_DELIVERY') ||
-      dto.deliveryLocationText !== undefined,
-  )
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString({ message: 'deliveryLocationText 必须是文本。' })
-  @MinLength(1, { message: '选择目的地派送后，请填写 Delivery Location。' })
+  @IsString({ message: 'deliveryLocationText 请填写派送地点。' })
+  @MinLength(1, { message: 'deliveryLocationText 请填写派送地点。' })
   @MaxLength(1000, { message: 'deliveryLocationText 不能超过 1000 个字符。' })
   deliveryLocationText?: string;
 

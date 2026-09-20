@@ -1,0 +1,104 @@
+.section {
+  --section-ink: oklch(0.43 0.1 240);
+  --section-tint: oklch(0.96 0.02 240);
+  --section-border: oklch(0.87 0.035 240);
+  overflow: hidden;
+  border: 1px solid var(--section-border);
+  border-radius: 12px;
+  background: hsl(var(--surface));
+}
+
+.section[data-tone='cargo'] {
+  --section-ink: oklch(0.4 0.08 175);
+  --section-tint: oklch(0.96 0.025 175);
+  --section-border: oklch(0.87 0.04 175);
+}
+
+.section[data-tone='services'] {
+  --section-ink: oklch(0.43 0.1 285);
+  --section-tint: oklch(0.96 0.02 285);
+  --section-border: oklch(0.88 0.035 285);
+}
+
+.section[data-tone='notes'] {
+  --section-ink: oklch(0.43 0.035 245);
+  --section-tint: oklch(0.96 0.008 245);
+  --section-border: oklch(0.87 0.018 245);
+}
+
+.section[data-tone='fees'] {
+  --section-ink: oklch(0.44 0.08 70);
+  --section-tint: oklch(0.96 0.03 85);
+  --section-border: oklch(0.88 0.05 85);
+}
+
+.sectionHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--section-border);
+  background: var(--section-tint);
+}
+
+.sectionNumber {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--section-ink);
+  color: oklch(0.99 0.005 240);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionTitle {
+  color: var(--section-ink);
+  font-size: 18px;
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.serviceOption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 150ms, border-color 150ms;
+}
+
+.serviceOption:hover,
+.serviceSelected {
+  border-color: var(--section-ink);
+  background: var(--section-tint);
+}
+
+.serviceOption:focus-within {
+  outline: 2px solid var(--section-ink);
+  outline-offset: 2px;
+}
+
+.serviceOption input {
+  accent-color: var(--section-ink);
+}
+
+@media (max-width: 639px) {
+  .sectionHeader {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .serviceOption {
+    transition: none;
+  }
+}

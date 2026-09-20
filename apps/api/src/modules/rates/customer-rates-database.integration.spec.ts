@@ -152,6 +152,18 @@ describe('customer rate search database integration', () => {
     );
     expect(result.items[0]?.sellAmount).toBe('1050');
   });
+  it('loads a selected rate and container without bypassing tenant scope or price visibility', async () => {
+    const list = await runAs(tenantA, fixedUser, fixedCustomer, () => service.search(query('40HQ')));
+    const rateId = list.items[0]!.id;
+    const selected = await runAs(tenantA, fixedUser, fixedCustomer, () => service.search({ ...query('40HQ'), rateId }));
+    expect(selected.items).toEqual(list.items);
+    expect(JSON.stringify(selected)).not.toContain('costAmount');
+    const foreignRate = await prisma.rate.findFirstOrThrow({ where: { tenantId: tenantB } });
+    const foreign = await runAs(tenantA, fixedUser, fixedCustomer, () => service.search({ ...query('40HQ'), rateId: foreignRate.id }));
+    expect(foreign.items).toEqual([]);
+    const missing = await runAs(tenantA, fixedUser, fixedCustomer, () => service.search({ ...query('40HQ'), rateId: 'missing-rate' }));
+    expect(missing.items).toEqual([]);
+  });
   it.each(['上海', 'shanghai', 'cnsha', 'SHA'])('searches by %s with tenant isolation and localized names', async (pol) => {
     const result = await runAs(tenantA, fixedUser, fixedCustomer, () =>
       service.search({ ...query('40HQ'), polCode: undefined, podCode: undefined, pol, pod: '洛杉矶' }),

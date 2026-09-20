@@ -608,6 +608,7 @@ model Quote {
   subtotal             Decimal     @db.Decimal(18, 4)
   totalAmount          Decimal     @db.Decimal(18, 4)
   containerQuantity    Int?
+  factoryLoadingDate   DateTime?   @db.Date
   incoterm             String?     @db.VarChar(10)
   pickupLocationText   String?     @db.VarChar(1000)
   deliveryLocationText String?     @db.VarChar(1000)

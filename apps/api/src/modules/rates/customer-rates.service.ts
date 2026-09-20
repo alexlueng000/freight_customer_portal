@@ -50,6 +50,7 @@ export class CustomerRatesService {
     const to = query.etdTo ? this.businessDate(query.etdTo) : undefined;
     const rateWhere: Prisma.RateWhereInput = {
       tenantId: context.tenantId,
+      ...(query.rateId ? { id: query.rateId } : {}),
       status: RateStatus.ACTIVE,
       ...(query.polCode ? { polCode: query.polCode } : {}),
       ...(query.podCode ? { podCode: query.podCode } : {}),

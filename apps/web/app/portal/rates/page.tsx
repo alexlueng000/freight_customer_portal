@@ -1,9 +1,9 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ChevronLeft, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useAuth } from '@/components/auth-provider';
@@ -13,36 +13,9 @@ import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { FieldLabel, RequiredLegend } from '@/components/required-mark';
 import { hasPermission } from '@/lib/auth';
+import type { CustomerRate } from '@/lib/customer-rate';
 import { rateSailingLabel } from '@/lib/rate-sailing';
 
-interface CustomerRate {
-  id: string;
-  polCode: string;
-  polName: string;
-  polDisplayName?: string;
-  podCode: string;
-  podName: string;
-  podDisplayName?: string;
-  carrierCode: string;
-  serviceName: string | null;
-  effectiveDate: string;
-  expiryDate: string;
-  etd: string | null;
-  sailingPattern?: string | null;
-  transitDays: number | null;
-  containerType: string;
-  oceanSellAmount: string;
-  sellAmount: string;
-  charges: Array<{
-    id: string;
-    chargeName: string;
-    chargeBasis: 'PER_CONTAINER' | 'PER_BL' | 'PER_SHIPMENT';
-    containerType: string | null;
-    amount: string;
-    currency: string;
-  }>;
-  currency: string;
-}
 interface RateSearchResponse {
   items: CustomerRate[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
@@ -52,108 +25,11 @@ interface ApiErrorPayload {
   message?: string;
   details?: { fieldErrors?: Record<string, string[]> };
 }
-const requestedServiceOptions = [
-  { code: 'ORIGIN_PICKUP', label: '起运地拖车 / 提货' },
-  { code: 'EXPORT_CUSTOMS', label: '出口报关' },
-  { code: 'IMPORT_CUSTOMS', label: '目的港清关' },
-  { code: 'DESTINATION_DELIVERY', label: '目的地派送' },
-] as const;
-type RequestedServiceCode = (typeof requestedServiceOptions)[number]['code'];
-const incotermOptions = ['EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'DAP', 'DDP', 'OTHER'] as const;
-const incotermLabels: Record<(typeof incotermOptions)[number], string> = {
-  EXW: 'EXW（工厂交货）',
-  FCA: 'FCA（货交承运人）',
-  FOB: 'FOB（装运港船上交货）',
-  CFR: 'CFR（成本加运费）',
-  CIF: 'CIF（成本、保险费加运费）',
-  DAP: 'DAP（目的地交货）',
-  DDP: 'DDP（完税后交货）',
-  OTHER: '其他（请在备注中说明）',
-};
-interface QuoteRequestValues {
-  quantity: string;
-  cargoItems: Array<{
-    clientId: string;
-    commodity: string;
-    estimatedGrossWeightKg: string;
-    cargoNature: string;
-    specialRequirement: string;
-  }>;
-  pickupLocation: string;
-  deliveryLocation: string;
-  exportCustomsRemark: string;
-  importCustomsRemark: string;
-  customerRemarks: string;
-  incoterm: '' | (typeof incotermOptions)[number];
-  requestedServices: RequestedServiceCode[];
-}
-let nextCargoItemId = 1;
-function newCargoItem(): QuoteRequestValues['cargoItems'][number] {
-  return {
-    clientId: `cargo-${nextCargoItemId++}`,
-    commodity: '',
-    estimatedGrossWeightKg: '',
-    cargoNature: '',
-    specialRequirement: '',
-  };
-}
-const quoteRequestSchema = z
-  .object({
-  quantity: z.string().refine((value) => {
-    const quantity = Number(value);
-    return Number.isInteger(quantity) && quantity >= 1 && quantity <= 999;
-  }, '箱量必须是 1–999 之间的整数。'),
-  cargoItems: z
-    .array(
-      z.object({
-        clientId: z.string(),
-        commodity: z
-          .string()
-          .trim()
-          .min(1, '请填写货物品名。')
-          .max(500, '货物品名不能超过 500 字。'),
-        estimatedGrossWeightKg: z.string().refine((value) => {
-          if (!value.trim()) return true;
-          const weight = Number(value);
-          return Number.isFinite(weight) && weight > 0 && weight <= 999999999;
-        }, '请输入大于 0 的重量。'),
-        cargoNature: z.string().trim().max(200, '货物性质不能超过 200 字。'),
-        specialRequirement: z.string().trim().max(2000, '特殊要求不能超过 2000 字。'),
-      }),
-    )
-    .min(1, '请至少添加一种货物。')
-    .max(50, '一次报价最多添加 50 种货物。'),
-  pickupLocation: z.string().trim().max(1000, '提货地点不能超过 1000 字。'),
-  deliveryLocation: z.string().trim().max(1000, '派送地点不能超过 1000 字。'),
-  exportCustomsRemark: z.string().trim().max(1000, '出口报关备注不能超过 1000 字。'),
-  importCustomsRemark: z.string().trim().max(1000, '进口清关备注不能超过 1000 字。'),
-  customerRemarks: z.string().trim().max(2000, '客户备注不能超过 2000 字。'),
-  incoterm: z.union([z.literal(''), z.enum(incotermOptions)]),
-  requestedServices: z.array(
-    z.enum(['ORIGIN_PICKUP', 'EXPORT_CUSTOMS', 'IMPORT_CUSTOMS', 'DESTINATION_DELIVERY']),
-  ),
-  })
-  .superRefine((value, context) => {
-    if (value.requestedServices.includes('ORIGIN_PICKUP') && !value.pickupLocation.trim())
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['pickupLocation'],
-        message: '选择起运地拖车后，请填写提货地点。',
-      });
-    if (
-      value.requestedServices.includes('DESTINATION_DELIVERY') &&
-      !value.deliveryLocation.trim()
-    )
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['deliveryLocation'],
-        message: '选择目的地派送后，请填写派送地点。',
-      });
-  });
 class PortalRateApiError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly fieldErrors?: Record<string, string[]>,
   ) {
     super(message);
   }
@@ -213,43 +89,10 @@ export default function PortalRatesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<PortalRateApiError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [creatingRateId, setCreatingRateId] = useState<string | null>(null);
-  const [selectedRate, setSelectedRate] = useState<CustomerRate | null>(null);
-  const [quoteRequestError, setQuoteRequestError] = useState('');
-  const createQuote = async (rate: CustomerRate, values: QuoteRequestValues) => {
-    setCreatingRateId(rate.id);
-    setQuoteRequestError('');
-    try {
-      const quote = await requestJson<{ id: string }>(apiFetch, '/api/v1/quotes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rateId: rate.id,
-          containerType: rate.containerType,
-          containerQuantity: Number(values.quantity),
-          incoterm: values.incoterm || undefined,
-          cargoItems: values.cargoItems.map((item) => ({
-            commodity: item.commodity.trim(),
-            ...(item.estimatedGrossWeightKg.trim()
-              ? { estimatedGrossWeight: Number(item.estimatedGrossWeightKg) }
-              : {}),
-            cargoNature: item.cargoNature.trim() || undefined,
-            specialRequirement: item.specialRequirement.trim() || undefined,
-          })),
-          pickupLocationText: values.pickupLocation.trim() || undefined,
-          deliveryLocationText: values.deliveryLocation.trim() || undefined,
-          exportCustomsRemark: values.exportCustomsRemark.trim() || undefined,
-          importCustomsRemark: values.importCustomsRemark.trim() || undefined,
-          customerRemarks: values.customerRemarks.trim() || undefined,
-          requestedServices: values.requestedServices,
-        }),
-      });
-      router.push(`/portal/quotes/${quote.id}`);
-    } catch (caught) {
-      setQuoteRequestError(toPortalRateError(caught).message);
-    } finally {
-      setCreatingRateId(null);
-    }
+  const quoteRequestUrl = (rate: CustomerRate) => {
+    const query = new URLSearchParams({ containerType: rate.containerType });
+    if (criteria) { query.set('etdFrom', criteria.etdFrom); query.set('etdTo', criteria.etdTo); }
+    return '/portal/rates/' + encodeURIComponent(rate.id) + '/quote-request?' + query.toString();
   };
   const search = useCallback(async () => {
     setLoading(true);
@@ -461,11 +304,7 @@ export default function PortalRatesPage() {
                     {canCreateQuote ? (
                       <button
                         className="h-11 w-full rounded bg-primary px-3 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
-                        disabled={creatingRateId !== null}
-                        onClick={() => {
-                          setSelectedRate(rate);
-                          setQuoteRequestError('');
-                        }}
+                        onClick={() => router.push(quoteRequestUrl(rate))}
                         type="button"
                       >
                         获取正式报价
@@ -538,11 +377,7 @@ export default function PortalRatesPage() {
                           <td className={`${cellClass} text-right`}>
                             <button
                               className="h-8 rounded bg-primary px-3 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
-                              disabled={creatingRateId !== null}
-                              onClick={() => {
-                                setSelectedRate(rate);
-                                setQuoteRequestError('');
-                              }}
+                              onClick={() => router.push(quoteRequestUrl(rate))}
                               type="button"
                             >
                               获取正式报价
@@ -584,567 +419,11 @@ export default function PortalRatesPage() {
           )}
         </section>
       )}
-      {canCreateQuote && selectedRate ? (
-        <QuoteRequestDialog
-          error={quoteRequestError}
-          rate={selectedRate}
-          submitting={creatingRateId === selectedRate.id}
-          onClose={() => {
-            if (creatingRateId) return;
-            setSelectedRate(null);
-            setQuoteRequestError('');
-          }}
-          onSubmit={(values) => void createQuote(selectedRate, values)}
-        />
-      ) : null}
+
     </div>
   );
 }
 
-function QuoteRequestDialog({
-  rate,
-  error,
-  submitting,
-  onClose,
-  onSubmit,
-}: {
-  rate: CustomerRate;
-  error: string;
-  submitting: boolean;
-  onClose: () => void;
-  onSubmit: (values: QuoteRequestValues) => void;
-}) {
-  const [values, setValues] = useState<QuoteRequestValues>({
-    quantity: '1',
-    cargoItems: [newCargoItem()],
-    pickupLocation: '',
-    deliveryLocation: '',
-    exportCustomsRemark: '',
-    importCustomsRemark: '',
-    customerRemarks: '',
-    incoterm: '',
-    requestedServices: [],
-  });
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const numericQuantity = Number(values.quantity);
-  const validQuantity =
-    Number.isInteger(numericQuantity) && numericQuantity >= 1 && numericQuantity <= 999;
-  const estimate = validQuantity ? quoteEstimate(rate, numericQuantity) : null;
-  const submit = () => {
-    const result = quoteRequestSchema.safeParse(values);
-    if (!result.success) {
-      setFieldErrors(
-        Object.fromEntries(
-          result.error.issues.map((issue) => [issue.path.join('.'), issue.message]),
-        ),
-      );
-      return;
-    }
-    setFieldErrors({});
-    onSubmit(result.data);
-  };
-  const update = <K extends keyof QuoteRequestValues>(key: K, value: QuoteRequestValues[K]) => {
-    setValues((current) => ({ ...current, [key]: value }));
-    setFieldErrors((current) => ({ ...current, [key]: '' }));
-  };
-  const updateCargoItem = (
-    index: number,
-    field: 'commodity' | 'estimatedGrossWeightKg' | 'cargoNature' | 'specialRequirement',
-    value: string,
-  ) => {
-    setValues((current) => ({
-      ...current,
-      cargoItems: current.cargoItems.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, [field]: value } : item,
-      ),
-    }));
-    setFieldErrors((current) => ({ ...current, [`cargoItems.${index}.${field}`]: '' }));
-  };
-  const addCargoItem = () =>
-    setValues((current) =>
-      current.cargoItems.length >= 50
-        ? current
-        : { ...current, cargoItems: [...current.cargoItems, newCargoItem()] },
-    );
-  const removeCargoItem = (index: number) => {
-    if (values.cargoItems.length === 1) return;
-    setValues((current) => ({
-      ...current,
-      cargoItems: current.cargoItems.filter((_, itemIndex) => itemIndex !== index),
-    }));
-    setFieldErrors({});
-  };
-  const toggleRequestedService = (code: RequestedServiceCode, checked: boolean) => {
-    update(
-      'requestedServices',
-      checked
-        ? [...values.requestedServices, code]
-        : values.requestedServices.filter((serviceCode) => serviceCode !== code),
-    );
-    if (checked) return;
-    if (code === 'ORIGIN_PICKUP') update('pickupLocation', '');
-    if (code === 'DESTINATION_DELIVERY') update('deliveryLocation', '');
-    if (code === 'EXPORT_CUSTOMS') update('exportCustomsRemark', '');
-    if (code === 'IMPORT_CUSTOMS') update('importCustomsRemark', '');
-  };
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
-      role="presentation"
-    >
-      <section
-        aria-labelledby="quote-request-title"
-        aria-modal="true"
-        className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-border bg-surface shadow-xl"
-        role="dialog"
-      >
-        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4">
-          <div>
-            <h2 className="text-lg font-semibold" id="quote-request-title">
-              获取正式报价
-            </h2>
-            <p className="mt-1 text-sm text-muted">
-              请补充本票货物概况及所需服务，销售将基于这些信息确认正式报价。
-            </p>
-          </div>
-          <button
-            aria-label="关闭报价申请"
-            className="grid size-9 place-items-center rounded border border-border"
-            disabled={submitting}
-            onClick={onClose}
-            type="button"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-        <div className="space-y-5 p-5">
-          <section className="space-y-4 rounded-md border border-border p-4">
-            <h3 className="text-sm font-semibold">当前运价条件</h3>
-            <div className="grid gap-x-5 gap-y-4 rounded bg-sidebar/50 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              <QuoteFact label="航线" value={`${rate.polDisplayName || rate.polName || rate.polCode} → ${rate.podDisplayName || rate.podName || rate.podCode}`} />
-              <QuoteFact label="港口代码" value={`${rate.polCode} → ${rate.podCode}`} />
-              <QuoteFact label="船司" value={rate.carrierCode} />
-              <QuoteFact label="航线服务" value={rate.serviceName || '待确认'} />
-              <QuoteFact label="开船日" value={rateSailingLabel(rate)} />
-              <QuoteFact label="有效期" value={`${formatDate(rate.effectiveDate)} 至 ${formatDate(rate.expiryDate)}`} />
-              <QuoteFact label="箱型" value={rate.containerType} />
-            </div>
-            <label className="block max-w-xs text-sm">
-              <FieldLabel label="箱量" required />
-              <div className="mt-2 flex items-center gap-3">
-                <input
-                  aria-invalid={Boolean(fieldErrors.quantity)}
-                  className="h-10 w-32 rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger"
-                  inputMode="numeric"
-                  max={999}
-                  min={1}
-                  onChange={(event) => update('quantity', event.target.value)}
-                  required
-                  type="number"
-                  value={values.quantity}
-                />
-                <span className="text-sm font-medium">× {rate.containerType}</span>
-              </div>
-              {fieldErrors.quantity ? (
-                <span className="mt-1 block text-xs text-danger">{fieldErrors.quantity}</span>
-              ) : null}
-            </label>
-          </section>
-          <section className="space-y-4 rounded-md border border-border p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold">货物概况</h3>
-                <p className="mt-1 text-xs text-muted">
-                  默认填写一条；如本票包含多种货物，可继续添加。
-                </p>
-              </div>
-              <button
-                className="inline-flex h-9 items-center gap-2 rounded border border-primary/30 px-3 text-sm font-semibold text-primary hover:bg-primary/5 disabled:opacity-40"
-                disabled={submitting || values.cargoItems.length >= 50}
-                onClick={addCargoItem}
-                type="button"
-              >
-                <Plus aria-hidden className="size-4" /> 添加货物
-              </button>
-            </div>
-            {fieldErrors.cargoItems ? (
-              <p className="text-xs text-danger">{fieldErrors.cargoItems}</p>
-            ) : null}
-            <div className="space-y-4">
-              {values.cargoItems.map((item, index) => (
-                <article
-                  className="rounded border border-border bg-sidebar/30 p-4"
-                  key={item.clientId}
-                >
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <h4 className="text-sm font-semibold">货物 {index + 1}</h4>
-                    <button
-                      aria-label={`删除货物 ${index + 1}`}
-                      className="inline-flex h-8 items-center gap-1.5 rounded px-2 text-xs font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-35"
-                      disabled={submitting || values.cargoItems.length === 1}
-                      onClick={() => removeCargoItem(index)}
-                      title={values.cargoItems.length === 1 ? '至少保留一种货物' : '删除此货物'}
-                      type="button"
-                    >
-                      <Trash2 aria-hidden className="size-3.5" /> 删除
-                    </button>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <QuoteRequestField
-                      error={fieldErrors[`cargoItems.${index}.commodity`]}
-                      label="品名"
-                      required
-                    >
-                      <input
-                        className={inputClass}
-                        maxLength={500}
-                        onChange={(event) =>
-                          updateCargoItem(index, 'commodity', event.target.value)
-                        }
-                        placeholder="例如：家具、服装、机械配件"
-                        value={item.commodity}
-                      />
-                    </QuoteRequestField>
-                    <QuoteRequestField
-                      error={fieldErrors[`cargoItems.${index}.estimatedGrossWeightKg`]}
-                      label="预计重量（kg，选填）"
-                    >
-                      <input
-                        className={inputClass}
-                        inputMode="decimal"
-                        min="0.001"
-                        onChange={(event) =>
-                          updateCargoItem(index, 'estimatedGrossWeightKg', event.target.value)
-                        }
-                        placeholder="例如：18000"
-                        step="0.001"
-                        type="number"
-                        value={item.estimatedGrossWeightKg}
-                      />
-                    </QuoteRequestField>
-                    <QuoteRequestField
-                      error={fieldErrors[`cargoItems.${index}.cargoNature`]}
-                      label="货物性质（选填）"
-                    >
-                      <input
-                        className={inputClass}
-                        maxLength={200}
-                        onChange={(event) =>
-                          updateCargoItem(index, 'cargoNature', event.target.value)
-                        }
-                        placeholder="例如：普货、易碎品"
-                        value={item.cargoNature}
-                      />
-                    </QuoteRequestField>
-                    <QuoteRequestField
-                      error={fieldErrors[`cargoItems.${index}.specialRequirement`]}
-                      label="特殊要求（选填）"
-                    >
-                      <input
-                        className={inputClass}
-                        maxLength={2000}
-                        onChange={(event) =>
-                          updateCargoItem(index, 'specialRequirement', event.target.value)
-                        }
-                        placeholder="例如：温控、指定操作时间"
-                        value={item.specialRequirement}
-                      />
-                    </QuoteRequestField>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-          <section className="space-y-4 rounded-md border border-border p-4">
-            <div>
-              <h3 className="text-sm font-semibold">需要附加服务</h3>
-              <p className="mt-1 text-xs text-muted">请选择需要货代协助办理的服务，可多选。相关费用由销售确认后列入正式报价。</p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              {requestedServiceOptions.map((option) => (
-                <label
-                  className="flex cursor-pointer items-center gap-3 rounded border border-border px-3 py-3 text-sm hover:bg-sidebar/60"
-                  key={option.code}
-                >
-                  <input
-                    checked={values.requestedServices.includes(option.code)}
-                    className="size-4 accent-primary"
-                    onChange={(event) => toggleRequestedService(option.code, event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span className="font-medium">{option.label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {values.requestedServices.includes('ORIGIN_PICKUP') ? (
-                <QuoteRequestField
-                  error={fieldErrors.pickupLocation}
-                  label="提货地点"
-                  required
-                >
-                  <textarea
-                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    maxLength={1000}
-                    onChange={(event) => update('pickupLocation', event.target.value)}
-                    placeholder="城市 / 区域及详细提货地点"
-                    value={values.pickupLocation}
-                  />
-                </QuoteRequestField>
-              ) : null}
-              {values.requestedServices.includes('DESTINATION_DELIVERY') ? (
-                <QuoteRequestField
-                  error={fieldErrors.deliveryLocation}
-                  label="派送地点"
-                  required
-                >
-                  <textarea
-                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    maxLength={1000}
-                    onChange={(event) => update('deliveryLocation', event.target.value)}
-                    placeholder="城市 / 区域及详细派送地点"
-                    value={values.deliveryLocation}
-                  />
-                </QuoteRequestField>
-              ) : null}
-              {values.requestedServices.includes('EXPORT_CUSTOMS') ? (
-                <QuoteRequestField
-                  error={fieldErrors.exportCustomsRemark}
-                  label="出口报关备注（选填）"
-                >
-                  <textarea
-                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    maxLength={1000}
-                    onChange={(event) => update('exportCustomsRemark', event.target.value)}
-                    placeholder="补充出口报关相关说明"
-                    value={values.exportCustomsRemark}
-                  />
-                </QuoteRequestField>
-              ) : null}
-              {values.requestedServices.includes('IMPORT_CUSTOMS') ? (
-                <QuoteRequestField
-                  error={fieldErrors.importCustomsRemark}
-                  label="目的港清关备注（选填）"
-                >
-                  <textarea
-                    className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    maxLength={1000}
-                    onChange={(event) => update('importCustomsRemark', event.target.value)}
-                    placeholder="补充目的港清关相关说明"
-                    value={values.importCustomsRemark}
-                  />
-                </QuoteRequestField>
-              ) : null}
-            </div>
-          </section>
-          <section className="space-y-4 rounded-md border border-border p-4">
-            <div>
-              <h3 className="text-sm font-semibold">补充信息（选填）</h3>
-              <p className="mt-1 text-xs text-muted">有合同约定或其他要求可在此补充，不确定可留空。</p>
-            </div>
-            <QuoteRequestField label="贸易术语（选填）">
-              <select
-                aria-label="贸易术语（选填）"
-                aria-describedby="incoterm-help"
-                className={inputClass}
-                onChange={(event) =>
-                  update('incoterm', event.target.value as QuoteRequestValues['incoterm'])
-                }
-                value={values.incoterm}
-              >
-                <option value="">暂不填写，待销售确认</option>
-                {incotermOptions.map((incoterm) => (
-                  <option key={incoterm} value={incoterm}>
-                    {incotermLabels[incoterm]}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-muted" id="incoterm-help">
-                已有买卖合同约定时填写，供销售确认报价范围；不会自动勾选服务或改变下方费用预估。
-              </p>
-            </QuoteRequestField>
-            <QuoteRequestField error={fieldErrors.customerRemarks} label="报价备注（选填）">
-              <textarea
-                className="min-h-20 w-full rounded border border-border bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                maxLength={2000}
-                onChange={(event) => update('customerRemarks', event.target.value)}
-                placeholder="补充希望销售关注的报价说明"
-                value={values.customerRemarks}
-              />
-            </QuoteRequestField>
-          </section>
-          <section aria-label="费用预估" className="overflow-hidden rounded-md border border-border">
-            <div className="border-b border-border bg-sidebar px-4 py-3 text-sm font-semibold">
-              费用预估
-            </div>
-            <div className="divide-y divide-border text-sm">
-              <QuoteEstimateRow
-                amount={validQuantity ? Number(rate.oceanSellAmount) * numericQuantity : null}
-                currency={rate.currency}
-                label="海运费"
-                quantity={validQuantity ? numericQuantity : null}
-                unitPrice={Number(rate.oceanSellAmount)}
-                unitLabel={`/${rate.containerType}`}
-              />
-              {rate.charges.map((charge) => {
-                const itemQuantity = charge.chargeBasis === 'PER_CONTAINER' ? numericQuantity : 1;
-                return (
-                  <QuoteEstimateRow
-                    amount={validQuantity ? Number(charge.amount) * itemQuantity : null}
-                    currency={charge.currency}
-                    key={charge.id}
-                    label={charge.chargeName}
-                    quantity={validQuantity ? itemQuantity : null}
-                    unitLabel={chargeUnitLabel(charge)}
-                    unitPrice={Number(charge.amount)}
-                  />
-                );
-              })}
-            </div>
-            {values.requestedServices.length > 0 ? (
-              <div aria-live="polite" className="border-t border-border px-4 py-3">
-                <h4 className="text-sm font-semibold">待确认的服务费用</h4>
-                <p className="mt-1 text-xs text-muted">
-                  以下服务尚未计价，未计入已知费用小计；销售将核对现有费用是否已包含，避免重复收费。
-                </p>
-                <ul className="mt-3 divide-y divide-border">
-                  {requestedServiceOptions.filter((option) => values.requestedServices.includes(option.code)).map((option) => {
-                    const location = option.code === 'ORIGIN_PICKUP'
-                      ? values.pickupLocation.trim()
-                      : option.code === 'DESTINATION_DELIVERY' ? values.deliveryLocation.trim() : '';
-                    return (
-                      <li className="flex items-start justify-between gap-4 py-2 text-sm" key={option.code}>
-                        <div className="min-w-0">
-                          <span>{option.label}</span>
-                          {location ? <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted">{location}</p> : null}
-                        </div>
-                        <span className="shrink-0 font-medium">待销售报价</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ) : null}
-            <div className="flex items-center justify-between bg-primary/5 px-4 py-4">
-              <span className="font-semibold">已知费用小计</span>
-              <span className="text-lg font-bold text-primary">
-                {estimate === null ? '—' : formatMoney(String(estimate), rate.currency)}
-              </span>
-            </div>
-            <div className="space-y-2 border-t border-border px-4 py-3 text-sm">
-              <div className="flex items-center justify-between gap-4 font-semibold">
-                <span>全部费用</span>
-                <span>待销售确认</span>
-              </div>
-              <p className="text-xs text-muted">
-                {values.requestedServices.length > 0
-                  ? '上方小计仅包含已列明金额，所选服务费用待确认，最终金额以正式报价为准。'
-                  : '上方小计为当前运价参考金额，最终费用及包含范围以正式报价为准。'}
-              </p>
-            </div>
-          </section>
-          <div className="rounded-md border border-warning/25 bg-warning/10 px-4 py-3 text-sm text-foreground">
-            提交后将生成“待销售确认”的报价草稿。销售可审核或调整价格；正式发送后，你才能接受、拒绝或下载正式报价
-            PDF。
-          </div>
-          {error ? (
-            <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
-              {error}
-            </div>
-          ) : null}
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
-          <button
-            className="h-9 rounded border border-border px-4 text-sm font-semibold"
-            disabled={submitting}
-            onClick={onClose}
-            type="button"
-          >
-            取消
-          </button>
-          <button
-            className="h-9 rounded bg-primary px-5 text-sm font-semibold text-surface disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={submitting || !validQuantity}
-            onClick={submit}
-            type="button"
-          >
-            {submitting ? '提交中…' : '提交报价需求'}
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function QuoteRequestField({
-  label,
-  required = false,
-  error,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  error?: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="block text-sm">
-      <FieldLabel label={label} required={required} />
-      <div className="mt-2">{children}</div>
-      {error ? <span className="mt-1 block text-xs text-danger">{error}</span> : null}
-    </label>
-  );
-}
-
-function QuoteFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs text-muted">{label}</div>
-      <div className="mt-1 font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function QuoteEstimateRow({
-  label,
-  quantity,
-  unitPrice,
-  amount,
-  currency,
-  unitLabel,
-}: {
-  label: string;
-  quantity: number | null;
-  unitPrice: number;
-  amount: number | null;
-  currency: string;
-  unitLabel: string;
-}) {
-  return (
-    <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
-      <div>
-        <div className="font-medium">{label}</div>
-        <div className="mt-0.5 text-xs text-muted">
-          {quantity === null
-            ? '请输入有效箱量'
-            : `${quantity} × ${formatMoney(String(unitPrice), currency)} ${unitLabel}`}
-        </div>
-      </div>
-      <div className="font-semibold">
-        {amount === null ? '—' : formatMoney(String(amount), currency)}
-      </div>
-    </div>
-  );
-}
-
-function quoteEstimate(rate: CustomerRate, quantity: number) {
-  return rate.charges.reduce(
-    (total, charge) =>
-      total + Number(charge.amount) * (charge.chargeBasis === 'PER_CONTAINER' ? quantity : 1),
-    Number(rate.oceanSellAmount) * quantity,
-  );
-}
 function FormField({
   label,
   error,
@@ -1179,6 +458,7 @@ async function requestJson<T>(
     throw new PortalRateApiError(
       firstFieldError ?? error?.message ?? '运价查询暂时不可用，请稍后重试。',
       error?.code,
+      error?.details?.fieldErrors,
     );
   }
   return payload as T;
@@ -1200,13 +480,6 @@ function formatDate(value: string) {
 }
 function formatMoney(value: string, currency: string) {
   return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
-}
-function chargeUnitLabel(
-  charge: Pick<CustomerRate['charges'][number], 'chargeBasis' | 'containerType'>,
-) {
-  if (charge.chargeBasis === 'PER_BL') return '/B/L';
-  if (charge.chargeBasis === 'PER_SHIPMENT') return '/票';
-  return charge.containerType ? `/${charge.containerType}` : '/箱';
 }
 const inputClass =
   'h-10 w-full rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 aria-[invalid=true]:border-danger aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-danger/10';
