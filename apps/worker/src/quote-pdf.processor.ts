@@ -1,5 +1,8 @@
 import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import PDFDocument from 'pdfkit';
+import { fileURLToPath } from 'node:url';
+
+const quoteFontPath = fileURLToPath(new URL('../assets/fonts/NotoSansCJKsc-Regular.otf', import.meta.url));
 
 export const QUOTE_PDF_QUEUE = 'quote-pdfs';
 export const QUOTE_PDF_JOB = 'generate-quote-pdf';
@@ -52,22 +55,25 @@ export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffe
   return new Promise((resolve, reject) => {
     const pdf = new PDFDocument({
       size: 'A4',
-      margins: { top: 48, right: 48, bottom: 48, left: 48 },
+      margins: { top: 48, right: 48, bottom: 72, left: 48 },
+      bufferPages: true,
       info: { Title: `Quote ${quote.quoteNo}` },
     });
     const chunks: Buffer[] = [];
     pdf.on('data', (chunk: Buffer) => chunks.push(chunk));
     pdf.on('end', () => resolve(Buffer.concat(chunks)));
     pdf.on('error', reject);
+    // Bundle and embed the font so Chinese works on both Windows and the minimal Linux worker.
+    pdf.registerFont('QuoteCJK', quoteFontPath);
     pdf.rect(0, 0, 595.28, 86).fill('#17324D');
     pdf.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(24).text('FREIGHT QUOTATION', 48, 31);
     pdf
-      .font('Helvetica')
+      .font('QuoteCJK')
       .fontSize(9)
       .text(`Version ${quote.version}`, 470, 40, { width: 76, align: 'right' });
     pdf.fillColor('#17212B').font('Helvetica-Bold').fontSize(14).text(quote.quoteNo, 48, 112);
     pdf
-      .font('Helvetica')
+      .font('QuoteCJK')
       .fontSize(9)
       .fillColor('#5B6570')
       .text(`Status: ${quote.status}`, 48, 135)
@@ -76,7 +82,7 @@ export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffe
     pdf.moveTo(48, 164).lineTo(547, 164).strokeColor('#D7DEE5').stroke();
     pdf.fillColor('#17212B').font('Helvetica-Bold').fontSize(11).text('ROUTE', 48, 184);
     pdf
-      .font('Helvetica')
+      .font('QuoteCJK')
       .fontSize(10)
       .text(`${quote.polCode}  ->  ${quote.podCode}`, 48, 205)
       .text(`Carrier: ${quote.carrierCode ?? 'TBC'}`, 300, 205)
@@ -84,33 +90,36 @@ export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffe
     const top = 250;
     const x = [48, 255, 335, 390, 475];
     const widths = [207, 80, 55, 85, 72];
-    pdf.rect(48, top, 499, 26).fill('#E9EEF3');
-    pdf.fillColor('#17324D').font('Helvetica-Bold').fontSize(8);
-    ['CHARGE', 'CONTAINER', 'QTY', 'UNIT PRICE', 'AMOUNT'].forEach((label, i) =>
-      pdf.text(label, x[i], top + 9, { width: widths[i]!, align: i >= 2 ? 'right' : 'left' }),
-    );
-    let y = top + 26;
-    pdf.font('Helvetica').fontSize(8.5);
+    const tableHeader = (at: number) => {
+      pdf.rect(48, at, 499, 26).fill('#E9EEF3');
+      pdf.fillColor('#17324D').font('Helvetica-Bold').fontSize(8);
+      ['CHARGE', 'CONTAINER', 'QTY', 'UNIT PRICE', 'AMOUNT'].forEach((label, i) =>
+        pdf.text(label, x[i], at + 9, { width: widths[i]!, align: i >= 2 ? 'right' : 'left' }),
+      );
+      pdf.font('QuoteCJK').fontSize(8.5);
+      return at + 26;
+    };
+    let y = tableHeader(top);
     for (const item of quote.items) {
-      if (y > 720) {
+      // Customer documents show business names, not internal codes such as MANUAL_CHARGE.
+      const cells = [item.chargeName, item.containerType ?? '-', Number(item.quantity).toFixed(2),
+        item.currency + ' ' + money(item.unitPrice), item.currency + ' ' + money(item.amount)];
+      const rowHeight = Math.max(30, ...cells.map((text, i) =>
+        pdf.heightOfString(text, { width: widths[i]! - 8, lineGap: 2 }) + 16));
+      if (y + rowHeight > 760) {
         pdf.addPage();
-        y = 60;
+        y = tableHeader(48);
       }
-      pdf.rect(48, y, 499, 30).fillAndStroke('#FFFFFF', '#E4E9EE');
-      pdf
-        .fillColor('#17212B')
-        .text(`${item.chargeName} (${item.chargeCode})`, x[0], y + 10, { width: widths[0]! })
-        .text(item.containerType ?? '-', x[1], y + 10, { width: widths[1]! })
-        .text(Number(item.quantity).toFixed(2), x[2], y + 10, { width: widths[2]!, align: 'right' })
-        .text(`${item.currency} ${money(item.unitPrice)}`, x[3], y + 10, {
-          width: widths[3]!,
-          align: 'right',
-        })
-        .text(`${item.currency} ${money(item.amount)}`, x[4], y + 10, {
-          width: widths[4]!,
-          align: 'right',
-        });
-      y += 30;
+      pdf.rect(48, y, 499, rowHeight).fillAndStroke('#FFFFFF', '#E4E9EE');
+      pdf.fillColor('#17212B');
+      cells.forEach((text, i) => pdf.text(text, x[i]! + 4, y + 8, {
+        width: widths[i]! - 8, lineGap: 2, align: i >= 2 ? 'right' : 'left',
+      }));
+      y += rowHeight;
+    }
+    if (y + 60 > 760) {
+      pdf.addPage();
+      y = 48;
     }
     pdf.rect(335, y + 12, 212, 42).fill('#17324D');
     pdf
@@ -136,18 +145,19 @@ export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffe
         .text('TERMS', 48, y);
       pdf
         .fillColor('#5B6570')
-        .font('Helvetica')
+        .font('QuoteCJK')
         .fontSize(8.5)
         .text(quote.customerTerms.trim(), 48, y + 18, { width: 499, lineGap: 3 });
     }
-    pdf
-      .fillColor('#5B6570')
-      .font('Helvetica')
-      .fontSize(8)
-      .text('Generated from a preserved rate and price snapshot.', 48, 790, {
-        width: 499,
-        align: 'center',
-      });
+    const pages = pdf.bufferedPageRange();
+    for (let page = pages.start; page < pages.start + pages.count; page += 1) {
+      pdf.switchToPage(page);
+      const bottom = pdf.page.margins.bottom;
+      pdf.page.margins.bottom = 20;
+      pdf.fillColor('#5B6570').font('QuoteCJK').fontSize(8)
+        .text('Generated from a preserved rate and price snapshot.', 48, 790, { width: 499, align: 'center' });
+      pdf.page.margins.bottom = bottom;
+    }
     pdf.end();
   });
 }

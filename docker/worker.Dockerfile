@@ -14,6 +14,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/apps/worker/dist ./apps/worker/dist
+COPY --from=build /app/apps/worker/assets ./apps/worker/assets
 COPY --from=build /app/apps/worker/package.json ./apps/worker/package.json
 COPY --from=deps /app/node_modules ./node_modules
 CMD ["node", "apps/worker/dist/main.js"]

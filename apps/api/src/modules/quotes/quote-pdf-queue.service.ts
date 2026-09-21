@@ -4,6 +4,8 @@ import { Queue, QueueEvents } from 'bullmq';
 
 export const QUOTE_PDF_QUEUE = 'quote-pdfs';
 export const QUOTE_PDF_JOB = 'generate-quote-pdf';
+// Rendering changes must invalidate both stored PDFs and BullMQ jobs, independently of quote data versions.
+const QUOTE_PDF_TEMPLATE_VERSION = 'cjk-v2';
 
 export interface QuotePdfJobData {
   tenantId: string;
@@ -67,9 +69,9 @@ export class QuotePdfQueueService implements OnModuleDestroy {
   });
 
   async getOrGenerate(data: Omit<QuotePdfJobData, 'objectKey'>): Promise<Buffer> {
-    const objectKey = `tenants/${data.tenantId}/quotes/${data.quoteId}/v${data.version}.pdf`;
+    const objectKey = `tenants/${data.tenantId}/quotes/${data.quoteId}/${QUOTE_PDF_TEMPLATE_VERSION}/v${data.version}.pdf`;
     if (!(await this.exists(objectKey))) {
-      const jobId = `${data.tenantId}-${data.quoteId}-v${data.version}`;
+      const jobId = `${data.tenantId}-${data.quoteId}-${QUOTE_PDF_TEMPLATE_VERSION}-v${data.version}`;
       let existing = await this.queue.getJob(jobId);
       if (existing && ['completed', 'failed'].includes(await existing.getState())) {
         await existing.remove();

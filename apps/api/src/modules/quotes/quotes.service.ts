@@ -635,46 +635,81 @@ export class QuotesService {
           '只有待销售确认的报价可以调整价格。',
           { status: ['当前报价状态不允许改价。'] },
         );
-      const requested = new Map(
-        dto.items.map((item) => [item.itemId, new Prisma.Decimal(item.unitPrice)]),
-      );
       if (validUntil && quote.sourceRate?.expiryDate && validUntil > quote.sourceRate.expiryDate)
         throw this.fieldError('QUOTE_VALID_UNTIL_EXCEEDS_RATE', '该报价有效期不能超过来源运价有效期。', {
           validUntil: ['该报价有效期不能超过来源运价有效期。'],
         });
-      if (
-        requested.size !== dto.items.length ||
-        [...requested.keys()].some((itemId) => !quote.items.some((item) => item.id === itemId))
-      )
-        throw this.fieldError('INVALID_QUOTE_ITEM', '改价明细与当前报价不匹配，请刷新后重试。', {
-          items: ['每个改价费用项必须属于当前报价。'],
-        });
-      const beforeItems = quote.items.map((item) => ({
-        id: item.id,
-        unitPrice: item.unitPrice.toString(),
-        amount: item.amount.toString(),
-      }));
-      let total = new Prisma.Decimal(0);
-      for (const item of quote.items) {
-        const unitPrice = requested.get(item.id) ?? item.unitPrice;
-        const amount = unitPrice.mul(item.quantity);
-        total = total.plus(amount);
-        if (requested.has(item.id))
-          await tx.quoteItem.update({
-            where: { id: item.id },
-            data: {
-              originalUnitPrice: item.originalUnitPrice ?? item.unitPrice,
-              unitPrice,
-              amount,
-            },
-          });
+      const invalidItems = (message: string) => this.fieldError('INVALID_QUOTE_ITEM', message, { items: [message] });
+      const removed = new Set(dto.deletedItemIds ?? []);
+      const existingIds = dto.items.flatMap((item) => item.itemId ? [item.itemId] : []);
+      if (new Set(existingIds).size !== existingIds.length ||
+          [...existingIds, ...removed].some((itemId) => !quote.items.some((item) => item.id === itemId)) ||
+          existingIds.some((itemId) => removed.has(itemId)))
+        throw invalidItems('费用项必须属于当前报价，且不能重复修改或同时删除。');
+      if (quote.items.some((item) => removed.has(item.id) && item.chargeCode === 'OCEAN_FREIGHT'))
+        throw invalidItems('海运费关联订舱箱型箱量，不能删除。');
+      const decimal = (value: string, positive = false) => {
+        if (typeof value !== 'string' || !/^\d{1,14}(?:\.\d{1,4})?$/.test(value))
+          throw invalidItems('金额和数量最多 14 位整数、4 位小数，不能为负数。');
+        const number = new Prisma.Decimal(value);
+        if (positive && number.lte(0)) throw invalidItems('计费数量必须大于 0。');
+        return number;
+      };
+      const edits = dto.items.map((input, index) => {
+        const old = quote.items.find((item) => item.id === input.itemId);
+        const chargeName = (input.chargeName ?? old?.chargeName ?? '').trim();
+        const chargeBasis = input.chargeBasis ?? old?.chargeBasis ?? (old?.containerType ? 'PER_CONTAINER' : 'PER_SHIPMENT');
+        const containerType = chargeBasis === 'PER_CONTAINER'
+          ? (input.containerType ?? old?.containerType ?? '').trim() : null;
+        if (!chargeName || chargeName.length > 150) throw invalidItems('请填写费用名称，最多 150 个字符。');
+        if (!['PER_CONTAINER', 'PER_BL', 'PER_SHIPMENT'].includes(chargeBasis)) throw invalidItems('请选择有效的计费方式。');
+        if (chargeBasis === 'PER_CONTAINER' && (!containerType || !quote.items.some((item) => item.chargeCode === 'OCEAN_FREIGHT' && item.containerType === containerType)))
+          throw invalidItems('按箱计费必须选择本报价运输需求中的箱型。');
+        const currency = input.currency ?? old?.currency ?? quote.currency;
+        if (currency !== quote.currency) throw invalidItems('新增或编辑费用必须使用当前报价币种，不支持混合币种报价。');
+        const quantity = decimal(input.quantity ?? old?.quantity.toString() ?? '1', true);
+        if (old?.chargeCode === 'OCEAN_FREIGHT' &&
+            (!quantity.eq(old.quantity) || containerType !== old.containerType || chargeBasis !== (old.chargeBasis ?? 'PER_CONTAINER')))
+          throw invalidItems('海运费的箱型、箱量和计费方式须保留原运输需求。');
+        const unitPrice = decimal(input.unitPrice);
+        const costAmount = input.costAmount === undefined ? old?.costAmount ?? null
+          : input.costAmount === null ? null : decimal(input.costAmount);
+        const amount = unitPrice.mul(quantity).toDecimalPlaces(4);
+        if (amount.gte('100000000000000')) throw invalidItems('费用金额超出允许范围。');
+        return { old, data: {
+          chargeCode: old?.chargeCode ?? 'MANUAL_CHARGE', chargeName, chargeBasis, containerType,
+          quantity, unitPrice, costAmount, currency, amount,
+          originalUnitPrice: old?.originalUnitPrice ?? old?.unitPrice ?? unitPrice,
+          sortOrder: old?.sortOrder ?? (Math.max(-1, ...quote.items.map((item) => item.sortOrder)) + index + 1),
+        } };
+      });
+      // Claim the draft version before mutating its lines, so concurrent send/edit cannot partially overwrite it.
+      const claimed = await tx.quote.updateMany({
+        where: { id, ...this.internalWhere(context), status: QuoteStatus.DRAFT, version: quote.version },
+        data: { version: { increment: 1 } },
+      });
+      if (claimed.count !== 1) throw invalidItems('报价已被其他操作修改，请刷新后重试。');
+      const snapshot = (item: { id: string; chargeCode: string; chargeName: string; chargeBasis: string | null; containerType: string | null; currency: string; quantity: Prisma.Decimal; unitPrice: Prisma.Decimal; amount: Prisma.Decimal; costAmount: Prisma.Decimal | null }) => ({
+        id: item.id, chargeCode: item.chargeCode, chargeName: item.chargeName, chargeBasis: item.chargeBasis,
+        containerType: item.containerType, currency: item.currency, quantity: item.quantity.toString(),
+        unitPrice: item.unitPrice.toString(), amount: item.amount.toString(), costAmount: item.costAmount?.toString() ?? null,
+      });
+      const beforeItems = quote.items.map(snapshot);
+      await tx.quoteItem.deleteMany({ where: { tenantId: context.tenantId, quoteId: id, id: { in: [...removed] } } });
+      for (const edit of edits) {
+        if (edit.old) await tx.quoteItem.update({ where: { id: edit.old.id, tenantId: context.tenantId, quoteId: id }, data: edit.data });
+        else await tx.quoteItem.create({ data: { ...edit.data, tenantId: context.tenantId, quoteId: id } });
       }
+      const savedItems = await tx.quoteItem.findMany({ where: { tenantId: context.tenantId, quoteId: id }, orderBy: { sortOrder: 'asc' } });
+      if (savedItems.some((item) => item.currency !== quote.currency)) throw invalidItems('当前报价包含不同币种，请先核实费用币种。');
+      if (!savedItems.length || savedItems.length > 100) throw invalidItems('报价必须包含 1 至 100 条费用。');
+      const total = savedItems.reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0));
+      if (total.gte('100000000000000')) throw invalidItems('报价总额超出允许范围。');
       const updated = await tx.quote.update({
         where: { id },
         data: {
           subtotal: total,
           totalAmount: total,
-          version: { increment: 1 },
           priceOverriddenAt: new Date(),
           priceOverriddenById: context.userId,
           priceOverrideReason: dto.reason.trim(),
@@ -699,10 +734,9 @@ export class QuotesService {
             validUntil: (validUntil ?? quote.validUntil).toISOString().slice(0, 10),
             internalNote: dto.internalNote === undefined ? quote.internalNote : dto.internalNote.trim() || null,
             customerTerms: dto.customerTerms === undefined ? quote.customerTerms : dto.customerTerms.trim(),
-            items: quote.items.map((item) => ({
-              id: item.id,
-              unitPrice: (requested.get(item.id) ?? item.unitPrice).toString(),
-            })),
+            items: savedItems.map(snapshot),
+            deletedItemIds: [...removed],
+            addedItemIds: savedItems.filter((item) => !quote.items.some((old) => old.id === item.id)).map((item) => item.id),
           },
         },
       });

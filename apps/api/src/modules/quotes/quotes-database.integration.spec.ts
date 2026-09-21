@@ -401,6 +401,64 @@ describe('quote database integration', () => {
       totalAmount: '2900',
     });
   });
+  it('adds, edits and deletes fees atomically, protects scope, and publishes only customer fields', async () => {
+    const created = await runAs(tenantA, userA, customerA, () => service.create({
+      rateId: rateA, containerType: '40HQ', containerQuantity: 2, ...cargoRequest,
+    }));
+    const initial = await runInternal(() => service.getInternal(created.id));
+    const ocean = initial.items.find((item) => item.chargeCode === 'OCEAN_FREIGHT')!;
+    const request = {
+      reason: '补充本次文件费用', customerTerms: '包含文件费，不含目的港当地费用。',
+      internalNote: '仅内部的采购备注',
+      items: [{ chargeName: '文件费', chargeBasis: 'PER_BL' as const, currency: created.currency, quantity: '1', unitPrice: '35.1234', costAmount: '20' }],
+    };
+    await expect(context.run({ requestId: 'cross-tenant-fee-edit', tenantId: tenantB, userId: userB, roles: [RoleCode.TENANT_ADMIN] },
+      () => service.overridePrices(created.id, request))).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
+    const added = await runInternal(() => service.overridePrices(created.id, request));
+    expect(added.totalAmount.toString()).toBe(initial.totalAmount.plus('35.1234').toString());
+    let detail = await runInternal(() => service.getInternal(created.id));
+    const fee = detail.items.find((item) => item.chargeCode === 'MANUAL_CHARGE')!;
+    expect(fee.chargeName).toBe('文件费');
+    const edited = await runInternal(() => service.overridePrices(created.id, {
+      ...request, items: [{ ...request.items[0]!, itemId: fee.id, quantity: '2', unitPrice: '40' }],
+    }));
+    expect(edited.totalAmount.toString()).toBe(initial.totalAmount.plus(80).toString());
+    for (const invalid of [
+      { ...request, items: [{ itemId: 'another-quotes-item', unitPrice: '1' }] },
+      { ...request, deletedItemIds: [ocean.id] },
+      { ...request, items: [{ itemId: ocean.id, quantity: '3', unitPrice: ocean.unitPrice.toString() }] },
+      { ...request, items: [{ ...request.items[0]!, currency: created.currency === 'USD' ? 'CNY' : 'USD' }] },
+      { ...request, items: [{ ...request.items[0]!, quantity: '0' }] },
+      { ...request, items: [{ ...request.items[0]!, quantity: '99999999999999', unitPrice: '99999999999999' }] },
+    ]) {
+      await expect(runInternal(() => service.overridePrices(created.id, invalid))).rejects.toMatchObject({ response: { code: 'INVALID_QUOTE_ITEM' } });
+    }
+    detail = await runInternal(() => service.getInternal(created.id));
+    expect(detail.version).toBe(edited.version);
+    expect(detail.items).toHaveLength(initial.items.length + 1);
+    // Trigger total overflow after line writes to prove the transaction also rolls back review fields and audit.
+    await expect(runInternal(() => service.overridePrices(created.id, {
+      ...request, internalNote: 'must roll back', items: [{ ...request.items[0]!, unitPrice: '99999999999999' }],
+    }))).rejects.toMatchObject({ response: { code: 'INVALID_QUOTE_ITEM' } });
+    expect((await runInternal(() => service.getInternal(created.id))).internalNote).toBe(request.internalNote);
+    const deleted = await runInternal(() => service.overridePrices(created.id, {
+      reason: '取消本次文件费用', deletedItemIds: [fee.id], items: [{ itemId: ocean.id, unitPrice: ocean.unitPrice.toString() }],
+    }));
+    expect(deleted.totalAmount.toString()).toBe(initial.totalAmount.toString());
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { entityId: created.id, action: 'PRICE_OVERRIDE' }, orderBy: { createdAt: 'desc' } });
+    expect(audit.beforeData).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: fee.id, chargeName: '文件费' })]) as unknown });
+    expect(audit.afterData).toMatchObject({ deletedItemIds: [fee.id] });
+    await runInternal(() => service.overridePrices(created.id, request));
+    await runInternal(() => service.send(created.id));
+    const customer = await runAs(tenantA, userA, customerA, () => service.get(created.id));
+    expect(customer.items.some((item) => item.chargeName === '文件费')).toBe(true);
+    expect(customer.items.every((item) => !('costAmount' in item))).toBe(true);
+    const pdf = await runAs(tenantA, userA, customerA, () => service.getPdfJobData(created.id, false));
+    expect(pdf.quote.items.some((item) => item.chargeName === '文件费')).toBe(true);
+    expect(JSON.stringify(pdf)).not.toContain(request.internalNote);
+    await expect(runAs(tenantB, userB, customerB, () => service.get(created.id))).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
+    await expect(runInternal(() => service.overridePrices(created.id, request))).rejects.toMatchObject({ response: { code: 'QUOTE_PRICE_OVERRIDE_NOT_ALLOWED' } });
+  });
   it('enforces send, viewed and accept transitions with idempotent acceptance', async () => {
     await runInternal(() => service.send(quoteId));
     const sentQuote = await runInternal(() => service.getInternal(quoteId));

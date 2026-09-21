@@ -398,8 +398,8 @@ export default function QuoteDetailPage() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
           role="dialog"
         >
-          <div className="w-full max-w-lg overflow-hidden rounded border border-border bg-surface shadow-xl">
-            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded border border-border bg-surface shadow-xl">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-success/10 text-success">
                   <CheckCircle2 aria-hidden className="size-5" />
@@ -423,10 +423,15 @@ export default function QuoteDetailPage() {
                 <X aria-hidden className="size-4" />
               </button>
             </div>
-            <div className="space-y-4 px-5 py-4 text-sm">
+            <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain px-5 py-4 text-sm">
+              <dl className="border-b border-border pb-4">
+                <dt className="text-sm font-medium text-muted">本次接受的报价总额</dt>
+                <dd className="mt-2 break-words text-3xl font-semibold tabular-nums leading-tight text-primary">
+                  {money(quote.totalAmount, quote.currency)}
+                </dd>
+              </dl>
               <div className="grid gap-3 rounded border border-success/15 bg-success/5 p-3 sm:grid-cols-2">
                 <Fact label="报价编号" value={quote.quoteNo} />
-                <Fact label="报价总额" value={money(quote.totalAmount, quote.currency)} />
                 <Fact
                   label="航线"
                   value={`${portDisplayName(quote.polCode)} → ${portDisplayName(quote.podCode)}`}
@@ -434,11 +439,52 @@ export default function QuoteDetailPage() {
                 <Fact label="有效期至" value={quote.validUntil.slice(0, 10)} />
                 <Fact label="箱量" value={containerSummary} />
               </div>
+              <section aria-labelledby="accept-quote-items-title">
+                <h3 id="accept-quote-items-title" className="font-semibold">本次报价包含的费用</h3>
+                <p className="mt-1 text-xs leading-5 text-muted">逐项核对计费数量、单价和小计，包含范围及不包含项目以报价条款为准。</p>
+                {quote.items.length ? (
+                  <ul className="mt-3 divide-y divide-border border-y border-border">
+                    {quote.items.map((item) => (
+                      <li key={item.id} className="py-3">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                          <h4 className="min-w-0 break-words font-semibold">{item.chargeName}</h4>
+                          <p className="font-semibold tabular-nums text-primary">
+                            <span className="mr-2 text-xs font-normal text-muted">小计</span>
+                            {money(item.amount, item.currency)}
+                          </p>
+                        </div>
+                        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3">
+                          <div>
+                            <dt className="text-muted">计费方式 / 箱型</dt>
+                            <dd className="mt-1">{chargeUnitLabel(item)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted">计费数量</dt>
+                            <dd className="mt-1 tabular-nums">{Number(item.quantity).toFixed(2)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted">单价</dt>
+                            <dd className="mt-1 tabular-nums">{money(item.unitPrice, item.currency)}</dd>
+                          </div>
+                        </dl>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-3 rounded bg-warning/10 p-3 text-sm">当前报价未提供费用明细，请联系销售确认包含项目后再接受。</p>
+                )}
+              </section>
+              <section aria-labelledby="accept-quote-terms-title">
+                <h3 id="accept-quote-terms-title" className="font-semibold">服务范围与报价条款</h3>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">
+                  {quote.customerTerms?.trim() || '本报价未补充服务范围说明。如需提货、报关、清关或派送，请在接受前联系销售确认包含项目及费用。'}
+                </p>
+              </section>
               <p className="text-sm leading-6 text-foreground">
-                请确认航线、箱量、有效期和总额无误。确认后，销售和操作团队会按已接受报价继续跟进订舱。
+                请确认航线、箱量、费用明细、报价条款、有效期和总额无误。确认后，销售和操作团队会按已接受报价继续跟进订舱。
               </p>
             </div>
-            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+            <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
               <button
                 className="h-9 rounded border border-border px-4 text-sm font-semibold disabled:opacity-40"
                 disabled={submitting !== null}
@@ -448,12 +494,14 @@ export default function QuoteDetailPage() {
                 取消
               </button>
               <button
-                className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
+                className="min-h-9 max-w-full rounded bg-primary px-4 py-2 text-sm font-semibold text-surface disabled:opacity-40"
                 disabled={submitting !== null}
                 onClick={() => void confirmAccept()}
                 type="button"
               >
-                {submitting === 'accept' ? '处理中…' : '确认接受'}
+                {submitting === 'accept'
+                  ? '处理中…'
+                  : `确认接受 · ${money(quote.totalAmount, quote.currency)}`}
               </button>
             </div>
           </div>

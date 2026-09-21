@@ -56,7 +56,7 @@ export class AdminQuotesController {
   }
   @Patch(':id/prices')
   @RequirePermissions('quote.manage')
-  @ApiOkResponse({ description: 'Atomically save draft quote prices, optional validity, customer terms and internal notes with a mandatory price-change reason' })
+  @ApiOkResponse({ description: 'Atomically add, edit and explicitly remove draft quote fee lines in the quote currency; preserve ocean freight container requirements; save validity, terms and notes with mandatory reason and before/after audit' })
   overridePrices(@Param('id') id: string, @Body() dto: OverrideQuotePricesDto) {
     return this.quotes.overridePrices(id, dto);
   }

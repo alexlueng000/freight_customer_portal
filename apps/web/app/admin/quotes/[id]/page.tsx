@@ -1,9 +1,11 @@
 'use client';
 import Link from 'next/link';
 import styles from './quote-review.module.css';
+import { QuoteFeeEditor } from '@/components/quote-fee-editor';
+import { generateQuoteCustomerTerms } from '@/lib/quote-customer-terms';
 import { useParams } from 'next/navigation';
 import { ArrowRight, CheckCircle2, MapPin, Package, TrendingUp, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { BusinessFlow } from '@/components/business-flow';
 import { ErrorState } from '@/components/error-state';
@@ -88,7 +90,9 @@ export default function AdminQuoteDetailPage() {
   const [acting, setActing] = useState(false);
   const [confirmingSend, setConfirmingSend] = useState(false);
   const [reason, setReason] = useState('');
-  const [prices, setPrices] = useState<Record<string, string>>({});
+  const [draftItems, setDraftItems] = useState<Item[]>([]);
+  const generatedTerms = useRef<string | null>(null);
+  const [confirmReplaceTerms, setConfirmReplaceTerms] = useState(false);
   const [reviewSaving, setReviewSaving] = useState(false);
   const [notice, setNotice] = useState<{ title: string; description: string } | null>(null);
   const [review, setReview] = useState({
@@ -105,11 +109,16 @@ export default function AdminQuoteDetailPage() {
       if (!response.ok) throw payload;
       const nextQuote = payload as Quote;
       setQuote(nextQuote);
-      setPrices(Object.fromEntries(nextQuote.items.map((item) => [item.id, item.unitPrice])));
+      setDraftItems(nextQuote.items.map((item) => ({ ...item })));
       setReason('');
+      setConfirmReplaceTerms(false);
+      const suggestedTerms = nextQuote.status === 'DRAFT'
+        ? generateQuoteCustomerTerms(nextQuote.items, nextQuote.validUntil.slice(0, 10)) : null;
+      const customerTerms = nextQuote.customerTerms?.trim() ? nextQuote.customerTerms : suggestedTerms ?? '';
+      generatedTerms.current = customerTerms === suggestedTerms ? suggestedTerms : null;
       setReview({
         validUntil: nextQuote.validUntil.slice(0, 10),
-        customerTerms: nextQuote.customerTerms ?? '',
+        customerTerms,
         internalNote: nextQuote.internalNote ?? '',
       });
     } catch (caught) {
@@ -126,6 +135,20 @@ export default function AdminQuoteDetailPage() {
     const timer = window.setTimeout(() => setNotice(null), 3200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+  const suggestedTerms = generateQuoteCustomerTerms(draftItems, review.validUntil);
+  useEffect(() => {
+    if (quote?.status !== 'DRAFT' || generatedTerms.current === null || review.customerTerms !== generatedTerms.current || !suggestedTerms) return;
+    if (review.customerTerms !== suggestedTerms) {
+      generatedTerms.current = suggestedTerms;
+      setReview((value) => ({ ...value, customerTerms: suggestedTerms }));
+    }
+  }, [suggestedTerms, review.customerTerms, quote?.status]);
+  const applyGeneratedTerms = () => {
+    if (!suggestedTerms) return;
+    generatedTerms.current = suggestedTerms;
+    setReview((value) => ({ ...value, customerTerms: suggestedTerms }));
+    setConfirmReplaceTerms(false);
+  };
   const act = async (action: 'send' | 'cancel') => {
     setActing(true);
     setError('');
@@ -162,7 +185,7 @@ export default function AdminQuoteDetailPage() {
       setActing(false);
     }
   };
-  const pricesChanged = Boolean(quote?.items.some((item) => normalizePrice(prices[item.id] ?? item.unitPrice) !== normalizePrice(item.unitPrice)));
+  const pricesChanged = Boolean(quote && JSON.stringify(draftItems) !== JSON.stringify(quote.items));
   const reviewChanged = Boolean(quote && (review.validUntil !== quote.validUntil.slice(0, 10)
     || review.customerTerms !== (quote.customerTerms ?? '') || review.internalNote !== (quote.internalNote ?? '')));
   const hasUnsavedChanges = pricesChanged || reviewChanged;
@@ -174,16 +197,16 @@ export default function AdminQuoteDetailPage() {
       return;
     }
     if (pricesChanged && reason.trim().length < 3) {
-      setError('价格已调整，请填写至少 3 个字符的内部改价原因。');
+      setError('费用已调整，请填写至少 3 个字符的内部改价原因。');
       document.getElementById('inline-price-reason')?.focus();
       return;
     }
-    if (pricesChanged && quote.items.some((item) => !/^\d{1,14}(?:\.\d{1,4})?$/.test((prices[item.id] ?? item.unitPrice).trim()))) {
-      setError('销售单价须为非负金额，最多 4 位小数。');
+    if (pricesChanged && (!draftItems.length || draftItems.some((item) => !item.chargeName.trim() || !/^\d{1,14}(?:\.\d{1,4})?$/.test(item.unitPrice.trim()) || !/^\d{1,14}(?:\.\d{1,4})?$/.test(item.quantity.trim()) || Number(item.quantity) <= 0 || (item.costAmount !== null && item.costAmount !== '' && !/^\d{1,14}(?:\.\d{1,4})?$/.test(item.costAmount.trim())) || (item.chargeBasis === 'PER_CONTAINER' && !item.containerType)))) {
+      setError('请检查费用名称、箱型、正数计费数量及非负单价；金额和数量最多 4 位小数。');
       return;
     }
     if (pricesChanged && review.customerTerms.trim().length < 3) {
-      setError('价格已调整，请补充客户可见报价条款（至少 3 个字符）。');
+      setError('费用已调整，请补充客户可见报价条款（至少 3 个字符）。');
       document.getElementById('quote-customer-terms')?.focus();
       return;
     }
@@ -193,7 +216,14 @@ export default function AdminQuoteDetailPage() {
       const response = await apiFetch('/api/v1/admin/quotes/' + encodeURIComponent(id) + (pricesChanged ? '/prices' : '/review'), {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...review, ...(pricesChanged ? {
-          reason: reason.trim(), items: quote.items.map((item) => ({ itemId: item.id, unitPrice: (prices[item.id] ?? item.unitPrice).trim() })),
+          reason: reason.trim(),
+          deletedItemIds: quote.items.filter((item) => !draftItems.some((draft) => draft.id === item.id)).map((item) => item.id),
+          items: draftItems.map((item) => ({
+            ...(quote.items.some((saved) => saved.id === item.id) ? { itemId: item.id } : {}),
+            chargeName: item.chargeName.trim(), chargeBasis: item.chargeBasis ?? (item.containerType ? 'PER_CONTAINER' : 'PER_SHIPMENT'),
+            containerType: item.containerType ?? '', quantity: item.quantity.trim(), currency: item.currency,
+            unitPrice: item.unitPrice.trim(), costAmount: item.costAmount?.trim() || null,
+          })),
         } : {}) }),
       });
       const payload: unknown = await response.json();
@@ -332,57 +362,18 @@ export default function AdminQuoteDetailPage() {
           </div>
           <span className="text-sm font-medium text-primary">{hasUnsavedChanges ? '有未保存的修改' : quote.status === 'DRAFT' ? '草稿 · 尚未发布' : '已保存 · 只读'}</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-border bg-sidebar text-xs text-muted">
-                <th className={head}>费用</th>
-                <th className={head}>计费方式</th>
-                <th className={head}>计费数量</th>
-                <th className={head}>参考运价（成本快照）</th>
-                <th className={head}>销售单价</th>
-                <th className={`${head} text-right`}>金额</th>
-              </tr>
-            </thead>
-            <tbody>
-              {quote.items.map((item) => (
-                <tr className="border-b border-border" key={item.id}>
-                  <td className={cell}>{item.chargeName}</td>
-                  <td className={cell}>{chargeUnitLabel(item)}</td>
-                  <td className={cell}>{Number(item.quantity).toFixed(2)}</td>
-                  <td className={cell}>
-                    {item.costAmount ? money(item.costAmount, item.currency) : '—'}
-                  </td>
-                  <td className={cell}>{quote.status === 'DRAFT' ? <input
-                    aria-label={item.chargeName + '销售单价（' + item.currency + '）'}
-                    className="h-10 w-36 rounded border border-primary/30 bg-surface px-3 font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    disabled={reviewSaving || acting} inputMode="decimal" maxLength={19}
-                    value={prices[item.id] ?? item.unitPrice}
-                    onChange={(event) => setPrices((current) => ({ ...current, [item.id]: event.target.value }))} /> : money(item.unitPrice, item.currency)}</td>
-                  <td className={`${cell} text-right font-semibold`}>
-                    {pricesChanged ? '保存后更新' : money(item.amount, item.currency)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className={styles.quoteTotal}>
-                <td className="px-4 py-4 text-right font-semibold" colSpan={5}>
-                  报价总额
-                </td>
-                <td className="px-4 py-4 text-right text-lg font-bold text-primary">
-                  {pricesChanged ? '保存后重新计算' : money(quote.totalAmount, quote.currency)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+        <QuoteFeeEditor
+          items={draftItems} savedItems={quote.items} currency={quote.currency}
+          totalAmount={quote.totalAmount} changed={pricesChanged}
+          editable={quote.status === 'DRAFT'} disabled={reviewSaving || acting}
+          onChange={setDraftItems}
+        />
         <div className="space-y-5 p-5">
           {pricesChanged ? <label className="block text-sm" htmlFor="inline-price-reason">
             <FieldLabel label="内部改价原因" required />
             <textarea id="inline-price-reason" className="mt-2 min-h-20 w-full rounded border border-border bg-surface p-3"
               disabled={reviewSaving || acting} value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)}
-              placeholder="说明调整价格的原因，至少 3 个字符，仅内部可见。" />
+              placeholder="说明新增、删除或调整费用的原因，至少 3 个字符，仅内部可见。" />
           </label> : null}
           <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
             <label className="block w-full text-sm sm:w-56">
@@ -398,15 +389,40 @@ export default function AdminQuoteDetailPage() {
               : '请按与客户约定的报价有效期填写。'}</p>
           </div>
           <div className="grid gap-5 md:grid-cols-2">
-            <label className={`${styles.fieldGroup} ${styles.customerField}`}>
-              <span className="flex flex-wrap items-center gap-2 font-semibold">客户可见报价条款 <span className={styles.visibilityTag}>对客展示</span></span>
-              <span className="mt-1 block text-xs text-muted">明确包含服务、不包含服务、费用及有效条件。客户勾选的需求不代表已承诺提供。</span>
-              <textarea id="quote-customer-terms" className="mt-2 min-h-32 w-full rounded border border-border bg-surface p-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
+            <div className={`${styles.fieldGroup} ${styles.customerField}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label htmlFor="quote-customer-terms" className="flex flex-wrap items-center gap-2 font-semibold">客户可见报价条款 <span className={styles.visibilityTag}>对客展示</span></label>
+                {quote.status === 'DRAFT' ? <button type="button"
+                  className="rounded border border-primary/30 bg-surface px-3 py-2 text-xs font-semibold text-primary disabled:opacity-40"
+                  disabled={reviewSaving || acting || !suggestedTerms || review.customerTerms === suggestedTerms}
+                  onClick={() => {
+                    if (review.customerTerms.trim() && review.customerTerms !== generatedTerms.current) setConfirmReplaceTerms(true);
+                    else applyGeneratedTerms();
+                  }}>根据费用生成</button> : null}
+              </div>
+              <p id="quote-terms-help" className="mt-2 text-xs text-muted">自动整理费用项目、计费方式和有效期；特殊约定可在下方补充。不包含的服务和其他条件请核实后填写。</p>
+              {confirmReplaceTerms ? <div role="group" aria-label="确认替换报价条款" className="mt-3 rounded border border-warning/30 bg-surface p-3 text-sm">
+                <p>重新生成将替换现有条款，包括你补充的特殊约定。是否替换？</p>
+                <div className="mt-2 flex gap-4">
+                  <button type="button" className="font-semibold text-primary disabled:opacity-40" disabled={reviewSaving || acting || !suggestedTerms} onClick={applyGeneratedTerms}>替换为生成内容</button>
+                  <button type="button" className="text-muted" onClick={() => setConfirmReplaceTerms(false)}>保留原文</button>
+                </div>
+              </div> : null}
+              <textarea id="quote-customer-terms" aria-describedby="quote-terms-help" className="mt-2 min-h-32 w-full rounded border border-border bg-surface p-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
                 disabled={quote.status !== 'DRAFT' || reviewSaving || acting} maxLength={2000}
-                placeholder="包含服务与费用：…；不包含服务与费用：…；需另行确认的条件：…"
-                onChange={(event) => setReview((value) => ({ ...value, customerTerms: event.target.value }))}
+                placeholder="填写费用名称和有效期后，可根据费用生成，再补充特殊约定。"
+                onChange={(event) => {
+                  generatedTerms.current = null;
+                  setConfirmReplaceTerms(false);
+                  setReview((value) => ({ ...value, customerTerms: event.target.value }));
+                }}
                 value={review.customerTerms} />
-            </label>
+              {quote.status === 'DRAFT' ? <p className="mt-2 text-xs text-muted" aria-live="polite">{!suggestedTerms
+                ? '请先填写费用名称和报价有效期。'
+                : generatedTerms.current !== null && review.customerTerms === generatedTerms.current
+                  ? '已根据费用生成；未手动修改时，会随费用项目和有效期同步更新。'
+                  : '已保留手写条款；调整费用后，请核对条款或重新生成。'}</p> : null}
+            </div>
             <label className={`${styles.fieldGroup} ${styles.internalField}`}>
               <span className="flex flex-wrap items-center gap-2 font-semibold">内部备注 <span className={styles.visibilityTag}>仅内部</span></span>
               <span className="mt-1 block text-xs text-muted">仅内部员工可见，不展示给客户。</span>
@@ -772,23 +788,23 @@ function SourceFact({
 function PricingSummaryRow({
   summary,
 }: {
-  summary: { currency: string; cost: number; sell: number; profit: number };
+  summary: { currency: string; cost: number; sell: number; profit: number; missingCost: boolean };
 }) {
-  const margin = summary.sell > 0 ? `${((summary.profit / summary.sell) * 100).toFixed(2)}%` : '—';
+  const margin = summary.missingCost ? '待成本确认' : summary.sell > 0 ? `${((summary.profit / summary.sell) * 100).toFixed(2)}%` : '—';
   return (
     <div className="grid gap-4 px-4 py-4 lg:grid-cols-[120px_repeat(4,minmax(0,1fr))] lg:items-center">
       <div>
         <div className="text-xs text-muted">币种</div>
         <div className="mt-1 text-base font-bold text-primary">{summary.currency}</div>
       </div>
-      <Metric label="总成本" value={money(String(summary.cost), summary.currency)} />
+      <Metric label="总成本" value={summary.missingCost ? '待成本确认' : money(String(summary.cost), summary.currency)} />
       <Metric label="报价总额" value={money(String(summary.sell), summary.currency)} />
       <Metric
         label="预计毛利"
-        tone={summary.profit < 0 ? 'danger' : 'success'}
-        value={money(String(summary.profit), summary.currency)}
+        tone={summary.missingCost ? undefined : summary.profit < 0 ? 'danger' : 'success'}
+        value={summary.missingCost ? '待成本确认' : money(String(summary.profit), summary.currency)}
       />
-      <Metric label="毛利率" tone={summary.profit < 0 ? 'danger' : 'success'} value={margin} />
+      <Metric label="毛利率" tone={summary.missingCost ? undefined : summary.profit < 0 ? 'danger' : 'success'} value={margin} />
     </div>
   );
 }
@@ -817,13 +833,6 @@ function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(
     new Date(value),
   );
-}
-function chargeUnitLabel(item: Pick<Item, 'chargeBasis' | 'containerType'>) {
-  if (item.chargeBasis === 'PER_BL') return '/B/L';
-  if (item.chargeBasis === 'PER_SHIPMENT') return '/票';
-  return item.containerType
-    ? `/${item.containerType} ${containerTypeLabel(item.containerType)}`
-    : '/箱';
 }
 function portDisplayName(code: string) {
   const names: Record<string, string> = {
@@ -862,7 +871,7 @@ function summarizeContainers(items: Item[]) {
 function summarizePricing(items: Item[]) {
   const summaries = new Map<
     string,
-    { currency: string; cost: number; sell: number; profit: number }
+    { currency: string; cost: number; sell: number; profit: number; missingCost: boolean }
   >();
   for (const item of items) {
     const summary = summaries.get(item.currency) ?? {
@@ -870,10 +879,12 @@ function summarizePricing(items: Item[]) {
       cost: 0,
       sell: 0,
       profit: 0,
+      missingCost: false,
     };
     const quantity = Number(item.quantity);
     const cost = item.costAmount === null ? 0 : Number(item.costAmount) * quantity;
     const sell = Number(item.amount);
+    summary.missingCost ||= item.costAmount === null;
     summary.cost += cost;
     summary.sell += sell;
     summary.profit += sell - cost;
@@ -886,11 +897,4 @@ function errorMessage(error: unknown, fallback: string) {
   const fieldErrors = payload.details?.fieldErrors;
   const firstFieldError = fieldErrors ? Object.values(fieldErrors).flat()[0] : undefined;
   return firstFieldError ?? payload.message ?? fallback;
-}
-const head = 'px-4 py-3 font-semibold';
-const cell = 'px-4 py-3 align-middle';
-
-function normalizePrice(value: string) {
-  const [whole, fraction = ''] = value.trim().split('.');
-  return `${(whole ?? '').replace(/^0+(?=\d)/, '')}.${fraction.replace(/0+$/, '')}`;
 }
