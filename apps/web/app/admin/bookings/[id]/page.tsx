@@ -1,4 +1,5 @@
 'use client';
+import { quoteAmounts } from '@/lib/quote-amounts';
 import { AlertTriangle, CheckCircle2, Ship } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -56,6 +57,7 @@ interface Booking {
     etd: string | null;
     currency: string;
     totalAmount: string;
+    amountsByCurrency?: Record<string, string>;
     sourceRate: { polName: string; podName: string; serviceName: string | null } | null;
     items: Array<{ containerType: string | null; quantity: string }>;
   } | null;
@@ -613,7 +615,7 @@ export default function AdminBookingDetail() {
           <Fact label="箱型 / 箱量" value={quoteContainerSummary} />
           <Fact
             label="金额"
-            value={b.quote ? `${b.quote.currency} ${formatMoney(b.quote.totalAmount)}` : '—'}
+            value={b.quote ? quoteAmounts(b.quote) : '—'}
           />
         </dl>
       </section>
@@ -1449,12 +1451,7 @@ function soSourceTypeLabel(value: string) {
   return labels[value] ?? value;
 }
 
-function formatMoney(value: string) {
-  return Number(value).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+
 
 function formatPackage(booking: Booking) {
   if (!booking.packageType && !booking.packages) return '—';

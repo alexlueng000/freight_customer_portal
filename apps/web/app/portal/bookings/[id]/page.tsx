@@ -1,4 +1,5 @@
 'use client';
+import { quoteAmounts } from '@/lib/quote-amounts';
 import { AlertTriangle, CheckCircle2, Clock, FileCheck2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -62,7 +63,7 @@ interface Booking {
   containerRequests: Container[];
   cargoItems: BookingCargoItem[];
   shipments: Array<{ id: string; shipmentNo: string; status: string }>;
-  quote: { quoteNo: string; currency: string; totalAmount: string } | null;
+  quote: { quoteNo: string; currency: string; totalAmount: string; amountsByCurrency?: Record<string, string> } | null;
 }
 interface CustomerShipper {
   id: string;
@@ -642,11 +643,7 @@ export default function BookingDetailPage() {
         </div>
         {booking.quote ? (
           <p className="mt-3 text-sm text-muted">
-            报价摘要：{booking.quote.currency}{' '}
-            {Number(booking.quote.totalAmount).toLocaleString('zh-CN', {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            报价摘要：{quoteAmounts(booking.quote)}
           </p>
         ) : null}
       </section>

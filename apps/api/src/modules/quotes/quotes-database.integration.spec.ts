@@ -12,15 +12,21 @@ import { RequestContextService } from '../../shared/request-context/request-cont
 import { CustomerRatePricingService } from '../rates/customer-rate-pricing.service.js';
 import { QuotesService } from './quotes.service.js';
 import { QuoteStateMachine } from './quote-state-machine.js';
+import { NotificationEventsService } from '../notifications/notification-events.service.js';
+import type { NotificationQueueService } from '../notifications/notification-queue.service.js';
+import { RatesService } from '../rates/rates.service.js';
 
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
 const prisma = new PrismaService();
 const context = new RequestContextService();
+const enqueueMany = jest.fn().mockResolvedValue(undefined);
+const notificationEvents = new NotificationEventsService({ enqueueMany } as unknown as NotificationQueueService);
 const service = new QuotesService(
   prisma,
   context,
   new CustomerRatePricingService(),
   new QuoteStateMachine(),
+  notificationEvents,
 );
 const tenantIds: string[] = [];
 let tenantA: string,
@@ -170,6 +176,7 @@ describe('quote database integration', () => {
     });
   });
   afterAll(async () => {
+    await prisma.notification.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.auditLog.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.shipment.deleteMany({ where: { tenantId: { in: tenantIds } } });
     await prisma.booking.deleteMany({ where: { tenantId: { in: tenantIds } } });
@@ -347,6 +354,112 @@ describe('quote database integration', () => {
     expect(JSON.stringify(customerDetail)).not.toContain('internalNote');
     expect(JSON.stringify(customerDetail)).not.toContain('Matched competitor lane offer');
   });
+  it('persists an independent internal sailing plan through both saves, clearing and authorization checks', async () => {
+    const created = await runAs(tenantA, userA, customerA, () => service.create({
+      rateId: rateA, containerType: '40HQ', containerQuantity: 1, ...cargoRequest,
+    }));
+    const initial = await runInternal(() => service.getInternal(created.id));
+    expect(initial.plannedSailingDate).toBeNull();
+    const save = (plannedSailingDate?: string | null) => runInternal(() => service.updateReview(created.id, { plannedSailingDate }));
+    const updated = await save('2030-12-31');
+    expect(updated.plannedSailingDate?.toISOString()).toBe('2030-12-31T00:00:00.000Z');
+    expect(updated.etd).toEqual(initial.etd);
+    expect(updated.factoryLoadingDate).toEqual(initial.factoryLoadingDate);
+    expect(updated.validUntil).toEqual(initial.validUntil);
+    expect(updated.status).toBe('DRAFT');
+    expect((await save()).plannedSailingDate).toEqual(updated.plannedSailingDate);
+    const reviewAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { tenantId: tenantA, entityId: created.id, action: 'REVIEW_UPDATED' }, orderBy: { createdAt: 'asc' },
+    });
+    expect(reviewAudit.beforeData).toMatchObject({ plannedSailingDate: null });
+    expect(reviewAudit.afterData).toMatchObject({ plannedSailingDate: '2030-12-31' });
+    for (const date of ['2026-02-30', '', '2026-09-25T00:00:00Z']) {
+      await expect(save(date)).rejects.toMatchObject({ response: { code: 'QUOTE_REVIEW_INVALID' } });
+    }
+    await expect(context.run({ requestId: 'cross-tenant-plan', tenantId: tenantB, userId: userB, roles: [RoleCode.TENANT_ADMIN] },
+      () => service.updateReview(created.id, { plannedSailingDate: null }))).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
+    await expect(runAs(tenantA, userA, customerA, () => service.updateReview(created.id, { plannedSailingDate: null }))).rejects.toThrow();
+    expect((await save(null)).plannedSailingDate).toBeNull();
+    const item = initial.items.find((entry) => entry.chargeCode === 'OCEAN_FREIGHT')!;
+    const prices = { reason: '核实船期并保存报价', items: [{ itemId: item.id, unitPrice: item.unitPrice.toString() }] };
+    await runInternal(() => service.overridePrices(created.id, { ...prices, plannedSailingDate: '2024-02-29' }));
+    await runInternal(() => service.overridePrices(created.id, prices));
+    expect((await runInternal(() => service.getInternal(created.id))).plannedSailingDate?.toISOString()).toBe('2024-02-29T00:00:00.000Z');
+    await runInternal(() => service.overridePrices(created.id, { ...prices, plannedSailingDate: null }));
+    expect((await runInternal(() => service.getInternal(created.id))).plannedSailingDate).toBeNull();
+    const priceAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { tenantId: tenantA, entityId: created.id, action: 'PRICE_OVERRIDE' }, orderBy: { createdAt: 'desc' },
+    });
+    expect(priceAudit.beforeData).toMatchObject({ plannedSailingDate: '2024-02-29' });
+    expect(priceAudit.afterData).toMatchObject({ plannedSailingDate: null });
+    await save('2030-12-31');
+    await runInternal(() => service.send(created.id));
+    expect(await runAs(tenantA, userA, customerA, () => service.get(created.id))).not.toHaveProperty('plannedSailingDate');
+    await expect(save(null)).rejects.toMatchObject({ response: { code: 'QUOTE_REVIEW_UPDATE_NOT_ALLOWED' } });
+    await expect(runInternal(() => service.overridePrices(created.id, { ...prices, plannedSailingDate: null }))).rejects.toMatchObject({ response: { code: 'QUOTE_PRICE_OVERRIDE_NOT_ALLOWED' } });
+  });
+  it('requires review when enabled, freezes pending drafts, rejects and resubmits, then publishes with isolated notifications', async () => {
+    const created = await runAs(tenantA, userA, customerA, () => service.create({ rateId: rateA, containerType: '40HQ', containerQuantity: 1, ...cargoRequest }));
+    await prisma.quote.update({ where: { id: created.id }, data: { salesOwnerId: internalUser } });
+    const sales = <T>(fn: () => Promise<T>) => context.run({ requestId: 'sales-review', tenantId: tenantA, userId: internalUser, roles: [RoleCode.SALES] }, fn);
+    expect(await runInternal(() => service.approvalSettings())).toEqual({ quoteApprovalRequired: false });
+    await expect(sales(() => service.updateApprovalSettings(true))).rejects.toMatchObject({ response: { code: 'QUOTE_ADMIN_REQUIRED' } });
+    await runInternal(() => service.updateApprovalSettings(true));
+    await expect(sales(() => service.send(created.id))).rejects.toMatchObject({ response: { code: 'QUOTE_APPROVAL_REQUIRED' } });
+    await sales(() => service.submitApproval(created.id));
+    await expect(sales(() => service.updateReview(created.id, { internalNote: 'change' }))).rejects.toMatchObject({ response: { code: 'QUOTE_REVIEW_UPDATE_NOT_ALLOWED' } });
+    await expect(sales(() => service.approveAndSend(created.id))).rejects.toMatchObject({ response: { code: 'QUOTE_ADMIN_REQUIRED' } });
+    await expect(context.run({ requestId: 'other-tenant-review', tenantId: tenantB, userId: userB, roles: [RoleCode.TENANT_ADMIN] }, () => service.approveAndSend(created.id))).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
+    await expect(runInternal(() => service.updateApprovalSettings(false))).rejects.toMatchObject({ response: { code: 'QUOTE_REVIEWS_PENDING' } });
+    await runInternal(() => service.rejectApproval(created.id, '请核实成本')); 
+    await sales(() => service.updateReview(created.id, { internalNote: '采购已确认' }));
+    await sales(() => service.submitApproval(created.id));
+    await runInternal(() => service.approveAndSend(created.id));
+    expect(await runInternal(() => service.getInternal(created.id))).toMatchObject({ status: 'SENT', reviewStatus: 'APPROVED' });
+    const notifications = await prisma.notification.findMany({ where: { tenantId: tenantA, type: 'QUOTE_SENT', payload: { path: ['quoteId'], equals: created.id } } });
+    expect(notifications).toHaveLength(2);
+    expect(notifications.every((item) => item.recipientUserId === userA)).toBe(true);
+    expect(notifications.map((item) => item.channel).sort()).toEqual(['EMAIL', 'IN_APP']);
+    expect(enqueueMany).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ tenantId: tenantA })]));
+    await expect(runInternal(() => service.approveAndSend(created.id))).rejects.toThrow();
+    expect(await prisma.notification.count({ where: { tenantId: tenantA, type: 'QUOTE_SENT', payload: { path: ['quoteId'], equals: created.id } } })).toBe(2);
+    await runInternal(() => service.updateApprovalSettings(false));
+  });
+  it('saves separate currency totals and creates a reviewed draft rate without promoting customer sell prices', async () => {
+    const created = await runAs(tenantA, userA, customerA, () => service.create({ rateId: rateA, containerType: '40HQ', containerQuantity: 1, ...cargoRequest }));
+    const rates = new RatesService(prisma, context);
+    await expect(runInternal(() => rates.draftFromQuote(created.id))).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_ADJUSTED' } });
+    await runInternal(() => service.overridePrices(created.id, { reason: '增加目的港费用', customerTerms: '费用按各自币种收取。', items: [
+      { chargeName: '目的港操作', chargeBasis: 'PER_BL', quantity: '2', unitPrice: '40.25', costAmount: '30.1', currency: 'CNY' },
+      { chargeName: '待确认费用', chargeBasis: 'PER_SHIPMENT', quantity: '1', unitPrice: '5', currency: 'EUR' },
+    ] }));
+    const detail = await runInternal(() => service.getInternal(created.id));
+    expect(detail.amountsByCurrency).toMatchObject({ CNY: '80.5', EUR: '5', USD: created.totalAmount.toString() });
+    expect(detail.pricing.summaries.find((item) => item.currency === 'CNY')).toMatchObject({ cost: '60.2', sell: '80.5', profit: '20.3' });
+    expect(detail.pricing.summaries.find((item) => item.currency === 'EUR')).toMatchObject({ cost: null, profit: null, missingCost: true });
+    const draft = await runInternal(() => rates.draftFromQuote(created.id));
+    expect(draft.prices[0]).toMatchObject({ costAmount: detail.items.find((item) => item.chargeCode === 'OCEAN_FREIGHT')!.costAmount!.toString(), sellAmount: '' });
+    expect(draft.status).toBe('DRAFT');
+    expect(draft.charges.find((item) => item.currency === 'EUR')?.amount).toBe('');
+    await expect(context.run({ requestId: 'cross-tenant-rate-draft', tenantId: tenantB, userId: userB, roles: [RoleCode.TENANT_ADMIN] }, () => rates.draftFromQuote(created.id))).rejects.toMatchObject({ response: { code: 'QUOTE_NOT_FOUND' } });
+    const generated = await runInternal(() => rates.create({ ...draft, rateNo: `COPY-${runId}`, status: 'ACTIVE', etd: undefined, transitDays: undefined,
+      prices: draft.prices.map((item) => ({ ...item, sellAmount: undefined })), charges: draft.charges.map((item) => ({ ...item, amount: item.amount || '0', containerType: item.containerType || undefined })),
+    }, created.id));
+    expect(generated).toMatchObject({ status: 'DRAFT' });
+    expect(generated.prices[0]!.sellAmount).toBeNull();
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: created.id } })).sourceRateId).toBe(rateA);
+    expect(await prisma.auditLog.count({ where: { entityId: generated.id, action: 'RATE_CREATED_FROM_QUOTE', tenantId: tenantA } })).toBe(1);
+    await runInternal(() => service.send(created.id));
+    const customerDetail = await runAs(tenantA, userA, customerA, () => service.get(created.id));
+    expect(customerDetail.amountsByCurrency).toMatchObject({ CNY: '80.5', EUR: '5' });
+    expect(customerDetail).not.toHaveProperty('pricing');
+    const pdf = await runAs(tenantA, userA, customerA, () => service.getPdfJobData(created.id, false));
+    expect(pdf.quote.amountsByCurrency).toMatchObject({ CNY: '80.5', EUR: '5' });
+    expect(JSON.stringify(pdf)).not.toContain('costAmount');
+    const filtered = await runInternal(() => service.listInternal({ page: 1, pageSize: 1, statuses: ['SENT', 'VIEWED'] }));
+    expect(filtered.pagination.total).toBeGreaterThanOrEqual(1);
+    expect(filtered.items.every((item) => ['SENT', 'VIEWED'].includes(item.status))).toBe(true);
+  });
   it('allows an internal user to override draft prices with an audit trail', async () => {
     const internalDetail = await runInternal(() => service.getInternal(quoteId));
     expect(internalDetail.sourceRate).toMatchObject({
@@ -388,7 +501,7 @@ describe('quote database integration', () => {
       }),
     );
     expect(updated.totalAmount.toString()).toBe('2900');
-    expect(updated.version).toBe(2);
+    expect(updated.version).toBe(internalDetail.version + 1);
     expect((await runInternal(() => service.getInternal(quoteId))).customerTerms).toBe('增加提货服务，费用范围以本报价明细为准。');
     const stored = await prisma.quoteItem.findUniqueOrThrow({ where: { id: item.id } });
     expect(stored.originalUnitPrice?.toString()).toBe('1300');
@@ -427,7 +540,7 @@ describe('quote database integration', () => {
       { ...request, items: [{ itemId: 'another-quotes-item', unitPrice: '1' }] },
       { ...request, deletedItemIds: [ocean.id] },
       { ...request, items: [{ itemId: ocean.id, quantity: '3', unitPrice: ocean.unitPrice.toString() }] },
-      { ...request, items: [{ ...request.items[0]!, currency: created.currency === 'USD' ? 'CNY' : 'USD' }] },
+      { ...request, items: [{ ...request.items[0]!, currency: 'invalid' }] },
       { ...request, items: [{ ...request.items[0]!, quantity: '0' }] },
       { ...request, items: [{ ...request.items[0]!, quantity: '99999999999999', unitPrice: '99999999999999' }] },
     ]) {

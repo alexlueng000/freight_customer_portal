@@ -1,8 +1,9 @@
 'use client';
+import { quoteAmounts } from '@/lib/quote-amounts';
 import { ChevronLeft, ChevronRight, Eye, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
@@ -18,11 +19,14 @@ interface Quote {
   status: string;
   polCode: string;
   podCode: string;
+  polDisplayName?: string;
+  podDisplayName?: string;
   carrierCode: string | null;
   etd: string | null;
   validUntil: string;
   currency: string;
   totalAmount: string | null;
+  amountsByCurrency?: Record<string, string> | null;
   sentAt: string | null;
 }
 interface QuoteList {
@@ -34,43 +38,62 @@ export default function QuotesPage() {
   const canCreateBooking = hasPermission(user, 'booking.create');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const status = searchParams.get('status') ?? '';
+  const filterKey = searchParams.toString();
+  const [filters, setFilters] = useState(() =>
+    Object.fromEntries(filterFields.map(({ key }) => [key, searchParams.get(key) ?? ''])),
+  );
   const [page, setPage] = useState(1);
   const [data, setData] = useState<QuoteList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [actionError, setActionError] = useState('');
   const [creatingQuoteId, setCreatingQuoteId] = useState<string | null>(null);
-  const isPendingStatus = status === 'pending';
+  const requestId = useRef(0);
+  useEffect(() => {
+    const params = new URLSearchParams(filterKey);
+    setFilters(Object.fromEntries(filterFields.map(({ key }) => [key, params.get(key) ?? ''])));
+    setPage(1);
+  }, [filterKey]);
   const load = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch(`/api/v1/quotes?page=${page}&pageSize=20`);
+      const params = new URLSearchParams(filterKey);
+      if (params.get('status') === 'pending') {
+        params.delete('status');
+        params.set('statuses', 'SENT,VIEWED,ACCEPTED');
+      }
+      params.set('page', String(page));
+      params.set('pageSize', '20');
+      const response = await apiFetch(`/api/v1/quotes?${params}`);
       const payload: unknown = await response.json();
+      if (currentRequest !== requestId.current) return;
       if (!response.ok) throw payload;
       setData(payload as QuoteList);
     } catch (caught) {
+      if (currentRequest !== requestId.current) return;
       const value = caught as { message?: string; code?: string };
       setError({ message: value.message ?? '报价列表加载失败，请稍后重试。', code: value.code });
     } finally {
-      setLoading(false);
+      if (currentRequest === requestId.current) setLoading(false);
     }
-  }, [apiFetch, page]);
+  }, [apiFetch, page, filterKey]);
   useEffect(() => {
     void load();
   }, [load]);
-  const visibleItems = useMemo(
-    () =>
-      status && data?.items
-        ? data.items.filter((quote) =>
-            isPendingStatus
-              ? ['SENT', 'VIEWED', 'ACCEPTED'].includes(quote.status)
-              : quote.status === status,
-          )
-        : (data?.items ?? []),
-    [data?.items, isPendingStatus, status],
-  );
+  const visibleItems = data?.items ?? [];
+  const hasFilters = filterFields.some(({ key }) => searchParams.get(key));
+  const applyFilters = (reset = false) => {
+    const params = new URLSearchParams();
+    if (!reset)
+      for (const { key } of filterFields) {
+        if (filters[key]?.trim()) params.set(key, filters[key].trim());
+      }
+    setPage(1);
+    if (reset) setFilters(Object.fromEntries(filterFields.map(({ key }) => [key, ''])));
+    router.replace(`/portal/quotes${params.size ? `?${params}` : ''}`, { scroll: false });
+  };
   const pagination = data?.pagination;
   const createBooking = async (quote: Quote) => {
     setCreatingQuoteId(quote.id);
@@ -97,6 +120,67 @@ export default function QuotesPage() {
         title="我的报价"
         description="查看报价申请、销售确认进度及可决策的正式报价。"
       />
+      <form
+        className="flex flex-wrap items-end gap-3 rounded border border-border bg-surface p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          applyFilters();
+        }}
+      >
+        {filterFields.map(({ key, label, placeholder }) => (
+          <label className="min-w-36 flex-1 text-sm" key={key}>
+            <span id={`quote-filter-${key}-label`} className="mb-1.5 block font-medium">{label}</span>
+            {key === 'status' ? (
+              <select
+                aria-labelledby={`quote-filter-${key}-label`}
+                className={filterInput}
+                value={filters[key] ?? ''}
+                onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}
+              >
+                <option value="">全部状态</option>
+                <option value="pending">待我处理</option>
+                {[
+                  'DRAFT',
+                  'SENT',
+                  'VIEWED',
+                  'ACCEPTED',
+                  'BOOKED',
+                  'REJECTED',
+                  'EXPIRED',
+                  'CANCELLED',
+                ].map((value) => (
+                  <option key={value} value={value}>
+                    {customerQuoteStatusLabel(value)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className={filterInput}
+                maxLength={100}
+                placeholder={placeholder}
+                value={filters[key] ?? ''}
+                onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}
+              />
+            )}
+          </label>
+        ))}
+        <div className="flex gap-2">
+          <button
+            className="h-10 rounded bg-primary px-4 text-sm font-semibold text-surface hover:bg-primary/90"
+            type="submit"
+          >
+            查询
+          </button>
+          <button
+            className="h-10 rounded border border-border px-4 text-sm hover:bg-sidebar"
+            type="button"
+            onClick={() => applyFilters(true)}
+          >
+            重置
+          </button>
+        </div>
+      </form>
       {actionError ? (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           {actionError}
@@ -114,10 +198,10 @@ export default function QuotesPage() {
         ) : !visibleItems.length ? (
           <div className="p-4">
             <EmptyState
-              title={isPendingStatus || status === 'SENT' ? '当前没有待处理报价' : '还没有报价'}
+              title={hasFilters ? '没有符合条件的报价' : '还没有报价'}
               description={
-                isPendingStatus || status === 'SENT'
-                  ? '待确认或待创建订舱的正式报价会出现在这里。'
+                hasFilters
+                  ? '请调整筛选条件，或点击重置查看全部报价。'
                   : '请先前往运价查询，选择方案提交报价申请。'
               }
             />
@@ -135,7 +219,7 @@ export default function QuotesPage() {
                           {quote.quoteNo}
                         </Link>
                         <div className="mt-1 text-sm text-foreground">
-                          {quote.polCode} → {quote.podCode}
+                          <QuoteRoute quote={quote} />
                         </div>
                       </div>
                       <StatusBadge tone={quoteStatusTone(quote.status)}>
@@ -155,7 +239,7 @@ export default function QuotesPage() {
                         <dd className="mt-0.5 font-semibold text-primary">
                           {quote.sentAt === null || quote.totalAmount === null
                             ? '销售审核中'
-                            : money(quote.totalAmount, quote.currency)}
+                            : quoteAmounts(quote)}
                         </dd>
                       </div>
                       <div>
@@ -224,7 +308,7 @@ export default function QuotesPage() {
                           <span className="font-semibold text-primary">{quote.quoteNo}</span>
                         </td>
                         <td className={cell}>
-                          {quote.polCode} → {quote.podCode}
+                          <QuoteRoute quote={quote} />
                         </td>
                         <td className={cell}>
                           {quote.carrierCode ?? '—'}
@@ -235,7 +319,7 @@ export default function QuotesPage() {
                         <td className={`${cell} font-semibold`}>
                           {quote.sentAt === null || quote.totalAmount === null
                             ? '销售审核中'
-                            : money(quote.totalAmount, quote.currency)}
+                            : quoteAmounts(quote)}
                         </td>
                         <td className={cell}>{quote.validUntil.slice(0, 10)}</td>
                         <td className={cell}>
@@ -310,6 +394,28 @@ export default function QuotesPage() {
 const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
 const button = 'grid size-9 place-items-center rounded border border-border disabled:opacity-40';
-function money(value: string, currency: string) {
-  return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
+const filterInput =
+  'h-10 w-full rounded border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20';
+const filterFields = [
+  { key: 'quoteNo', label: '报价编号', placeholder: '输入报价编号' },
+  { key: 'status', label: '状态', placeholder: '' },
+  { key: 'pol', label: '起运港', placeholder: '中文 / 英文 / 代码' },
+  { key: 'pod', label: '目的港', placeholder: '中文 / 英文 / 代码' },
+  { key: 'carrierCode', label: '船司', placeholder: '如 COSCO' },
+];
+function QuoteRoute({ quote }: { quote: Quote }) {
+  const pol = quote.polDisplayName || quote.polCode;
+  const pod = quote.podDisplayName || quote.podCode;
+  return (
+    <>
+      <div className="font-medium">
+        {pol} → {pod}
+      </div>
+      {pol !== quote.polCode || pod !== quote.podCode ? (
+        <div className="mt-1 text-xs text-muted">
+          {quote.polCode} → {quote.podCode}
+        </div>
+      ) : null}
+    </>
+  );
 }

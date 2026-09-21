@@ -177,7 +177,8 @@ export class DashboardService {
     context: { tenantId: string; userId: string; roles: RoleCode[] },
     roleView: AdminRoleView,
   ) {
-    const quoteWhere = this.internalQuoteWhere(context, roleView.code);
+    const quoteWhere: Prisma.QuoteWhereInput = {
+      AND: [this.internalQuoteWhere(context, roleView.code), { OR: [{ status: { notIn: [QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.VIEWED] } }, { validUntil: { gte: todayUtcDate() } }] }] };
     const bookingWhere = this.internalBookingWhere(context, roleView.code);
     const shipmentWhere = this.internalShipmentWhere(context, roleView.code);
     const [
@@ -200,19 +201,21 @@ export class DashboardService {
       this.prisma.quote.findMany({
         where: {
           ...quoteWhere,
-          status: { in: [QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.VIEWED] },
+          status: { in: [QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.VIEWED, QuoteStatus.ACCEPTED] },
         },
         select: {
           id: true,
           quoteNo: true,
           status: true,
+          reviewStatus: true,
+          amountsByCurrency: true,
           polCode: true,
           podCode: true,
           totalAmount: true,
           currency: true,
           customer: { select: { name: true } },
         },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ status: 'asc' }, { updatedAt: 'asc' }],
         take: 8,
       }),
       this.prisma.booking.findMany({
@@ -264,7 +267,7 @@ export class DashboardService {
         {
           label: '客户可确认报价',
           value: sentQuotes,
-          href: '/admin/quotes?status=SENT',
+          href: '/admin/quotes?statuses=SENT,VIEWED',
           tone: 'info',
           description: '已发送或已查看，等待客户决定',
         },
@@ -291,8 +294,8 @@ export class DashboardService {
           status: quote.status,
           route: `${quote.polCode} → ${quote.podCode}`,
           href: `/admin/quotes/${quote.id}`,
-          actionLabel: salesQuoteAction(quote.status),
-          meta: `${quote.currency} ${quote.totalAmount.toString()}`,
+          actionLabel: quote.reviewStatus === 'PENDING' ? '查看审核进度' : salesQuoteAction(quote.status),
+          meta: quoteAmountLabel(quote),
         })),
         ...bookings.map((booking) => ({
           id: booking.id,
@@ -411,6 +414,8 @@ export class DashboardService {
       unreadCount,
       ownerlessCustomers,
       inactiveUsers,
+      pendingQuotes,
+      pendingReviewCount,
       notifications,
     ] = await Promise.all([
       this.prisma.customerCompany.groupBy({
@@ -424,7 +429,7 @@ export class DashboardService {
         _count: { _all: true },
       }),
       this.prisma.rate.count({ where: { tenantId: context.tenantId, status: RateStatus.ACTIVE } }),
-      this.prisma.quote.count({ where: { tenantId: context.tenantId, status: QuoteStatus.DRAFT } }),
+      this.prisma.quote.count({ where: { tenantId: context.tenantId, status: QuoteStatus.DRAFT, validUntil: { gte: todayUtcDate() } } }),
       this.prisma.booking.count({
         where: { tenantId: context.tenantId, status: BookingStatus.SUBMITTED },
       }),
@@ -444,6 +449,10 @@ export class DashboardService {
         orderBy: { updatedAt: 'desc' },
         take: 5,
       }),
+      this.prisma.quote.findMany({ where: { tenantId: context.tenantId, status: QuoteStatus.DRAFT, reviewStatus: 'PENDING', validUntil: { gte: todayUtcDate() } },
+        select: { id: true, quoteNo: true, status: true, reviewStatus: true, polCode: true, podCode: true, customer: { select: { name: true } } },
+        orderBy: { updatedAt: 'asc' }, take: 8 }),
+      this.prisma.quote.count({ where: { tenantId: context.tenantId, status: QuoteStatus.DRAFT, reviewStatus: 'PENDING', validUntil: { gte: todayUtcDate() } } }),
       this.notifications(context.tenantId, context.userId, 6),
     ]);
     const activeCustomers = countStatus(customers, CustomerStatus.ACTIVE);
@@ -484,14 +493,16 @@ export class DashboardService {
           description: '可用于客户查价和报价',
         },
         {
-          label: '全局待处理',
-          value: quotes + bookings + invoices,
-          href: '/admin',
+          label: '待审核报价',
+          value: pendingReviewCount,
+          href: '/admin/quotes?status=DRAFT&reviewStatus=PENDING',
           tone: 'warning',
-          description: '报价、订舱和账单待办合计',
+          description: '销售已提交，等待管理员审核发布',
         },
       ],
       tasks: [
+        ...pendingQuotes.map((quote) => ({ id: quote.id, type: 'QUOTE', title: `${quote.quoteNo} · ${quote.customer.name}`, status: quote.status,
+          route: `${quote.polCode} → ${quote.podCode}`, href: `/admin/quotes/${quote.id}`, actionLabel: quote.reviewStatus === 'PENDING' ? '审核并发布' : '查看报价' })),
         ...ownerlessCustomers.map((customer) => ({
           id: customer.id,
           type: 'CUSTOMER',
@@ -585,6 +596,7 @@ export class DashboardService {
           carrierCode: true,
           validUntil: true,
           totalAmount: true,
+          amountsByCurrency: true,
           currency: true,
         },
         orderBy: [{ validUntil: 'asc' }, { updatedAt: 'desc' }],
@@ -651,7 +663,7 @@ export class DashboardService {
               ? `${quote.quoteNo} 已接受，待创建订舱`
               : `${quote.quoteNo} 待确认`,
           status: quote.status,
-          description: `${quote.polCode} → ${quote.podCode} · ${quote.carrierCode ?? '船司待确认'} · ${quote.currency} ${quote.totalAmount.toString()} · 有效期至 ${quote.validUntil.toISOString().slice(0, 10)}`,
+          description: `${quote.polCode} → ${quote.podCode} · ${quote.carrierCode ?? '船司待确认'} · ${quoteAmountLabel(quote)} · 有效期至 ${quote.validUntil.toISOString().slice(0, 10)}`,
           href: `/portal/quotes/${quote.id}`,
           actionLabel: quote.status === QuoteStatus.ACCEPTED ? '创建订舱' : '确认报价',
         })),
@@ -830,6 +842,11 @@ function resolveAdminRoleView(roles: RoleCode[]): AdminRoleView {
   };
 }
 
+function quoteAmountLabel(quote: { currency: string; totalAmount: { toString(): string }; amountsByCurrency: Prisma.JsonValue }) {
+  const values = quote.amountsByCurrency && typeof quote.amountsByCurrency === 'object' && !Array.isArray(quote.amountsByCurrency) ? Object.entries(quote.amountsByCurrency) : [];
+  const amounts = values.filter((entry): entry is [string, string] => typeof entry[1] === 'string');
+  return amounts.length ? amounts.map(([currency, amount]) => `${currency} ${amount}`).join(' + ') : `${quote.currency} ${quote.totalAmount.toString()}`;
+}
 function salesQuoteAction(status: QuoteStatus) {
   if (status === QuoteStatus.DRAFT) return '审核并发送';
   if (status === QuoteStatus.SENT || status === QuoteStatus.VIEWED) return '跟进客户';

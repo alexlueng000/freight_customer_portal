@@ -14,6 +14,12 @@ import { ConfirmRateImportDto } from './dto/confirm-rate-import.dto.js';
 @ApiTags('rates') @ApiBearerAuth() @Controller({ path: 'rates', version: '1' })
 export class RatesController {
   constructor(private readonly rates: RatesService, private readonly imports: RateImportsService) {}
+  @Get('from-quote/:quoteId') @RequirePermissions('rate.manage', 'quote.manage')
+  @ApiOkResponse({ description: 'Prefill a new draft from an edited quote; customer sell prices are omitted, missing costs require confirmation' })
+  quoteDraft(@Param('quoteId') quoteId: string) { return this.rates.draftFromQuote(quoteId); }
+  @Post('from-quote/:quoteId') @RequirePermissions('rate.manage', 'quote.manage')
+  @ApiCreatedResponse({ description: 'Create a separate draft rate after confirmation; preserve original quote and source rate; audit provenance' })
+  createFromQuote(@Param('quoteId') quoteId: string, @Body() dto: CreateRateDto) { return this.rates.create(dto, quoteId); }
   @Get('port-mappings')
   @RequirePermissions('rate.read')
   @ApiOkResponse({ description: 'Read-only global built-in port directory; search and import aliases are shown separately. Contains no tenant business data.' })

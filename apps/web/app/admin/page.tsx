@@ -205,7 +205,7 @@ export default function AdminPage() {
               <div className="border-b border-border px-4 py-3">
                 <h2 className="text-sm font-semibold">本角色待办</h2>
                 <p className="mt-1 text-xs text-muted">
-                  仅显示当前账号权限范围内最需要处理的业务。
+                  仅显示当前账号权限范围内优先处理的业务，报价最多展示 8 条；点击上方统计可查看全部对应报价。
                 </p>
               </div>
               <DataTable

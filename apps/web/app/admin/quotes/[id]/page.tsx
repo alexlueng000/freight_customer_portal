@@ -1,4 +1,5 @@
 'use client';
+import { quoteAmounts } from '@/lib/quote-amounts';
 import Link from 'next/link';
 import styles from './quote-review.module.css';
 import { QuoteFeeEditor } from '@/components/quote-fee-editor';
@@ -33,15 +34,21 @@ interface ApiErrorPayload {
   details?: { fieldErrors?: Record<string, string[]> };
 }
 interface Quote {
+  reviewStatus: 'NONE' | 'PENDING' | 'REJECTED' | 'APPROVED';
+  approvalRequired: boolean;
+  approvalNote: string | null;
+  pricing?: { lines: Array<{ id: string; costTotal: string | null; profit: string | null; margin: string | null }>; summaries: Array<{ currency: string; cost: string | null; sell: string; profit: string | null; margin: string | null; missingCost: boolean }> };
   quoteNo: string;
   status: string;
   polCode: string;
   podCode: string;
   carrierCode: string | null;
   etd: string | null;
+  plannedSailingDate: string | null;
   validUntil: string;
   currency: string;
   totalAmount: string;
+  amountsByCurrency?: Record<string, string>;
   containerQuantity: number | null;
   factoryLoadingDate: string | null;
   incoterm: string | null;
@@ -63,7 +70,7 @@ interface Quote {
   priceOverrideReason: string | null;
   sentAt: string | null;
   sentBy: { id: string; displayName: string; email: string } | null;
-  customer: { name: string };
+  customer: { id: string; name: string };
   sourceRate: {
     id: string;
     rateNo: string;
@@ -83,7 +90,9 @@ interface Quote {
 }
 export default function AdminQuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
+  const administrator = user?.roles.some((role) => role === 'TENANT_ADMIN' || role === 'SUPER_ADMIN');
+  const [rejectionReason, setRejectionReason] = useState('');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -96,6 +105,7 @@ export default function AdminQuoteDetailPage() {
   const [reviewSaving, setReviewSaving] = useState(false);
   const [notice, setNotice] = useState<{ title: string; description: string } | null>(null);
   const [review, setReview] = useState({
+    plannedSailingDate: '',
     validUntil: '',
     customerTerms: '',
     internalNote: '',
@@ -112,11 +122,12 @@ export default function AdminQuoteDetailPage() {
       setDraftItems(nextQuote.items.map((item) => ({ ...item })));
       setReason('');
       setConfirmReplaceTerms(false);
-      const suggestedTerms = nextQuote.status === 'DRAFT'
+      const suggestedTerms = nextQuote.status === 'DRAFT' && nextQuote.reviewStatus !== 'PENDING'
         ? generateQuoteCustomerTerms(nextQuote.items, nextQuote.validUntil.slice(0, 10)) : null;
       const customerTerms = nextQuote.customerTerms?.trim() ? nextQuote.customerTerms : suggestedTerms ?? '';
       generatedTerms.current = customerTerms === suggestedTerms ? suggestedTerms : null;
       setReview({
+        plannedSailingDate: nextQuote.plannedSailingDate?.slice(0, 10) ?? '',
         validUntil: nextQuote.validUntil.slice(0, 10),
         customerTerms,
         internalNote: nextQuote.internalNote ?? '',
@@ -137,24 +148,25 @@ export default function AdminQuoteDetailPage() {
   }, [notice]);
   const suggestedTerms = generateQuoteCustomerTerms(draftItems, review.validUntil);
   useEffect(() => {
-    if (quote?.status !== 'DRAFT' || generatedTerms.current === null || review.customerTerms !== generatedTerms.current || !suggestedTerms) return;
+    if (quote?.status !== 'DRAFT' || quote.reviewStatus === 'PENDING' || generatedTerms.current === null || review.customerTerms !== generatedTerms.current || !suggestedTerms) return;
     if (review.customerTerms !== suggestedTerms) {
       generatedTerms.current = suggestedTerms;
       setReview((value) => ({ ...value, customerTerms: suggestedTerms }));
     }
-  }, [suggestedTerms, review.customerTerms, quote?.status]);
+  }, [suggestedTerms, review.customerTerms, quote?.status, quote?.reviewStatus]);
   const applyGeneratedTerms = () => {
     if (!suggestedTerms) return;
     generatedTerms.current = suggestedTerms;
     setReview((value) => ({ ...value, customerTerms: suggestedTerms }));
     setConfirmReplaceTerms(false);
   };
-  const act = async (action: 'send' | 'cancel') => {
+  const act = async (action: 'send' | 'cancel' | 'submit-review' | 'approve-and-send' | 'reject-review') => {
     setActing(true);
     setError('');
     try {
       const response = await apiFetch(`/api/v1/admin/quotes/${encodeURIComponent(id)}/${action}`, {
         method: 'POST',
+        ...(action === 'reject-review' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: rejectionReason }) } : {}),
       });
       const payload: unknown = await response.json();
       if (!response.ok) throw payload;
@@ -187,6 +199,7 @@ export default function AdminQuoteDetailPage() {
   };
   const pricesChanged = Boolean(quote && JSON.stringify(draftItems) !== JSON.stringify(quote.items));
   const reviewChanged = Boolean(quote && (review.validUntil !== quote.validUntil.slice(0, 10)
+    || review.plannedSailingDate !== (quote.plannedSailingDate?.slice(0, 10) ?? '')
     || review.customerTerms !== (quote.customerTerms ?? '') || review.internalNote !== (quote.internalNote ?? '')));
   const hasUnsavedChanges = pricesChanged || reviewChanged;
   const saveQuote = async () => {
@@ -215,7 +228,7 @@ export default function AdminQuoteDetailPage() {
     try {
       const response = await apiFetch('/api/v1/admin/quotes/' + encodeURIComponent(id) + (pricesChanged ? '/prices' : '/review'), {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...review, ...(pricesChanged ? {
+        body: JSON.stringify({ ...review, plannedSailingDate: review.plannedSailingDate || null, ...(pricesChanged ? {
           reason: reason.trim(),
           deletedItemIds: quote.items.filter((item) => !draftItems.some((draft) => draft.id === item.id)).map((item) => item.id),
           items: draftItems.map((item) => ({
@@ -236,7 +249,7 @@ export default function AdminQuoteDetailPage() {
   };
   const confirmSend = async () => {
     if (hasUnsavedChanges || reviewSaving) { setConfirmingSend(false); setError('请先保存报价，再发布正式报价。'); return; }
-    const sent = await act('send');
+    const sent = await act(quote?.reviewStatus === 'PENDING' ? 'approve-and-send' : 'send');
     if (!sent) return;
     setConfirmingSend(false);
     setNotice({
@@ -251,7 +264,8 @@ export default function AdminQuoteDetailPage() {
   const showSentBanner = Boolean(
     quote.sentAt && ['SENT', 'VIEWED', 'ACCEPTED', 'BOOKED'].includes(quote.status),
   );
-  const pricingSummary = summarizePricing(quote.items);
+  const pricingSummary = quote.pricing?.summaries ?? [];
+  const canEdit = quote.status === 'DRAFT' && quote.reviewStatus !== 'PENDING';
   const containerSummary = summarizeContainers(quote.items);
   const businessFlow = resolveQuoteBusinessFlow(
     quote,
@@ -296,27 +310,34 @@ export default function AdminQuoteDetailPage() {
                 作废
               </button>
             ) : null}
-            {quote.status === 'DRAFT' ? (
+            {quote.status === 'DRAFT' && (!quote.approvalRequired || quote.reviewStatus === 'PENDING' && administrator) ? (
               <button
                 className="h-9 rounded bg-primary px-4 text-sm font-semibold text-surface disabled:opacity-40"
                 disabled={acting || reviewSaving}
                 onClick={() => { if (hasUnsavedChanges) { setError('请先保存报价，再发布正式报价。'); document.getElementById('quote-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; } setConfirmingSend(true); }}
                 type="button"
               >
-                发布正式报价
+                {quote.reviewStatus === 'PENDING' ? '审核通过并发布' : '发布正式报价'}
               </button>
             ) : null}
           </div>
         }
       />
       <BusinessFlow {...businessFlow} />
+      {quote.approvalRequired && quote.status === 'DRAFT' ? <section className="space-y-3 rounded border border-border bg-surface p-4" aria-label="管理员审核">
+        <h2 className="font-semibold">{quote.reviewStatus === 'PENDING' ? '待管理员审核' : quote.reviewStatus === 'REJECTED' ? '审核已驳回' : '需要管理员审核'}</h2>
+        <p className="text-sm text-muted">{quote.reviewStatus === 'PENDING' ? '审核中，报价内容已锁定；管理员审核通过后直接发布给客户。' : '请保存报价后提交，管理员审核通过后发布给客户。'}</p>
+        {quote.approvalNote ? <p className="whitespace-pre-wrap text-sm">驳回原因：{quote.approvalNote}</p> : null}
+        {canEdit ? <button type="button" className="rounded bg-primary px-4 py-2 text-sm font-semibold text-surface disabled:opacity-40" disabled={hasUnsavedChanges || acting || reviewSaving} onClick={() => void act('submit-review')}>提交管理员审核</button> : null}
+        {quote.reviewStatus === 'PENDING' && administrator ? <div className="space-y-2"><label className="block text-sm">驳回原因<textarea className="mt-2 w-full rounded border border-border p-2" maxLength={2000} value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} /></label><button type="button" className="rounded border border-danger/30 px-4 py-2 text-sm text-danger disabled:opacity-40" disabled={acting || rejectionReason.trim().length < 3} onClick={() => void act('reject-review')}>驳回修改</button></div> : null}
+      </section> : null}
       <section className="grid gap-4 rounded border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Fact label="状态">
           <StatusBadge tone={quoteStatusTone(quote.status)}>
             {quoteStatusLabel(quote.status)}
           </StatusBadge>
         </Fact>
-        <Fact label="客户" value={quote.customer.name} />
+        <Fact label="客户"><Link className="text-primary underline underline-offset-4 hover:opacity-80" href={`/admin/customers/${encodeURIComponent(quote.customer.id)}`}>{quote.customer.name}</Link></Fact>
         <Fact
           label="船司 / 航线服务"
           value={
@@ -325,7 +346,7 @@ export default function AdminQuoteDetailPage() {
         />
         <Fact label="预计开船时间" value={quote.etd?.slice(0, 10) ?? '待确认'} />
         <Fact label="箱型 × 箱量" value={containerSummary} />
-        <Fact label="来源运价" value={quote.sourceRate?.rateNo ?? '—'} />
+        <Fact label="来源运价">{quote.sourceRate ? <Link className="text-primary underline underline-offset-4 hover:opacity-80" href={`/admin/rates?search=${encodeURIComponent(quote.sourceRate.rateNo)}`}>{quote.sourceRate.rateNo}</Link> : '—'}</Fact>
       </section>
       <RouteSummary podCode={quote.podCode} polCode={quote.polCode} quoteItems={quote.items} />
       <QuoteRequestSummary quote={quote} />
@@ -364,8 +385,8 @@ export default function AdminQuoteDetailPage() {
         </div>
         <QuoteFeeEditor
           items={draftItems} savedItems={quote.items} currency={quote.currency}
-          totalAmount={quote.totalAmount} changed={pricesChanged}
-          editable={quote.status === 'DRAFT'} disabled={reviewSaving || acting}
+          totalAmount={quote.totalAmount} amountsByCurrency={quote.amountsByCurrency} changed={pricesChanged}
+          editable={canEdit} disabled={reviewSaving || acting}
           onChange={setDraftItems}
         />
         <div className="space-y-5 p-5">
@@ -379,20 +400,29 @@ export default function AdminQuoteDetailPage() {
             <label className="block w-full text-sm sm:w-56">
               <span className="font-medium">报价有效期至</span>
               <input className="mt-2 h-10 w-full rounded border border-border bg-surface px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
-                disabled={quote.status !== 'DRAFT' || reviewSaving || acting}
+                disabled={!canEdit || reviewSaving || acting}
                 max={quote.sourceRate?.expiryDate.slice(0, 10)}
                 onChange={(event) => setReview((value) => ({ ...value, validUntil: event.target.value }))}
                 type="date" value={review.validUntil} />
             </label>
-            <p className="pb-2 text-xs text-muted">{quote.sourceRate
-              ? '不能晚于来源运价到期日：' + quote.sourceRate.expiryDate.slice(0, 10)
+            <label className="block w-full text-sm sm:w-56">
+              <span className="font-medium">拟参加船期（选填）</span>
+              <input className="mt-2 h-10 w-full rounded border border-border bg-surface px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
+                aria-describedby="planned-sailing-date-help"
+                disabled={!canEdit || reviewSaving || acting}
+                onChange={(event) => setReview((value) => ({ ...value, plannedSailingDate: event.target.value }))}
+                type="date" value={review.plannedSailingDate} />
+            </label>
+            <p className="w-full text-xs text-muted">{quote.sourceRate
+              ? '报价有效期不能晚于来源运价到期日：' + quote.sourceRate.expiryDate.slice(0, 10)
               : '请按与客户约定的报价有效期填写。'}</p>
+            <p id="planned-sailing-date-help" className="w-full text-xs text-muted">拟参加船期仅供内部计划使用，不代表已确认订舱。</p>
           </div>
           <div className="grid gap-5 md:grid-cols-2">
             <div className={`${styles.fieldGroup} ${styles.customerField}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label htmlFor="quote-customer-terms" className="flex flex-wrap items-center gap-2 font-semibold">客户可见报价条款 <span className={styles.visibilityTag}>对客展示</span></label>
-                {quote.status === 'DRAFT' ? <button type="button"
+                {canEdit ? <button type="button"
                   className="rounded border border-primary/30 bg-surface px-3 py-2 text-xs font-semibold text-primary disabled:opacity-40"
                   disabled={reviewSaving || acting || !suggestedTerms || review.customerTerms === suggestedTerms}
                   onClick={() => {
@@ -409,7 +439,7 @@ export default function AdminQuoteDetailPage() {
                 </div>
               </div> : null}
               <textarea id="quote-customer-terms" aria-describedby="quote-terms-help" className="mt-2 min-h-32 w-full rounded border border-border bg-surface p-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
-                disabled={quote.status !== 'DRAFT' || reviewSaving || acting} maxLength={2000}
+                disabled={!canEdit || reviewSaving || acting} maxLength={2000}
                 placeholder="填写费用名称和有效期后，可根据费用生成，再补充特殊约定。"
                 onChange={(event) => {
                   generatedTerms.current = null;
@@ -427,7 +457,7 @@ export default function AdminQuoteDetailPage() {
               <span className="flex flex-wrap items-center gap-2 font-semibold">内部备注 <span className={styles.visibilityTag}>仅内部</span></span>
               <span className="mt-1 block text-xs text-muted">仅内部员工可见，不展示给客户。</span>
               <textarea className="mt-2 min-h-32 w-full rounded border border-border bg-surface p-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-sidebar/50"
-                disabled={quote.status !== 'DRAFT' || reviewSaving || acting} maxLength={2000}
+                disabled={!canEdit || reviewSaving || acting} maxLength={2000}
                 placeholder="例如：待核实的采购成本、供应商沟通结果。"
                 onChange={(event) => setReview((value) => ({ ...value, internalNote: event.target.value }))}
                 value={review.internalNote} />
@@ -450,7 +480,7 @@ export default function AdminQuoteDetailPage() {
         <div className="border-t border-border p-5">
           {quote.sourceRate ? (
             <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-              <SourceFact label="来源运价编号" value={quote.sourceRate.rateNo} />
+              <SourceFact label="来源运价编号" value={<Link className="text-primary underline underline-offset-4 hover:opacity-80" href={`/admin/rates?search=${encodeURIComponent(quote.sourceRate.rateNo)}`}>{quote.sourceRate.rateNo}</Link>} />
               <SourceFact label="供应商" value={quote.sourceRate.supplierName || '未填写'} />
               <SourceFact label="合约编号" value={quote.sourceRate.contractNo || '未填写'} />
               <SourceFact label="航线服务" value={quote.sourceRate.serviceName || '未填写'} />
@@ -459,6 +489,7 @@ export default function AdminQuoteDetailPage() {
             </div>
           ) : <p className="text-sm text-muted">这份报价未关联来源运价。</p>}
           <p className="mt-4 text-xs text-muted">用于追溯当前关联的运价。报价成本快照及利润请查看下方费用信息。</p>
+          {quote.priceOverrideReason && user?.permissions.includes('rate.manage') ? <div className="mt-4"><Link className="inline-flex rounded border border-primary/30 px-4 py-2 text-sm font-semibold text-primary" href={`/admin/rates?fromQuote=${encodeURIComponent(id)}`}>生成新运价</Link><p className="mt-2 text-xs text-muted">按已保存费用预填，核对后创建独立草稿；客户专属售价不自动复制，当前报价仍关联原运价。</p></div> : null}
           <div className="mt-4 border-t border-border pt-4 text-sm">
             {quote.sentAt
               ? '最近发送：' + new Date(quote.sentAt).toLocaleString('zh-CN') + ' · ' + (quote.sentBy?.displayName || '未记录发送人')
@@ -477,6 +508,11 @@ export default function AdminQuoteDetailPage() {
             <PricingSummaryRow summary={summary} key={summary.currency} />
           ))}
         </div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-sidebar text-xs text-muted"><tr>{['费用名称', '币种', '计费单位 / 数量', '成本小计', '对客金额', '毛利', '毛利率'].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{quote.items.map((item) => {
+          const line = quote.pricing?.lines.find((entry) => entry.id === item.id);
+          const basis = item.chargeBasis === 'PER_BL' ? '提单' : item.chargeBasis === 'PER_SHIPMENT' ? '票' : item.containerType ?? '箱';
+          return <tr key={item.id} className="border-t border-border"><td className="px-4 py-3">{item.chargeName}{item.chargeCode === 'MANUAL_CHARGE' ? <span className="ml-2 text-xs text-muted">新增费用</span> : null}</td><td className="px-4 py-3">{item.currency}</td><td className="px-4 py-3">{item.quantity} × {basis}</td><td className="px-4 py-3">{line?.costTotal == null ? '待成本确认' : money(line.costTotal, item.currency)}</td><td className="px-4 py-3">{money(item.amount, item.currency)}</td><td className="px-4 py-3">{line?.profit == null ? '待成本确认' : money(line.profit, item.currency)}</td><td className="px-4 py-3">{line?.margin == null ? '—' : `${line.margin}%`}</td></tr>;
+        })}</tbody></table></div>
       </section>
       <section aria-label="最近一次改价原因" className={`${styles.sourcePanel} p-5`}>
         <div className="flex flex-wrap items-center gap-2">
@@ -513,7 +549,7 @@ export default function AdminQuoteDetailPage() {
               />
               <Fact label="箱量" value={containerSummary} />
               <Fact label="有效期至" value={review.validUntil || quote.validUntil.slice(0, 10)} />
-              <Fact label="报价总额" value={money(quote.totalAmount, quote.currency)} />
+              <Fact label="报价总额" value={quoteAmounts(quote)} />
             </div>
             <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
               <button
@@ -773,7 +809,7 @@ function SourceFact({
   emphasis = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   emphasis?: boolean;
 }) {
   return (
@@ -788,9 +824,9 @@ function SourceFact({
 function PricingSummaryRow({
   summary,
 }: {
-  summary: { currency: string; cost: number; sell: number; profit: number; missingCost: boolean };
+  summary: { currency: string; cost: string | null; sell: string; profit: string | null; margin: string | null; missingCost: boolean };
 }) {
-  const margin = summary.missingCost ? '待成本确认' : summary.sell > 0 ? `${((summary.profit / summary.sell) * 100).toFixed(2)}%` : '—';
+  const margin = summary.missingCost ? '待成本确认' : summary.margin === null ? '—' : `${summary.margin}%`;
   return (
     <div className="grid gap-4 px-4 py-4 lg:grid-cols-[120px_repeat(4,minmax(0,1fr))] lg:items-center">
       <div>
@@ -801,10 +837,10 @@ function PricingSummaryRow({
       <Metric label="报价总额" value={money(String(summary.sell), summary.currency)} />
       <Metric
         label="预计毛利"
-        tone={summary.missingCost ? undefined : summary.profit < 0 ? 'danger' : 'success'}
+        tone={summary.missingCost ? undefined : summary.profit?.startsWith('-') ? 'danger' : 'success'}
         value={summary.missingCost ? '待成本确认' : money(String(summary.profit), summary.currency)}
       />
-      <Metric label="毛利率" tone={summary.missingCost ? undefined : summary.profit < 0 ? 'danger' : 'success'} value={margin} />
+      <Metric label="毛利率" tone={summary.missingCost ? undefined : summary.profit?.startsWith('-') ? 'danger' : 'success'} value={margin} />
     </div>
   );
 }
@@ -867,30 +903,6 @@ function summarizeContainers(items: Item[]) {
   return containers
     .map((item) => `${Number(item.quantity).toFixed(0)} × ${item.containerType}`)
     .join(' / ');
-}
-function summarizePricing(items: Item[]) {
-  const summaries = new Map<
-    string,
-    { currency: string; cost: number; sell: number; profit: number; missingCost: boolean }
-  >();
-  for (const item of items) {
-    const summary = summaries.get(item.currency) ?? {
-      currency: item.currency,
-      cost: 0,
-      sell: 0,
-      profit: 0,
-      missingCost: false,
-    };
-    const quantity = Number(item.quantity);
-    const cost = item.costAmount === null ? 0 : Number(item.costAmount) * quantity;
-    const sell = Number(item.amount);
-    summary.missingCost ||= item.costAmount === null;
-    summary.cost += cost;
-    summary.sell += sell;
-    summary.profit += sell - cost;
-    summaries.set(item.currency, summary);
-  }
-  return [...summaries.values()];
 }
 function errorMessage(error: unknown, fallback: string) {
   const payload = error as ApiErrorPayload;

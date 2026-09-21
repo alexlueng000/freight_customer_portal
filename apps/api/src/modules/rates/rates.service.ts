@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { ChargeBasis, Prisma } from '@prisma/client';
+import { ChargeBasis, Prisma, RoleCode } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RequestContextService } from '../../shared/request-context/request-context.service.js';
 import type { CreateRateDto } from './dto/create-rate.dto.js';
@@ -58,13 +58,44 @@ export class RatesService {
     return rate;
   }
 
-  async create(dto: CreateRateDto) {
+  private async quoteForRate(id: string, db: Prisma.TransactionClient = this.prisma) {
+    const context = this.requireInternalUser();
+    const salesScoped = context.roles.includes(RoleCode.SALES) && !context.roles.some((role) => role === RoleCode.TENANT_ADMIN || role === RoleCode.SUPER_ADMIN);
+    const quote = await db.quote.findFirst({ where: { id, tenantId: context.tenantId,
+      ...(salesScoped ? { OR: [{ salesOwnerId: context.userId }, { salesOwnerId: null, customer: { salesOwnerId: context.userId } }] } : {}),
+    }, include: { items: { orderBy: { sortOrder: 'asc' } }, sourceRate: { include: { prices: true } } } });
+    if (!quote) throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: '找不到对应报价。' });
+    if (!quote.priceOverriddenAt) throw this.fieldError('QUOTE_NOT_ADJUSTED', '请先保存报价费用调整，再生成新运价。', {});
+    return quote;
+  }
+  async draftFromQuote(id: string) {
+    const quote = await this.quoteForRate(id);
+    const source = quote.sourceRate;
+    return { rateNo: '', polCode: quote.polCode, polName: source?.polName ?? quote.polCode,
+      podCode: quote.podCode, podName: source?.podName ?? quote.podCode, carrierCode: quote.carrierCode ?? '',
+      serviceName: source?.serviceName ?? '', effectiveDate: source?.effectiveDate.toISOString().slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      expiryDate: quote.validUntil.toISOString().slice(0, 10), etd: source?.etd?.toISOString().slice(0, 10) ?? '',
+      transitDays: source?.transitDays == null ? '' : String(source.transitDays), supplierName: source?.supplierName ?? '', contractNo: source?.contractNo ?? '',
+      currency: quote.currency, status: 'DRAFT',
+      prices: quote.items.filter((item) => item.chargeCode === 'OCEAN_FREIGHT' && item.containerType).map((item) => ({
+        containerType: item.containerType!, costAmount: item.costAmount?.toString() ?? '', sellAmount: '', currency: item.currency,
+        remark: source?.prices.find((price) => price.containerType === item.containerType)?.remark ?? '',
+      })),
+      charges: quote.items.filter((item) => item.chargeCode !== 'OCEAN_FREIGHT').map((item, index) => ({
+        chargeCode: `QUOTE_CHARGE_${index + 1}`, chargeName: item.chargeName, chargeBasis: item.chargeBasis ?? 'PER_SHIPMENT',
+        containerType: item.containerType ?? '', amount: item.costAmount?.toString() ?? '', currency: item.currency, isIncluded: false,
+      })),
+    };
+  }
+  async create(dto: CreateRateDto, sourceQuoteId?: string) {
     const context = this.requireInternalUser();
     this.validate(dto);
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const rate = await tx.rate.create({ data: this.createData(dto, context.tenantId, context.userId), select: rateSelect });
+        const quote = sourceQuoteId ? await this.quoteForRate(sourceQuoteId, tx) : null;
+        const rate = await tx.rate.create({ data: this.createData(quote ? { ...dto, status: 'DRAFT' } : dto, context.tenantId, context.userId), select: rateSelect });
         await tx.auditLog.create({ data: { tenantId: context.tenantId, actorUserId: context.userId, entityType: 'Rate', entityId: rate.id, action: 'RATE_CREATED', afterData: this.auditData(rate) } });
+        if (quote) await tx.auditLog.create({ data: { tenantId: context.tenantId, actorUserId: context.userId, entityType: 'Rate', entityId: rate.id, action: 'RATE_CREATED_FROM_QUOTE', afterData: { sourceQuoteId: quote.id, sourceQuoteNo: quote.quoteNo, sourceQuoteVersion: quote.version, sourceRateId: quote.sourceRateId, newRateId: rate.id, status: 'DRAFT' } } });
         return rate;
       });
     } catch (error) { this.rethrowConflict(error); }

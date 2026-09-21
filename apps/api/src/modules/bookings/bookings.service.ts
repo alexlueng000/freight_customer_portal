@@ -97,6 +97,7 @@ const bookingSelect = {
       etd: true,
       currency: true,
       totalAmount: true,
+      amountsByCurrency: true,
       sourceRate: {
         select: {
           polName: true,

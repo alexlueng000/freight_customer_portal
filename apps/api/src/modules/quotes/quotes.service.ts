@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { CustomerStatus, Prisma, QuoteStatus, RateStatus, RoleCode } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -14,6 +15,11 @@ import type { OverrideQuotePricesDto } from './dto/override-quote-prices.dto.js'
 import type { RejectQuoteDto } from './dto/reject-quote.dto.js';
 import type { UpdateQuoteReviewDto } from './dto/update-quote-review.dto.js';
 import { QuoteStateMachine } from './quote-state-machine.js';
+import { quotePricing } from './quote-pricing.js';
+import { portDisplayName } from '../rates/port-search.js';
+import { customerQuoteFilters } from './quote-list-filters.js';
+import { NotificationEventsService } from '../notifications/notification-events.service.js';
+import type { EmailNotificationJobData } from '../notifications/notification-queue.service.js';
 
 const publicQuoteSelect = {
   id: true,
@@ -27,6 +33,7 @@ const publicQuoteSelect = {
   currency: true,
   subtotal: true,
   totalAmount: true,
+  amountsByCurrency: true,
   containerQuantity: true,
   factoryLoadingDate: true,
   incoterm: true,
@@ -57,6 +64,7 @@ export class QuotesService {
     private readonly requestContext: RequestContextService,
     private readonly pricing: CustomerRatePricingService,
     private readonly stateMachine: QuoteStateMachine,
+    @Optional() private readonly notificationEvents?: NotificationEventsService,
   ) {}
 
   async create(dto: CreateQuoteDto) {
@@ -171,6 +179,7 @@ export class QuotesService {
           currency: price.currency,
           subtotal: totalAmount,
           totalAmount,
+          amountsByCurrency: { [price.currency]: totalAmount.toString() },
           containerQuantity: dto.containerQuantity,
           factoryLoadingDate: dto.factoryLoadingDate ? new Date(`${dto.factoryLoadingDate}T00:00:00.000Z`) : null,
           incoterm: dto.incoterm ?? null,
@@ -268,19 +277,27 @@ export class QuotesService {
 
   async list(query: ListQuotesDto) {
     const context = this.requireCustomerContext();
-    const where = { tenantId: context.tenantId, customerCompanyId: context.customerCompanyId };
+    const where: Prisma.QuoteWhereInput = {
+      ...customerQuoteFilters(query, this.today()),
+      tenantId: context.tenantId,
+      customerCompanyId: context.customerCompanyId,
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.quote.findMany({
         where,
-        select: publicQuoteSelect,
-        orderBy: { createdAt: 'desc' },
+        select: { ...publicQuoteSelect, sourceRate: { select: { polName: true, podName: true } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
       }),
       this.prisma.quote.count({ where }),
     ]);
     return {
-      items: items.map((item) => this.toCustomerQuoteSummary(this.withEffectiveStatus(item))),
+      items: items.map(({ sourceRate, ...item }) => ({
+        ...this.toCustomerQuoteSummary(this.withEffectiveStatus(item)),
+        polDisplayName: portDisplayName(item.polCode, sourceRate?.polName ?? item.polCode),
+        podDisplayName: portDisplayName(item.podCode, sourceRate?.podName ?? item.podCode),
+      })),
       pagination: {
         page: query.page,
         pageSize: query.pageSize,
@@ -350,6 +367,7 @@ export class QuotesService {
         ...effectiveQuote,
         subtotal: null,
         totalAmount: null,
+        amountsByCurrency: null,
         customerTerms: null,
         items: [],
         requestContainerType,
@@ -368,7 +386,10 @@ export class QuotesService {
 
   async listInternal(query: ListQuotesDto) {
     const context = this.requireInternalContext();
-    const where = this.internalWhere(context);
+    const statuses = query.statuses ?? (query.status ? [query.status] : []);
+    const where: Prisma.QuoteWhereInput = { ...this.internalWhere(context), ...(query.reviewStatus ? { reviewStatus: query.reviewStatus } : {}), ...(statuses.length ? { AND: [{ OR: statuses.map((status) => status === QuoteStatus.EXPIRED
+      ? { OR: [{ status }, { status: { in: [...expirableStatuses] }, validUntil: { lt: this.today() } }] }
+      : { status, ...(expirableStatuses.includes(status) ? { validUntil: { gte: this.today() } } : {}) }) }] } : {}) };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.quote.findMany({
         where,
@@ -399,6 +420,12 @@ export class QuotesService {
         ...publicQuoteSelect,
         customer: { select: { id: true, name: true } },
         internalNote: true,
+        plannedSailingDate: true,
+        reviewStatus: true,
+        reviewSubmittedAt: true,
+        reviewedAt: true,
+        approvalNote: true,
+        tenant: { select: { quoteApprovalRequired: true } },
         priceOverrideReason: true,
         sentBy: { select: { id: true, displayName: true, email: true } },
         sourceRate: {
@@ -457,7 +484,8 @@ export class QuotesService {
     });
     if (!quote)
       throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
-    return this.withEffectiveStatus(quote);
+    const { tenant, ...detail } = quote;
+    return { ...this.withEffectiveStatus(detail), approvalRequired: tenant.quoteApprovalRequired, pricing: quotePricing(quote.items) };
   }
 
   async getPdfJobData(id: string, internal: boolean) {
@@ -482,6 +510,7 @@ export class QuotesService {
         validUntil: true,
         currency: true,
         totalAmount: true,
+        amountsByCurrency: true,
         version: true,
         customerTerms: true,
         customer: { select: { name: true } },
@@ -522,6 +551,7 @@ export class QuotesService {
         validUntil: quote.validUntil.toISOString(),
         currency: quote.currency,
         totalAmount: quote.totalAmount.toString(),
+        amountsByCurrency: quote.amountsByCurrency as Record<string, string>,
         customerTerms: quote.customerTerms,
         version: quote.version,
         customerName: quote.customer.name,
@@ -539,6 +569,60 @@ export class QuotesService {
     await this.assertSendable(id);
     return this.transition(id, QuoteStatus.SENT, { internal: true });
   }
+  async approvalSettings() {
+    const context = this.requireInternalContext();
+    return this.prisma.tenant.findUniqueOrThrow({ where: { id: context.tenantId }, select: { quoteApprovalRequired: true } });
+  }
+  private requireAdministrator() {
+    const context = this.requireInternalContext();
+    if (!context.roles.some((role) => role === RoleCode.TENANT_ADMIN || role === RoleCode.SUPER_ADMIN))
+      throw new ForbiddenException({ code: 'QUOTE_ADMIN_REQUIRED', message: '只有租户管理员可以审核或设置报价发布规则。' });
+    return context;
+  }
+  async updateApprovalSettings(quoteApprovalRequired: boolean) {
+    const context = this.requireAdministrator();
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${context.tenantId} FOR UPDATE`;
+      const before = await tx.tenant.findUniqueOrThrow({ where: { id: context.tenantId }, select: { quoteApprovalRequired: true } });
+      if (!quoteApprovalRequired && await tx.quote.count({ where: { tenantId: context.tenantId, status: 'DRAFT', reviewStatus: 'PENDING' } }))
+        throw this.fieldError('QUOTE_REVIEWS_PENDING', '请先处理待审核报价，再关闭审核。', { quoteApprovalRequired: ['仍有报价待管理员审核。'] });
+      const after = await tx.tenant.update({ where: { id: context.tenantId }, data: { quoteApprovalRequired }, select: { quoteApprovalRequired: true } });
+      await tx.auditLog.create({ data: { tenantId: context.tenantId, actorUserId: context.userId, entityType: 'Tenant', entityId: context.tenantId, action: 'QUOTE_APPROVAL_SETTINGS_UPDATED', beforeData: before, afterData: after } });
+      return after;
+    });
+  }
+  async submitApproval(id: string) {
+    const context = this.requireInternalContext();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${context.tenantId} FOR SHARE`;
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: context.tenantId } });
+      if (!tenant.quoteApprovalRequired) throw this.fieldError('QUOTE_APPROVAL_DISABLED', '当前租户未启用管理员审核。', {});
+      await this.assertSendable(id, tx);
+      const quote = await tx.quote.findFirst({ where: { id, ...this.internalWhere(context) } });
+      if (!quote) throw new NotFoundException({ code: 'QUOTE_NOT_FOUND' });
+      if (quote.reviewStatus === 'PENDING') throw this.fieldError('QUOTE_ALREADY_SUBMITTED', '报价已提交审核。', {});
+      const updated = await tx.quote.updateMany({ where: { id, tenantId: context.tenantId, status: 'DRAFT', version: quote.version }, data: { reviewStatus: 'PENDING', reviewSubmittedAt: new Date(), reviewedAt: null, approvalNote: null, version: { increment: 1 }, updatedById: context.userId } });
+      if (updated.count !== 1) throw this.fieldError('QUOTE_STATE_CONFLICT', '报价已变化，请刷新后重试。', {});
+      await tx.auditLog.create({ data: { tenantId: context.tenantId, actorUserId: context.userId, entityType: 'Quote', entityId: id, action: 'REVIEW_SUBMITTED', beforeData: { reviewStatus: quote.reviewStatus }, afterData: { reviewStatus: 'PENDING', version: quote.version + 1 } } });
+    });
+    return this.getInternal(id);
+  }
+  async rejectApproval(id: string, reason: string) {
+    const context = this.requireAdministrator();
+    if (!reason?.trim() || reason.trim().length < 3 || reason.length > 2000) throw this.fieldError('QUOTE_REJECTION_REASON_REQUIRED', '请填写至少 3 个字符的驳回原因。', {});
+    await this.prisma.$transaction(async (tx) => {
+      const quote = await tx.quote.findFirst({ where: { id, tenantId: context.tenantId } });
+      if (!quote) throw new NotFoundException({ code: 'QUOTE_NOT_FOUND' });
+      const changed = await tx.quote.updateMany({ where: { id, tenantId: context.tenantId, status: 'DRAFT', reviewStatus: 'PENDING', version: quote.version }, data: { reviewStatus: 'REJECTED', reviewedAt: new Date(), approvalNote: reason.trim(), version: { increment: 1 }, updatedById: context.userId } });
+      if (changed.count !== 1) throw this.fieldError('QUOTE_REVIEW_NOT_PENDING', '只有待管理员审核的草稿可以驳回。', {});
+      await tx.auditLog.create({ data: { tenantId: context.tenantId, actorUserId: context.userId, entityType: 'Quote', entityId: id, action: 'REVIEW_REJECTED', beforeData: { reviewStatus: quote.reviewStatus }, afterData: { reviewStatus: 'REJECTED', reason: reason.trim() } } });
+    });
+    return this.getInternal(id);
+  }
+  async approveAndSend(id: string) {
+    this.requireAdministrator();
+    return this.transition(id, QuoteStatus.SENT, { internal: true, approval: true });
+  }
   async expire(id: string) {
     this.requireInternalContext();
     return this.transition(id, QuoteStatus.EXPIRED, { internal: true, idempotent: true });
@@ -550,6 +634,7 @@ export class QuotesService {
 
   async updateReview(id: string, dto: UpdateQuoteReviewDto) {
     const context = this.requireInternalContext();
+    const plannedSailingDate = this.parsePlannedSailingDate(dto.plannedSailingDate);
     const validUntil = dto.validUntil ? this.businessDate(dto.validUntil) : undefined;
     if (dto.validUntil && !validUntil)
       throw this.fieldError('QUOTE_REVIEW_INVALID', '报价审核信息不完整。', {
@@ -565,12 +650,15 @@ export class QuotesService {
           validUntil: true,
           customerTerms: true,
           internalNote: true,
+          plannedSailingDate: true,
+          reviewStatus: true,
+          version: true,
           sourceRate: { select: { expiryDate: true } },
         },
       });
       if (!quote)
         throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
-      if (quote.status !== QuoteStatus.DRAFT)
+      if (quote.status !== QuoteStatus.DRAFT || quote.reviewStatus === 'PENDING')
         throw this.fieldError(
           'QUOTE_REVIEW_UPDATE_NOT_ALLOWED',
           '只有待销售确认的报价可以修改审核信息。',
@@ -583,8 +671,9 @@ export class QuotesService {
           { validUntil: ['该报价有效期不能超过来源运价有效期。'] },
         );
 
-      const data: Prisma.QuoteUpdateInput = {
+      const data: Prisma.QuoteUpdateManyMutationInput = {
         updatedById: context.userId,
+        ...(plannedSailingDate === undefined ? {} : { plannedSailingDate }),
         ...(validUntil ? { validUntil } : {}),
         ...(dto.customerTerms === undefined
           ? {}
@@ -593,7 +682,8 @@ export class QuotesService {
           ? {}
           : { internalNote: dto.internalNote.trim() || null }),
       };
-      await tx.quote.update({ where: { id }, data });
+      const saved = await tx.quote.updateMany({ where: { id, ...this.internalWhere(context), status: 'DRAFT', version: quote.version, reviewStatus: { not: 'PENDING' } }, data: { ...data, version: { increment: 1 } } });
+      if (saved.count !== 1) throw this.fieldError('QUOTE_STATE_CONFLICT', '报价已变化，请刷新后重试。', {});
       await tx.auditLog.create({
         data: {
           tenantId: context.tenantId,
@@ -602,11 +692,13 @@ export class QuotesService {
           entityId: id,
           action: 'REVIEW_UPDATED',
           beforeData: {
+            plannedSailingDate: quote.plannedSailingDate?.toISOString().slice(0, 10) ?? null,
             validUntil: quote.validUntil.toISOString().slice(0, 10),
             customerTerms: quote.customerTerms,
             internalNote: quote.internalNote,
           },
           afterData: {
+            plannedSailingDate: (plannedSailingDate === undefined ? quote.plannedSailingDate : plannedSailingDate)?.toISOString().slice(0, 10) ?? null,
             validUntil: validUntil?.toISOString().slice(0, 10),
             customerTerms: dto.customerTerms,
             internalNote: dto.internalNote,
@@ -619,6 +711,7 @@ export class QuotesService {
 
   async overridePrices(id: string, dto: OverrideQuotePricesDto) {
     const context = this.requireInternalContext();
+    const plannedSailingDate = this.parsePlannedSailingDate(dto.plannedSailingDate);
     const validUntil = dto.validUntil ? this.businessDate(dto.validUntil) : undefined;
     if (dto.validUntil && !validUntil)
       throw this.fieldError('QUOTE_REVIEW_INVALID', '报价有效期不正确。', { validUntil: ['请填写有效日期。'] });
@@ -629,7 +722,7 @@ export class QuotesService {
       });
       if (!quote)
         throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
-      if (!draftQuoteStatuses.includes(quote.status as (typeof draftQuoteStatuses)[number]))
+      if (!draftQuoteStatuses.includes(quote.status as (typeof draftQuoteStatuses)[number]) || quote.reviewStatus === 'PENDING')
         throw this.fieldError(
           'QUOTE_PRICE_OVERRIDE_NOT_ALLOWED',
           '只有待销售确认的报价可以调整价格。',
@@ -666,7 +759,8 @@ export class QuotesService {
         if (chargeBasis === 'PER_CONTAINER' && (!containerType || !quote.items.some((item) => item.chargeCode === 'OCEAN_FREIGHT' && item.containerType === containerType)))
           throw invalidItems('按箱计费必须选择本报价运输需求中的箱型。');
         const currency = input.currency ?? old?.currency ?? quote.currency;
-        if (currency !== quote.currency) throw invalidItems('新增或编辑费用必须使用当前报价币种，不支持混合币种报价。');
+        if (!/^[A-Z]{3}$/.test(currency)) throw invalidItems('费用币种必须为三位大写代码。');
+        if (old?.chargeCode === 'OCEAN_FREIGHT' && currency !== old.currency) throw invalidItems('基础海运费币种沿用来源报价。');
         const quantity = decimal(input.quantity ?? old?.quantity.toString() ?? '1', true);
         if (old?.chargeCode === 'OCEAN_FREIGHT' &&
             (!quantity.eq(old.quantity) || containerType !== old.containerType || chargeBasis !== (old.chargeBasis ?? 'PER_CONTAINER')))
@@ -701,18 +795,22 @@ export class QuotesService {
         else await tx.quoteItem.create({ data: { ...edit.data, tenantId: context.tenantId, quoteId: id } });
       }
       const savedItems = await tx.quoteItem.findMany({ where: { tenantId: context.tenantId, quoteId: id }, orderBy: { sortOrder: 'asc' } });
-      if (savedItems.some((item) => item.currency !== quote.currency)) throw invalidItems('当前报价包含不同币种，请先核实费用币种。');
       if (!savedItems.length || savedItems.length > 100) throw invalidItems('报价必须包含 1 至 100 条费用。');
-      const total = savedItems.reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0));
-      if (total.gte('100000000000000')) throw invalidItems('报价总额超出允许范围。');
+      const totals = new Map<string, Prisma.Decimal>();
+      for (const item of savedItems) totals.set(item.currency, (totals.get(item.currency) ?? new Prisma.Decimal(0)).plus(item.amount));
+      if ([...totals.values()].some((amount) => amount.gte('100000000000000'))) throw invalidItems('报价总额超出允许范围。');
+      const amountsByCurrency = Object.fromEntries([...totals].map(([currency, amount]) => [currency, amount.toString()]));
+      const total = totals.get(quote.currency) ?? new Prisma.Decimal(0);
       const updated = await tx.quote.update({
         where: { id },
         data: {
           subtotal: total,
           totalAmount: total,
+          amountsByCurrency,
           priceOverriddenAt: new Date(),
           priceOverriddenById: context.userId,
           priceOverrideReason: dto.reason.trim(),
+          ...(plannedSailingDate === undefined ? {} : { plannedSailingDate }),
           ...(validUntil ? { validUntil } : {}),
           ...(dto.internalNote === undefined ? {} : { internalNote: dto.internalNote.trim() || null }),
           ...(dto.customerTerms === undefined ? {} : { customerTerms: dto.customerTerms.trim() }),
@@ -727,9 +825,11 @@ export class QuotesService {
           entityType: 'Quote',
           entityId: id,
           action: 'PRICE_OVERRIDE',
-          beforeData: { totalAmount: quote.totalAmount.toString(), items: beforeItems, customerTerms: quote.customerTerms, validUntil: quote.validUntil.toISOString().slice(0, 10), internalNote: quote.internalNote },
+          beforeData: { totalAmount: quote.totalAmount.toString(), items: beforeItems, customerTerms: quote.customerTerms, validUntil: quote.validUntil.toISOString().slice(0, 10), internalNote: quote.internalNote, plannedSailingDate: quote.plannedSailingDate?.toISOString().slice(0, 10) ?? null },
           afterData: {
+            plannedSailingDate: (plannedSailingDate === undefined ? quote.plannedSailingDate : plannedSailingDate)?.toISOString().slice(0, 10) ?? null,
             totalAmount: total.toString(),
+            amountsByCurrency,
             reason: dto.reason.trim(),
             validUntil: (validUntil ?? quote.validUntil).toISOString().slice(0, 10),
             internalNote: dto.internalNote === undefined ? quote.internalNote : dto.internalNote.trim() || null,
@@ -766,21 +866,34 @@ export class QuotesService {
       internal?: boolean;
       idempotent?: boolean;
       auditData?: Prisma.InputJsonObject;
+      approval?: boolean;
     },
   ) {
     const context = this.requestContext.requireAuthenticated();
-    return this.prisma.$transaction(async (tx) => {
+    const emailJobs: EmailNotificationJobData[] = [];
+    const result = await this.prisma.$transaction(async (tx) => {
       const where = options.internal
         ? { id, ...this.internalWhere(context) }
         : { id, tenantId: context.tenantId, customerCompanyId: options.customerCompanyId };
       const quote = await tx.quote.findFirst({
         where,
-        select: { id: true, status: true, quoteNo: true, validUntil: true },
+        select: { id: true, status: true, quoteNo: true, validUntil: true, version: true, customerCompanyId: true, reviewStatus: true },
       });
       if (!quote)
         throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
       if (quote.status === target && options.idempotent)
         return tx.quote.findUniqueOrThrow({ where: { id }, select: publicQuoteSelect });
+      if (target === QuoteStatus.SENT) {
+        await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id = ${context.tenantId} FOR SHARE`;
+        const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: context.tenantId } });
+        if (options.approval) {
+          this.requireAdministrator();
+          if (quote.reviewStatus !== 'PENDING') throw this.fieldError('QUOTE_REVIEW_NOT_PENDING', '请先提交管理员审核。', {});
+        } else if (tenant.quoteApprovalRequired || quote.reviewStatus === 'PENDING') {
+          throw this.fieldError('QUOTE_APPROVAL_REQUIRED', '请先提交管理员审核，由管理员审核并发布。', {});
+        }
+        await this.assertSendable(id, tx);
+      }
       if (!this.stateMachine.canTransition(quote.status, target))
         throw new BadRequestException({
           code: 'ILLEGAL_QUOTE_TRANSITION',
@@ -788,9 +901,10 @@ export class QuotesService {
           details: { from: quote.status, to: target },
         });
       const updated = await tx.quote.updateMany({
-        where: { id, tenantId: context.tenantId, status: quote.status },
+        where: { id, tenantId: context.tenantId, status: quote.status, version: quote.version },
         data: {
           status: target,
+          ...(options.approval ? { reviewStatus: 'APPROVED' as const, reviewedAt: new Date() } : {}),
           updatedById: context.userId,
           ...(target === QuoteStatus.SENT ? { sentAt: new Date(), sentById: context.userId } : {}),
           ...(target === QuoteStatus.ACCEPTED ? { acceptedAt: new Date() } : {}),
@@ -816,11 +930,17 @@ export class QuotesService {
           entityId: id,
           action: `STATUS_${target}`,
           beforeData: { status: quote.status },
-          afterData: { status: target, ...(options.auditData ?? {}) },
+          afterData: { status: target, ...(options.approval ? { reviewStatus: 'APPROVED', approvedVersion: quote.version } : {}), ...(options.auditData ?? {}) },
         },
       });
+      if (target === QuoteStatus.SENT && this.notificationEvents) emailJobs.push(...await this.notificationEvents.createCustomerNotifications(tx, {
+        tenantId: context.tenantId, customerCompanyId: quote.customerCompanyId, type: 'QUOTE_SENT',
+        payload: { title: `正式报价 ${quote.quoteNo} 已发布`, description: '请查看报价详情并确认。', href: `/portal/quotes/${id}`, quoteId: id },
+      }));
       return tx.quote.findUniqueOrThrow({ where: { id }, select: publicQuoteSelect });
     });
+    await this.notificationEvents?.enqueueEmailNotifications(emailJobs);
+    return result;
   }
 
   private async expireIfDue(id: string, tenantId: string, customerCompanyId: string) {
@@ -857,13 +977,13 @@ export class QuotesService {
     },
   >(quote: T) {
     return !quote.sentAt
-      ? { ...quote, subtotal: null, totalAmount: null, customerTerms: null }
+      ? { ...quote, subtotal: null, totalAmount: null, amountsByCurrency: null, customerTerms: null }
       : quote;
   }
 
-  private async assertSendable(id: string) {
+  private async assertSendable(id: string, db: Prisma.TransactionClient = this.prisma) {
     const context = this.requireInternalContext();
-    const quote = await this.prisma.quote.findFirst({
+    const quote = await db.quote.findFirst({
       where: { id, ...this.internalWhere(context) },
       select: {
         status: true,
@@ -912,7 +1032,7 @@ export class QuotesService {
     userId: string;
     roles: RoleCode[];
   }): Prisma.QuoteWhereInput {
-    if (context.roles.includes(RoleCode.SALES)) {
+    if (context.roles.includes(RoleCode.SALES) && !context.roles.some((role) => role === RoleCode.TENANT_ADMIN || role === RoleCode.SUPER_ADMIN)) {
       return {
         tenantId: context.tenantId,
         OR: [
@@ -944,6 +1064,16 @@ export class QuotesService {
     fieldErrors: Record<string, string[]>,
   ): BadRequestException {
     return new BadRequestException({ code, message, details: { fieldErrors } });
+  }
+  private parsePlannedSailingDate(value: string | null | undefined) {
+    if (value === undefined || value === null) return value;
+    const date = typeof value === 'string' && /^(?!0000)\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T00:00:00.000Z`) : null;
+    if (!date || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value)
+      throw this.fieldError('QUOTE_REVIEW_INVALID', '拟参加船期不正确。', {
+        plannedSailingDate: ['请选择有效的拟参加船期。'],
+      });
+    return date;
   }
   private businessDate(value: string) {
     const date = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);

@@ -1,8 +1,9 @@
 'use client';
+import { quoteAmounts } from '@/lib/quote-amounts';
 import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState, PermissionDeniedState } from '@/components/error-state';
@@ -20,6 +21,7 @@ interface Quote {
   validUntil: string;
   currency: string;
   totalAmount: string;
+  amountsByCurrency?: Record<string, string>;
   customer: { name: string };
 }
 interface QuoteList {
@@ -30,6 +32,8 @@ export default function AdminQuotesPage() {
   const { apiFetch } = useAuth();
   const searchParams = useSearchParams();
   const status = searchParams.get('status') ?? '';
+  const statuses = searchParams.get('statuses') ?? '';
+  const reviewStatus = searchParams.get('reviewStatus') ?? '';
   const [page, setPage] = useState(1);
   const [data, setData] = useState<QuoteList | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,20 +42,22 @@ export default function AdminQuotesPage() {
     setLoading(true);
     setError(null);
     try {
-      setData(await request<QuoteList>(apiFetch, `/api/v1/admin/quotes?page=${page}&pageSize=20`));
+      const query = new URLSearchParams({ page: String(page), pageSize: '20' });
+      if (status) query.set('status', status);
+      if (statuses) query.set('statuses', statuses);
+      if (reviewStatus) query.set('reviewStatus', reviewStatus);
+      setData(await request<QuoteList>(apiFetch, `/api/v1/admin/quotes?${query}`));
     } catch (caught) {
       setError(normalize(caught));
     } finally {
       setLoading(false);
     }
-  }, [apiFetch, page]);
+  }, [apiFetch, page, status, statuses, reviewStatus]);
+  useEffect(() => { setPage(1); }, [status, statuses, reviewStatus]);
   useEffect(() => {
     void load();
   }, [load]);
-  const visibleItems = useMemo(
-    () => (status && data?.items ? data.items.filter((quote) => quote.status === status) : data?.items ?? []),
-    [data?.items, status],
-  );
+  const visibleItems = data?.items ?? [];
   const pagination = data?.pagination;
   return (
     <div className="space-y-5">
@@ -104,7 +110,7 @@ export default function AdminQuotesPage() {
                           {quote.polCode} → {quote.podCode}
                         </td>
                         <td className={`${cell} font-semibold`}>
-                          {money(quote.totalAmount, quote.currency)}
+                          {quoteAmounts(quote)}
                         </td>
                         <td className={cell}>{quote.validUntil.slice(0, 10)}</td>
                         <td className={cell}>
@@ -173,9 +179,7 @@ function normalize(value: unknown) {
   const error = value as { message?: string; code?: string };
   return { message: error.message ?? '报价服务暂时不可用。', code: error.code };
 }
-function money(value: string, currency: string) {
-  return `${currency} ${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value))}`;
-}
+
 const head = 'px-4 py-3 font-semibold';
 const cell = 'px-4 py-3 align-middle';
 const button = 'grid size-9 place-items-center rounded border border-border disabled:opacity-40';

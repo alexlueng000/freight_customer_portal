@@ -5,7 +5,7 @@ import { Queue, QueueEvents } from 'bullmq';
 export const QUOTE_PDF_QUEUE = 'quote-pdfs';
 export const QUOTE_PDF_JOB = 'generate-quote-pdf';
 // Rendering changes must invalidate both stored PDFs and BullMQ jobs, independently of quote data versions.
-const QUOTE_PDF_TEMPLATE_VERSION = 'cjk-v2';
+const QUOTE_PDF_TEMPLATE_VERSION = 'cjk-v3-currencies';
 
 export interface QuotePdfJobData {
   tenantId: string;
@@ -22,6 +22,7 @@ export interface QuotePdfJobData {
     validUntil: string;
     currency: string;
     totalAmount: string;
+    amountsByCurrency?: Record<string, string>;
     customerTerms: string | null;
     version: number;
     customerName: string;

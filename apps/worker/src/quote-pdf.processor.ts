@@ -22,6 +22,7 @@ export interface QuotePdfJobData {
     validUntil: string;
     currency: string;
     totalAmount: string;
+    amountsByCurrency?: Record<string, string>;
     customerTerms: string | null;
     version: number;
     customerName: string;
@@ -51,6 +52,10 @@ export async function processQuotePdf(s3: S3Client, bucket: string, data: QuoteP
   return { objectKey: data.objectKey, size: pdf.length };
 }
 
+export function quotePdfTotals(quote: Pick<QuotePdfJobData['quote'], 'currency' | 'totalAmount' | 'amountsByCurrency'>) {
+  const totals = Object.entries(quote.amountsByCurrency ?? {});
+  return totals.length ? totals : [[quote.currency, quote.totalAmount]];
+}
 export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const pdf = new PDFDocument({
@@ -117,6 +122,8 @@ export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffe
       }));
       y += rowHeight;
     }
+    const totals = quotePdfTotals(quote);
+    for (const [currency, total] of totals) {
     if (y + 60 > 760) {
       pdf.addPage();
       y = 48;
@@ -128,10 +135,12 @@ export function generateQuotePdf(quote: QuotePdfJobData['quote']): Promise<Buffe
       .fontSize(10)
       .text('TOTAL', 350, y + 28)
       .fontSize(13)
-      .text(`${quote.currency} ${money(quote.totalAmount)}`, 405, y + 25, {
+      .text(`${currency} ${money(total)}`, 405, y + 25, {
         width: 127,
         align: 'right',
       });
+    y += 54;
+    }
     if (quote.customerTerms?.trim()) {
       y += 78;
       if (y > 690) {

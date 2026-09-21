@@ -2,7 +2,8 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { FieldPath, UseFormSetError } from 'react-hook-form';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -105,14 +106,23 @@ const rateImportTargetLabels: Record<string, string> = {
 };
 
 export default function RatesPage() {
+  return <Suspense fallback={<LoadingState />}><RatesContent /></Suspense>;
+}
+
+function RatesContent() {
+  const searchParams = useSearchParams();
+  const linkedSearch = searchParams.get('search') ?? '';
+  const fromQuote = searchParams.get('fromQuote');
+  const [quoteDraft, setQuoteDraft] = useState<RateFormValues | null>(null);
   const { apiFetch, user } = useAuth();
   const [items, setItems] = useState<Rate[]>([]);
   const [pagination, setPagination] = useState<RateListResponse['pagination']>({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
-  const [page, setPage] = useState(1); const [searchInput, setSearchInput] = useState(''); const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1); const [searchInput, setSearchInput] = useState(linkedSearch); const [search, setSearch] = useState(linkedSearch);
   const [status, setStatus] = useState<RateStatus | ''>(''); const [polCode, setPolCode] = useState(''); const [podCode, setPodCode] = useState(''); const [carrierCode, setCarrierCode] = useState(''); const [containerType, setContainerType] = useState(''); const [validOn, setValidOn] = useState('');
   const [loading, setLoading] = useState(true); const [error, setError] = useState<RateApiError | null>(null); const [reloadKey, setReloadKey] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false); const [importOpen, setImportOpen] = useState(false); const [editingRate, setEditingRate] = useState<Rate | null>(null); const [notice, setNotice] = useState<string | null>(null);
 
+  useEffect(() => { setSearchInput(linkedSearch); setSearch(linkedSearch); setPage(1); }, [linkedSearch]);
   useEffect(() => { const timer = window.setTimeout(() => { setPage(1); setSearch(searchInput.trim()); }, 300); return () => window.clearTimeout(timer); }, [searchInput]);
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -123,6 +133,14 @@ export default function RatesPage() {
   }, [apiFetch, carrierCode, containerType, page, podCode, polCode, search, status, validOn]);
   useEffect(() => { void load(); }, [load, reloadKey]);
   const canManage = hasPermission(user, 'rate.manage');
+  useEffect(() => {
+    if (!fromQuote || !canManage) return;
+    let cancelled = false;
+    void requestJson<RateFormValues>(apiFetch, `/api/v1/rates/from-quote/${encodeURIComponent(fromQuote)}`)
+      .then((draft) => { if (!cancelled) setQuoteDraft(draft); })
+      .catch((caught) => { if (!cancelled) setError(toRateError(caught)); });
+    return () => { cancelled = true; };
+  }, [apiFetch, canManage, fromQuote]);
   const [rateToDelete, setRateToDelete] = useState<Rate | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -167,7 +185,7 @@ export default function RatesPage() {
       </FilterBar>
       {loading ? <LoadingState rows={6} /> : error ? <div className="p-4"><ErrorState description={error.message} onRetry={() => setReloadKey((value) => value + 1)} /></div> : items.length === 0 ? <div className="p-4"><EmptyState description={search || status || polCode || podCode || carrierCode || containerType || validOn ? '请调整筛选条件后重试。' : '新建运价后，记录会显示在这里。'} title="暂无匹配运价" /></div> : <><DataTable columns={columns} data={items} getRowKey={(rate) => rate.id} /><Pagination page={page} pagination={pagination} setPage={setPage} /></>}
     </section>}
-    {dialogOpen || editingRate ? <RateDialog apiFetch={apiFetch} rate={editingRate} onClose={() => { setDialogOpen(false); setEditingRate(null); }} onSaved={() => saved(Boolean(editingRate))} /> : null}
+    {dialogOpen || editingRate || quoteDraft ? <RateDialog apiFetch={apiFetch} rate={editingRate} initialDraft={quoteDraft ?? undefined} sourceQuoteId={quoteDraft ? fromQuote ?? undefined : undefined} onClose={() => { setDialogOpen(false); setEditingRate(null); setQuoteDraft(null); }} onSaved={() => { setQuoteDraft(null); saved(Boolean(editingRate)); }} /> : null}
     {importOpen ? <ImportRateDialog apiFetch={apiFetch} onClose={() => setImportOpen(false)} onCompleted={() => { setNotice('Excel 运价导入完成，列表已刷新。'); setPage(1); setReloadKey((value) => value + 1); }} /> : null}
   </div>;
 }
@@ -1119,23 +1137,23 @@ function humanizeImportJobError(message: string) {
   return message.replace(/Import validation failed with \d+ error\(s\)/, '导入前校验未通过，请根据上方问题修正后重新导入。').replace(/[A-Za-z][A-Za-z0-9_]+/g, '字段');
 }
 
-function RateDialog({ apiFetch, rate, onClose, onSaved }: { apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; rate: Rate | null; onClose: () => void; onSaved: () => void }) {
+function RateDialog({ apiFetch, rate, initialDraft, sourceQuoteId, onClose, onSaved }: { apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; rate: Rate | null; initialDraft?: RateFormValues; sourceQuoteId?: string; onClose: () => void; onSaved: () => void }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const { register, control, handleSubmit, watch, setValue, setError, formState: { errors, isSubmitting } } = useForm<RateFormValues>({ resolver: zodResolver(rateFormSchema), defaultValues: rate ? rateDefaults(rate) : emptyRateDefaults() });
+  const { register, control, handleSubmit, watch, setValue, setError, formState: { errors, isSubmitting } } = useForm<RateFormValues>({ resolver: zodResolver(rateFormSchema), defaultValues: rate ? rateDefaults(rate) : initialDraft ?? emptyRateDefaults() });
   const prices = useFieldArray({ control, name: 'prices' }); const charges = useFieldArray({ control, name: 'charges' }); const mainCurrency = watch('currency');
   const polCodeField = register('polCode'); const podCodeField = register('podCode'); const carrierCodeField = register('carrierCode'); const currencyField = register('currency');
   const applyPort = (target: 'polName' | 'podName', code: string) => { const port = commonPorts.find((item) => item.code === upper(code)); if (port) setValue(target, port.name, { shouldDirty: true, shouldValidate: true }); };
-  useEffect(() => { if (!rate) { prices.fields.forEach((_, index) => setValue(`prices.${index}.currency`, mainCurrency.toUpperCase())); charges.fields.forEach((_, index) => setValue(`charges.${index}.currency`, mainCurrency.toUpperCase())); } }, [charges.fields, mainCurrency, prices.fields, rate, setValue]);
+  useEffect(() => { if (!rate && !sourceQuoteId) { prices.fields.forEach((_, index) => setValue(`prices.${index}.currency`, mainCurrency.toUpperCase())); charges.fields.forEach((_, index) => setValue(`charges.${index}.currency`, mainCurrency.toUpperCase())); } }, [charges.fields, mainCurrency, prices.fields, rate, setValue, sourceQuoteId]);
   const submit = handleSubmit(async (values) => {
     setSubmitError(null);
     const payload = { ...values, rateNo: upper(values.rateNo), polCode: upper(values.polCode), podCode: upper(values.podCode), carrierCode: upper(values.carrierCode), currency: upper(values.currency), ...(values.etd ? { etd: new Date(values.etd).toISOString() } : { etd: undefined }), ...(values.transitDays ? { transitDays: Number(values.transitDays) } : { transitDays: undefined }), serviceName: optional(values.serviceName), supplierName: optional(values.supplierName), contractNo: optional(values.contractNo), prices: values.prices.map((price) => ({ ...price, containerType: upper(price.containerType), currency: upper(price.currency), remark: optional(price.remark), ...(price.sellAmount ? {} : { sellAmount: undefined }) })), charges: values.charges.map((charge) => ({ ...charge, chargeCode: upper(charge.chargeCode), chargeName: charge.chargeName.trim(), currency: upper(charge.currency), ...(charge.chargeBasis === 'PER_CONTAINER' ? { containerType: charge.containerType } : { containerType: undefined }) })) };
-    try { await requestJson<Rate>(apiFetch, rate ? `/api/v1/rates/${rate.id}` : '/api/v1/rates', { method: rate ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }); onSaved(); } catch (caught) { const error = toRateError(caught); applyRateServerFieldErrors(error.details?.fieldErrors, setError); setSubmitError(localizeRateError(error)); }
+    try { await requestJson<Rate>(apiFetch, sourceQuoteId ? `/api/v1/rates/from-quote/${encodeURIComponent(sourceQuoteId)}` : rate ? `/api/v1/rates/${rate.id}` : '/api/v1/rates', { method: rate ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sourceQuoteId ? { ...payload, status: 'DRAFT' } : payload) }); onSaved(); } catch (caught) { const error = toRateError(caught); applyRateServerFieldErrors(error.details?.fieldErrors, setError); setSubmitError(localizeRateError(error)); }
   });
   return <div aria-labelledby="rate-dialog-title" aria-modal="true" className="fixed inset-0 z-50 flex items-start justify-end bg-foreground/30" role="dialog"><button aria-label="关闭运价表单" className="absolute inset-0" onClick={onClose} type="button" /><div className="relative h-full w-full max-w-4xl overflow-y-auto border-l border-border bg-surface shadow-xl">
     <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface px-5 py-4"><div><h2 className="text-lg font-semibold" id="rate-dialog-title">{rate ? '编辑运价' : '新建运价'}</h2><p className="mt-1 text-sm text-muted"><RequiredLegend>字段为保存运价前必须填写</RequiredLegend>；金额最多保留 4 位小数。</p></div><button aria-label="关闭" className="grid size-9 place-items-center rounded border border-border" onClick={onClose} type="button"><X aria-hidden className="size-4" /></button></div>
     <form className="space-y-6 p-5" onSubmit={(event) => void submit(event)}><RateFormOptionLists />{submitError ? <div className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">{submitError}</div> : null}
-      <fieldset className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><legend className="col-span-full text-sm font-semibold">基础信息</legend>
-        <FormField error={errors.rateNo?.message} label="运价编号 *"><input {...register('rateNo')} className={inputClass} placeholder="例如 RATE-SHA-LAX-001" /></FormField><FormField error={errors.carrierCode?.message} label="船司代码 *"><input {...carrierCodeField} className={inputClass} list="rate-carrier-options" placeholder="选择或输入船司代码" /></FormField><FormField error={errors.serviceName?.message} label="航线服务"><input {...register('serviceName')} className={inputClass} list="rate-service-options" placeholder="选择或输入服务名称" /></FormField><FormField error={errors.status?.message} label="状态 *"><select {...register('status')} className={inputClass}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
+      {sourceQuoteId ? <p className="rounded border border-border bg-sidebar p-3 text-sm">从报价生成独立草稿：请填写新编号，核对航线、有效期和每单位采购成本。销售价留空，需另行确认通用售价；不会更改原报价或原运价。</p> : null}<fieldset className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><legend className="col-span-full text-sm font-semibold">基础信息</legend>
+        <FormField error={errors.rateNo?.message} label="运价编号 *"><input {...register('rateNo')} className={inputClass} placeholder="例如 RATE-SHA-LAX-001" /></FormField><FormField error={errors.carrierCode?.message} label="船司代码 *"><input {...carrierCodeField} className={inputClass} list="rate-carrier-options" placeholder="选择或输入船司代码" /></FormField><FormField error={errors.serviceName?.message} label="航线服务"><input {...register('serviceName')} className={inputClass} list="rate-service-options" placeholder="选择或输入服务名称" /></FormField><FormField error={errors.status?.message} label="状态 *"><select {...register('status')} className={inputClass} disabled={Boolean(sourceQuoteId)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
         <FormField error={errors.polCode?.message} label="起运港代码 *"><input {...polCodeField} className={inputClass} list="rate-port-options" onBlur={(event) => { void polCodeField.onBlur(event); applyPort('polName', event.target.value); }} placeholder="选择或输入起运港" /></FormField><FormField error={errors.polName?.message} label="起运港名称 *"><input {...register('polName')} className={inputClass} placeholder="选择港口代码后自动带出" /></FormField><FormField error={errors.podCode?.message} label="目的港代码 *"><input {...podCodeField} className={inputClass} list="rate-port-options" onBlur={(event) => { void podCodeField.onBlur(event); applyPort('podName', event.target.value); }} placeholder="选择或输入目的港" /></FormField><FormField error={errors.podName?.message} label="目的港名称 *"><input {...register('podName')} className={inputClass} placeholder="选择港口代码后自动带出" /></FormField>
         <FormField error={errors.effectiveDate?.message} label="生效日 *"><input {...register('effectiveDate')} className={inputClass} type="date" /></FormField><FormField error={errors.expiryDate?.message} label="失效日 *"><input {...register('expiryDate')} className={inputClass} type="date" /></FormField><FormField error={errors.etd?.message} label="预计开船时间"><input {...register('etd')} className={inputClass} type="datetime-local" /></FormField><FormField error={errors.transitDays?.message} label="航程（天）"><input {...register('transitDays')} className={inputClass} inputMode="numeric" /></FormField>
         <FormField error={errors.supplierName?.message} label="供应方"><input {...register('supplierName')} className={inputClass} placeholder="可选，供应商或代理名称" /></FormField><FormField error={errors.contractNo?.message} label="合约号"><input {...register('contractNo')} className={inputClass} placeholder="可选" /></FormField><FormField error={errors.currency?.message} label="基础币种 *"><select {...currencyField} className={inputClass}>{currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select></FormField>

@@ -1,4 +1,5 @@
 'use client';
+import { quoteAmounts } from '@/lib/quote-amounts';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -42,6 +43,7 @@ interface Quote {
   validUntil: string;
   currency: string;
   totalAmount: string | null;
+  amountsByCurrency?: Record<string, string> | null;
   requestContainerType: string | null;
   containerQuantity: number | null;
   factoryLoadingDate: string | null;
@@ -375,7 +377,7 @@ export default function QuoteDetailPage() {
                     报价总额
                   </td>
                   <td className="px-4 py-4 text-right text-lg font-bold text-primary">
-                    {money(quote.totalAmount, quote.currency)}
+                    {quoteAmounts(quote)}
                   </td>
                 </tr>
               </tfoot>
@@ -427,7 +429,7 @@ export default function QuoteDetailPage() {
               <dl className="border-b border-border pb-4">
                 <dt className="text-sm font-medium text-muted">本次接受的报价总额</dt>
                 <dd className="mt-2 break-words text-3xl font-semibold tabular-nums leading-tight text-primary">
-                  {money(quote.totalAmount, quote.currency)}
+                  {quoteAmounts(quote)}
                 </dd>
               </dl>
               <div className="grid gap-3 rounded border border-success/15 bg-success/5 p-3 sm:grid-cols-2">
@@ -501,7 +503,7 @@ export default function QuoteDetailPage() {
               >
                 {submitting === 'accept'
                   ? '处理中…'
-                  : `确认接受 · ${money(quote.totalAmount, quote.currency)}`}
+                  : `确认接受 · ${quoteAmounts(quote)}`}
               </button>
             </div>
           </div>
@@ -542,7 +544,7 @@ export default function QuoteDetailPage() {
             <div className="space-y-4 px-5 py-4 text-sm">
               <div className="grid gap-3 rounded border border-danger/15 bg-danger/5 p-3 sm:grid-cols-2">
                 <Fact label="报价编号" value={quote.quoteNo} />
-                <Fact label="报价总额" value={money(quote.totalAmount, quote.currency)} />
+                <Fact label="报价总额" value={quoteAmounts(quote)} />
                 <Fact
                   label="航线"
                   value={`${portDisplayName(quote.polCode)} → ${portDisplayName(quote.podCode)}`}
@@ -624,7 +626,7 @@ function QuoteDecisionStatus({ quote }: { quote: Quote }) {
         </div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:text-right">
           <Fact label="有效期至" value={quote.validUntil.slice(0, 10)} />
-          <Fact label="报价总额" value={money(quote.totalAmount, quote.currency)} />
+          <Fact label="报价总额" value={quoteAmounts(quote)} />
         </div>
       </div>
     </section>

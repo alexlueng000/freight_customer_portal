@@ -51,7 +51,7 @@ class OverrideQuoteItemPriceDto {
   @Matches(/^\d{1,14}(?:\.\d{1,4})?$/)
   costAmount?: string | null;
 
-  @ApiPropertyOptional({ description: '必须与当前报价币种一致，不进行汇率换算' })
+  @ApiPropertyOptional({ description: '费用币种，按币种分别汇总，不进行汇率换算；基础海运费币种不可改' })
   @IsOptional()
   @IsString()
   @Matches(/^[A-Z]{3}$/)
@@ -61,6 +61,12 @@ class OverrideQuoteItemPriceDto {
   unitPrice!: string;
 }
 export class OverrideQuotePricesDto {
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true, description: '与价格在同一事务保存的拟参加船期，仅内部审核使用；YYYY-MM-DD，null 清空，省略保留。不替换来源 ETD，不代表已确认订舱。' })
+  @IsOptional()
+  @Matches(/^(?!0000)\d{4}-\d{2}-\d{2}$/, { message: 'plannedSailingDate 拟参加船期须为 YYYY-MM-DD。' })
+  @IsDateString({ strict: true }, { message: 'plannedSailingDate 请选择有效的拟参加船期。' })
+  plannedSailingDate?: string | null;
+
   @ApiPropertyOptional({ description: '明确删除的附加费用 ID；海运费不允许删除', type: [String] })
   @IsOptional()
   @IsArray()

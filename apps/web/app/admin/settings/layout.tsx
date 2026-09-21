@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { PageHeader } from '@/components/page-header';
 
-const tabs = [{ href: '/admin/settings/ports', label: '基础港口映射表' }];
+const tabs = [{ href: '/admin/settings/ports', label: '基础港口映射表' }, { href: '/admin/settings/quotes', label: '报价审核' }];
 
 export default function SettingsLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();

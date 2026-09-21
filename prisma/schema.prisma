@@ -173,6 +173,13 @@ enum NotificationStatus {
   FAILED
 }
 
+enum QuoteReviewStatus {
+  NONE
+  PENDING
+  REJECTED
+  APPROVED
+}
+
 model Tenant {
   id              String       @id @default(cuid())
   code            String       @unique @db.VarChar(50)
@@ -180,6 +187,7 @@ model Tenant {
   status          TenantStatus @default(TRIAL)
   timezone        String       @default("Asia/Shanghai") @db.VarChar(100)
   defaultCurrency String       @default("USD") @db.VarChar(3)
+  quoteApprovalRequired Boolean @default(false)
   brandName       String?      @db.VarChar(200)
   logoUrl         String?      @db.VarChar(1000)
   portalSlug      String?      @unique @db.VarChar(63)
@@ -609,6 +617,12 @@ model Quote {
   totalAmount          Decimal     @db.Decimal(18, 4)
   containerQuantity    Int?
   factoryLoadingDate   DateTime?   @db.Date
+  plannedSailingDate   DateTime?   @db.Date
+  reviewStatus         QuoteReviewStatus @default(NONE)
+  reviewSubmittedAt    DateTime? @db.Timestamptz(3)
+  reviewedAt           DateTime? @db.Timestamptz(3)
+  approvalNote         String? @db.VarChar(2000)
+  amountsByCurrency    Json @default("{}")
   incoterm             String?     @db.VarChar(10)
   pickupLocationText   String?     @db.VarChar(1000)
   deliveryLocationText String?     @db.VarChar(1000)

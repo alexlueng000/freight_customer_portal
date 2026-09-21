@@ -5,9 +5,12 @@ import { AdminQuotesController } from './admin-quotes.controller.js';
 import { QuoteStateMachine } from './quote-state-machine.js';
 import { QuotePdfQueueService } from './quote-pdf-queue.service.js';
 import { QuotesService } from './quotes.service.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
+import { QuoteSettingsController } from './quote-settings.controller.js';
 
 @Module({
-  controllers: [QuotesController, AdminQuotesController],
+  imports: [NotificationsModule],
+  controllers: [QuotesController, AdminQuotesController, QuoteSettingsController],
   providers: [QuotesService, CustomerRatePricingService, QuoteStateMachine, QuotePdfQueueService],
 })
 export class QuotesModule {}

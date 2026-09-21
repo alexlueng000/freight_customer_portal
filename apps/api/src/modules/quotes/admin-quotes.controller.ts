@@ -6,6 +6,7 @@ import { ListQuotesDto } from './dto/list-quotes.dto.js';
 import { QuotesService } from './quotes.service.js';
 import { OverrideQuotePricesDto } from './dto/override-quote-prices.dto.js';
 import { UpdateQuoteReviewDto } from './dto/update-quote-review.dto.js';
+import { RejectQuoteApprovalDto } from './dto/quote-approval.dto.js';
 import { QuotePdfQueueService } from './quote-pdf-queue.service.js';
 
 @ApiTags('admin-quotes')
@@ -30,6 +31,15 @@ export class AdminQuotesController {
   get(@Param('id') id: string) {
     return this.quotes.getInternal(id);
   }
+  @Post(':id/submit-review') @RequirePermissions('quote.manage')
+  @ApiOkResponse({ description: 'Submit saved draft for tenant administrator review; freezes edits until rejected' })
+  submitReview(@Param('id') id: string) { return this.quotes.submitApproval(id); }
+  @Post(':id/approve-and-send') @RequirePermissions('quote.manage')
+  @ApiOkResponse({ description: 'Tenant administrator atomically approves and publishes the pending quote' })
+  approve(@Param('id') id: string) { return this.quotes.approveAndSend(id); }
+  @Post(':id/reject-review') @RequirePermissions('quote.manage')
+  @ApiOkResponse({ description: 'Tenant administrator returns quote for changes with a mandatory internal reason' })
+  rejectReview(@Param('id') id: string, @Body() dto: RejectQuoteApprovalDto) { return this.quotes.rejectApproval(id, dto.reason); }
   @Post(':id/send')
   @RequirePermissions('quote.manage')
   @ApiOkResponse({ description: 'Send a draft quote to its customer' })
@@ -50,13 +60,13 @@ export class AdminQuotesController {
   }
   @Patch(':id/review')
   @RequirePermissions('quote.manage')
-  @ApiOkResponse({ description: 'Update draft quote validity, customer terms, and internal notes' })
+  @ApiOkResponse({ description: 'Update draft quote validity, optional internal planned sailing date, customer terms, and internal notes' })
   updateReview(@Param('id') id: string, @Body() dto: UpdateQuoteReviewDto) {
     return this.quotes.updateReview(id, dto);
   }
   @Patch(':id/prices')
   @RequirePermissions('quote.manage')
-  @ApiOkResponse({ description: 'Atomically add, edit and explicitly remove draft quote fee lines in the quote currency; preserve ocean freight container requirements; save validity, terms and notes with mandatory reason and before/after audit' })
+  @ApiOkResponse({ description: 'Atomically add, edit and explicitly remove draft quote fee lines in the quote currency; preserve ocean freight container requirements; save validity, optional internal planned sailing date, terms and notes with mandatory reason and before/after audit' })
   overridePrices(@Param('id') id: string, @Body() dto: OverrideQuotePricesDto) {
     return this.quotes.overridePrices(id, dto);
   }

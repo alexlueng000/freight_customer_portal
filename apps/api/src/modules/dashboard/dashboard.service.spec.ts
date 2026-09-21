@@ -160,6 +160,24 @@ describe('dashboard service', () => {
     expect(dashboard.tasks.map((task) => task.title).join(' ')).not.toContain(`DASH-QT-B`);
   });
 
+  it('keeps sales drafts ahead of recent customer follow-ups and excludes expired drafts', async () => {
+    const base = await prisma.quote.findFirstOrThrow({ where: { tenantId: tenantA, status: QuoteStatus.DRAFT } });
+    const numbers: string[] = [];
+    try {
+      for (let i = 0; i < 10; i++) {
+        const quoteNo = `RECENT-${runId}-${i}`;
+        numbers.push(quoteNo);
+        await prisma.quote.create({ data: { tenantId: tenantA, customerCompanyId: customerA, quoteNo, status: QuoteStatus.SENT, polCode: base.polCode, podCode: base.podCode, currency: base.currency, subtotal: base.subtotal, totalAmount: base.totalAmount, validUntil: day(10) } });
+      }
+      numbers.push(`EXPIRED-${runId}`);
+      await prisma.quote.create({ data: { tenantId: tenantA, customerCompanyId: customerA, quoteNo: numbers.at(-1)!, status: QuoteStatus.DRAFT, polCode: base.polCode, podCode: base.podCode, currency: base.currency, subtotal: base.subtotal, totalAmount: base.totalAmount, validUntil: day(-1) } });
+      const dashboard = await context.run({ requestId: 'sales-task-priority', tenantId: tenantA, userId: salesA, roles: [RoleCode.SALES] }, () => service.admin());
+      expect(dashboard.tasks[0]?.id).toBe(base.id);
+      expect(dashboard.summary.find((item) => item.label === '待确认报价')?.value).toBe(1);
+      expect(dashboard.summary.find((item) => item.label === '客户可确认报价')?.href).toBe('/admin/quotes?statuses=SENT,VIEWED');
+      expect(dashboard.tasks.map((task) => task.title).join(' ')).not.toContain(`EXPIRED-${runId}`);
+    } finally { await prisma.quote.deleteMany({ where: { tenantId: tenantA, quoteNo: { in: numbers } } }); }
+  });
   it('returns a finance-focused dashboard with invoice tasks', async () => {
     const dashboard = await context.run(
       {
