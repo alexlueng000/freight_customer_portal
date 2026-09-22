@@ -1,3 +1,5 @@
+import { ListBookingSubmissionsDto } from './dto/list-booking-submissions.dto.js';
+import { ApiOperation } from '@nestjs/swagger';
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermissions } from '../auth/permissions.decorator.js';
@@ -36,6 +38,11 @@ export class BookingsController {
   }
   @Get() @RequirePermissions('booking.read') list(@Query() query: ListBookingsDto) {
     return this.bookings.list(query);
+  }
+  @Get(':id/submissions') @RequirePermissions('booking.read')
+  @ApiOperation({ summary: 'List immutable booking submissions for authorized printing, newest first, 20 per page' })
+  submissions(@Param('id') id: string, @Query() query: ListBookingSubmissionsDto) {
+    return this.bookings.listSubmissions(id, false, query.before);
   }
   @Get(':id') @RequirePermissions('booking.read') get(@Param('id') id: string) {
     return this.bookings.get(id);

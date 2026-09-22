@@ -52,7 +52,7 @@ export async function processQuotePdf(s3: S3Client, bucket: string, data: QuoteP
   return { objectKey: data.objectKey, size: pdf.length };
 }
 
-export function quotePdfTotals(quote: Pick<QuotePdfJobData['quote'], 'currency' | 'totalAmount' | 'amountsByCurrency'>) {
+export function quotePdfTotals(quote: Pick<QuotePdfJobData['quote'], 'currency' | 'totalAmount' | 'amountsByCurrency'>): Array<[string, string]> {
   const totals = Object.entries(quote.amountsByCurrency ?? {});
   return totals.length ? totals : [[quote.currency, quote.totalAmount]];
 }

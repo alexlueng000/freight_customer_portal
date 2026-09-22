@@ -30,8 +30,8 @@ const typeCopy: Record<
   { title: string; actionLabel: string; href: (payload: NotificationPayload) => string }
 > = {
   SO_PUBLISHED: {
-    title: 'SO 已发布',
-    actionLabel: '查看订舱与 SO',
+    title: '订舱确认单已发布',
+    actionLabel: '查看订舱与订舱确认单',
     href: (payload) => payload.href ?? '/portal/bookings?status=BOOKED',
   },
   SHIPMENT_CREATED: {

@@ -6,6 +6,8 @@ import { BookingsService } from './bookings.service.js';
 import { BookingSoService } from './booking-so.service.js';
 import type { DocumentStorageService } from './document-storage.service.js';
 import { DocumentsService } from './documents.service.js';
+import { ShipmentsService } from './shipments.service.js';
+import { ShipmentStateMachine } from './shipment-state-machine.js';
 
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
 const prisma = new PrismaService();
@@ -34,6 +36,7 @@ const service = new BookingsService(
 );
 const bookingSo = new BookingSoService(prisma, context, storage, notificationEvents as never);
 const documents = new DocumentsService(prisma, context, storage);
+const shipments = new ShipmentsService(prisma, context, new ShipmentStateMachine());
 const tenantIds: string[] = [];
 let tenantA: string;
 let tenantB: string;
@@ -399,6 +402,16 @@ describe('booking database integration', () => {
     expect(JSON.stringify(customer.reviewActions)).not.toContain(
       'Commercial notes remain internal',
     );
+    const versions = await runCustomer(tenantA, userA, customerA, () => service.listSubmissions(bookingA));
+    expect(versions.map(row => row.version)).toEqual([2, 1]);
+    expect(versions[1]?.snapshot).toMatchObject({ commodity: 'Consumer goods', shipperName: 'Example Shipper' });
+    expect(versions[0]?.snapshot).toMatchObject({ commodity: 'Consumer electronics accessories' });
+    expect(JSON.stringify(versions)).not.toMatch(/internalRemark|costAmount|sourceName|Commercial notes/);
+    await prisma.customerCompany.update({ where: { id: customerA }, data: { name: 'Renamed Customer' } });
+    expect(await runCustomer(tenantA, userA, customerA, () => service.listSubmissions(bookingA))).toEqual(versions);
+    for (const [tenant, user, customerId] of [[tenantB, userB, customerB], [tenantA, userAOther, customerAOther]] as const) {
+      await expect(runCustomer(tenant, user, customerId, () => service.listSubmissions(bookingA))).rejects.toMatchObject({ response: { code: 'BOOKING_NOT_FOUND' } });
+    }
     expect(customer.reviewActions.some((action) => action.action === 'REQUEST_REVISION')).toBe(
       true,
     );
@@ -429,7 +442,12 @@ describe('booking database integration', () => {
         bookingContactEmail: 'alex@example.test',
       }),
     );
-    await runCustomer(tenantA, userA, customerA, () => service.submit(booking.id));
+    const concurrent = await Promise.allSettled([
+      runCustomer(tenantA, userA, customerA, () => service.submit(booking.id)),
+      runCustomer(tenantA, userA, customerA, () => service.submit(booking.id)),
+    ]);
+    expect(concurrent.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(await prisma.bookingSubmission.count({ where: { tenantId: tenantA, bookingId: booking.id } })).toBe(1);
 
     await expect(
       runInternal(() => service.approve(booking.id, { remark: 'Checked' })),
@@ -518,12 +536,22 @@ describe('booking database integration', () => {
           carrierCode: 'COSCO',
           vessel: 'Demo Vessel',
           voyage: 'DV001',
-          receivedAt: new Date().toISOString(),
+          eta: '2026-10-12T16:30:00+08:00',
+          cyCutoffAt: '2026-09-25T16:30:00+08:00',
+          siCutoffAt: '2026-09-24T10:15:00+08:00',
+          vgmCutoffAt: '2026-09-25T09:45:00+08:00',
+          terminal: '测试码头',
+          receivedAt: '2026-09-22T08:30:00+08:00',
         },
         soFile('shipping-order-v1.pdf'),
       ),
     );
     expect(draft).toMatchObject({ status: 'INTERNAL_DRAFT', version: 1 });
+    expect(draft.receivedAt.toISOString()).toBe('2026-09-22T00:30:00.000Z');
+    expect(draft.cyCutoffAt?.toISOString()).toBe('2026-09-25T08:30:00.000Z');
+    expect(draft.siCutoffAt?.toISOString()).toBe('2026-09-24T02:15:00.000Z');
+    expect(draft.vgmCutoffAt?.toISOString()).toBe('2026-09-25T01:45:00.000Z');
+    expect(draft.terminal).toBe('测试码头');
     expect(draft.document.customerVisible).toBe(false);
     expect((await prisma.booking.findUniqueOrThrow({ where: { id: bookingA } })).status).toBe(
       BookingStatus.BOOKED,
@@ -534,9 +562,14 @@ describe('booking database integration', () => {
     await expect(
       runCustomer(tenantA, userA, customerA, () => documents.download(draft.document.id)),
     ).rejects.toMatchObject({ response: { code: 'DOCUMENT_NOT_FOUND' } });
-    const shipment = await runInternal(() =>
-      service.createShipment(bookingA, { vessel: 'Demo Vessel', voyage: 'DV001' }),
-    );
+    const creations = await Promise.allSettled([
+      runInternal(() => service.createShipment(bookingA, { vessel: 'Untrusted browser vessel', voyage: 'BAD', eta: '2030-01-01T00:00:00Z' })),
+      runInternal(() => service.createShipment(bookingA, { soRecordId: draft.id })),
+    ]);
+    expect(creations.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    const shipment = await prisma.shipment.findFirstOrThrow({ where: { tenantId: tenantA, bookingId: bookingA } });
+    expect(shipment).toMatchObject({ vessel: 'Demo Vessel', voyage: 'DV001', etd: null, eta: new Date('2026-10-12T08:30:00Z') });
+    expect(await prisma.shipment.count({ where: { tenantId: tenantA, bookingId: bookingA } })).toBe(1);
     expect(shipment.bookingId).toBe(bookingA);
     expect(lastNotification('SHIPMENT_CREATED')).toMatchObject({
       tenantId: tenantA,
@@ -579,6 +612,26 @@ describe('booking database integration', () => {
       bookingSo.listCustomer(bookingA),
     );
     expect(beforeReplacementPublish.map((item) => item.id)).toEqual([published.id]);
+    expect(beforeReplacementPublish[0]).not.toHaveProperty('sourceName');
+    expect(beforeReplacementPublish[0]).not.toHaveProperty('uploadedBy');
+    expect((await runInternal(() => bookingSo.listInternal(bookingA)))[0]).toHaveProperty('sourceName');
+    const difference = await runInternal(() => shipments.confirmationDifference(shipment.id));
+    expect(difference.confirmation?.id).toBe(replacement.id);
+    expect(difference.differences.some(item => item.field === 'vessel')).toBe(true);
+    const atd = new Date('2026-09-01T08:00:00Z');
+    const ata = new Date('2026-09-10T08:00:00Z');
+    // Legacy actual times must survive even when a record is still marked PLANNED.
+    await prisma.shipment.update({ where: { id: shipment.id }, data: { atd, ata } });
+    const fresh = await runInternal(() => shipments.confirmationDifference(shipment.id));
+    await expect(runInternal(() => shipments.syncConfirmation(shipment.id, { soRecordId: published.id, expectedUpdatedAt: fresh.shipment.updatedAt.toISOString(), fields: ['vessel'] }))).rejects.toMatchObject({ response: { code: 'SHIPMENT_CONFIRMATION_CONFLICT' } });
+    await runInternal(() => shipments.syncConfirmation(shipment.id, { soRecordId: replacement.id, expectedUpdatedAt: fresh.shipment.updatedAt.toISOString(), fields: ['vessel'] }));
+    expect(await prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } })).toMatchObject({ vessel: null, voyage: 'DV001', atd, ata });
+    await expect(runInternal(() => shipments.syncConfirmation(shipment.id, { soRecordId: replacement.id, expectedUpdatedAt: fresh.shipment.updatedAt.toISOString(), fields: ['voyage'] }))).rejects.toMatchObject({ response: { code: 'SHIPMENT_CONFIRMATION_CONFLICT' } });
+    expect(await prisma.auditLog.findFirst({ where: { tenantId: tenantA, entityId: shipment.id, action: 'SYNC_BOOKING_CONFIRMATION' } })).toMatchObject({ beforeData: { vessel: 'Demo Vessel' }, afterData: { vessel: null, soRecordId: replacement.id } });
+    await prisma.shipment.update({ where: { id: shipment.id }, data: { status: 'DEPARTED' } });
+    await expect(runInternal(() => shipments.syncConfirmation(shipment.id, { soRecordId: replacement.id, expectedUpdatedAt: fresh.shipment.updatedAt.toISOString(), fields: ['voyage'] }))).rejects.toMatchObject({ response: { code: 'SHIPMENT_SYNC_NOT_PLANNED' } });
+    await expect(runCustomer(tenantA, userA, customerA, () => shipments.confirmationDifference(shipment.id))).rejects.toMatchObject({ response: { code: 'SHIPMENT_NOT_FOUND' } });
+    await expect(context.run({ requestId: 'other-tenant', tenantId: tenantB, userId: userB, roles: [RoleCode.OPERATION] }, () => shipments.confirmationDifference(shipment.id))).rejects.toMatchObject({ response: { code: 'SHIPMENT_NOT_FOUND' } });
     await runInternal(() => bookingSo.publish(bookingA, replacement.id));
     const afterReplacementPublish = await runCustomer(tenantA, userA, customerA, () =>
       bookingSo.listCustomer(bookingA),

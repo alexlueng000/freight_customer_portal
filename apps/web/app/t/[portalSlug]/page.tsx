@@ -283,7 +283,7 @@ const workspaceCapabilities = [
 const customerJourney = [
   { title: '提交需求', description: '查询适用运价，选择航线、船期和所需服务。' },
   { title: '确认报价', description: '在线查看正式报价与费用明细，确认后进入订舱。' },
-  { title: '协同订舱', description: '补充货物与联系人信息，跟进订舱审核和 SO。' },
+  { title: '协同订舱', description: '补充货物与联系人信息，跟进订舱审核和订舱确认单。' },
   { title: '跟进出运', description: '集中查看船期变化、关键节点和业务文件。' },
 ] as const;
 

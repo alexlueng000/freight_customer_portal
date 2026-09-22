@@ -1,3 +1,5 @@
+import { ApiOperation } from '@nestjs/swagger';
+import { SyncShipmentConfirmationDto } from './dto/sync-shipment-confirmation.dto.js';
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ShipmentStatus } from '@prisma/client';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -25,6 +27,14 @@ export class ShipmentsController {
   get(@Param('id') id: string) {
     return this.shipments.get(id);
   }
+
+  @Get(':id/confirmation-difference') @RequirePermissions('shipment.manage')
+  @ApiOperation({ summary: 'Compare current internal booking confirmation with shipment planned fields' })
+  confirmationDifference(@Param('id') id: string) { return this.shipments.confirmationDifference(id); }
+
+  @Post(':id/sync-confirmation') @RequirePermissions('shipment.manage')
+  @ApiOperation({ summary: 'Apply selected confirmation fields to a planned shipment with optimistic conflict detection and audit' })
+  syncConfirmation(@Param('id') id: string, @Body() dto: SyncShipmentConfirmationDto) { return this.shipments.syncConfirmation(id, dto); }
 
   @Patch(':id')
   @RequirePermissions('shipment.manage')

@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/page-header';
 
 const sections: Record<string, { title: string; description: string }> = {
   'audit-logs': { title: '审计日志', description: '系统持续记录关键业务操作。当前版本暂未开放审计检索页面，如需核查请联系平台管理员。' },
-  documents: { title: '单证', description: '已发布 SO 和附件请在对应订舱详情查看。' },
+  documents: { title: '单证', description: '已发布订舱确认单和附件请在对应订舱详情查看。' },
 };
 
 export default async function AdminSectionPage({ params }: { params: Promise<{ section: string }> }) {

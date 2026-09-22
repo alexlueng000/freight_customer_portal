@@ -352,7 +352,7 @@ export function AppShell({
           {isPilotPathAvailable(pathname) ? children : (
             <section className="rounded border border-border bg-surface p-6">
               <h1 className="text-lg font-semibold">此功能暂未开放</h1>
-              <p className="mt-2 text-sm text-muted">当前可办理报价、订舱并查看运输进展。SO 和已发布附件请在对应订舱详情中查看。</p>
+              <p className="mt-2 text-sm text-muted">当前可办理报价、订舱并查看运输进展。订舱确认单和已发布附件请在对应订舱详情中查看。</p>
               <Link className="mt-4 inline-block text-sm font-semibold text-primary hover:underline" href={auth.user?.userType === 'CUSTOMER' ? '/portal' : '/admin'}>返回首页</Link>
             </section>
           )}

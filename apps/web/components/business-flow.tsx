@@ -3,7 +3,7 @@ import type { BusinessFlowStage } from '@/lib/business-flow';
 
 const stages = [
   { key: 'formalQuote', label: '报价确认', description: '销售报价，客户确认' },
-  { key: 'booking', label: '订舱办理', description: '提交资料，获取 SO' },
+  { key: 'booking', label: '订舱办理', description: '提交资料，获取订舱确认单' },
   { key: 'shipment', label: '运输进展', description: '查看开船与到港信息' },
 ];
 

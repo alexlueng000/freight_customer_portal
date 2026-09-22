@@ -1,4 +1,6 @@
 'use client';
+import { BookingCommission, CommissionSummary } from '@/components/booking-commission';
+import { formatConfirmationTime, cutoffHint } from '@/lib/booking-confirmation-time';
 import { quoteAmounts } from '@/lib/quote-amounts';
 import { AlertTriangle, CheckCircle2, Clock, FileCheck2 } from 'lucide-react';
 import Link from 'next/link';
@@ -32,6 +34,7 @@ interface BookingCargoItem {
   specialRequirement: string | null;
 }
 interface Booking {
+  submittedAt?: string | null;
   id: string;
   bookingNo: string;
   quoteId: string | null;
@@ -80,6 +83,9 @@ interface SoRecord {
   soNumber: string;
   vessel: string | null;
   voyage: string | null;
+  etd: string | null;
+  eta: string | null;
+  carrierCode: string | null;
   cyCutoffAt: string | null;
   siCutoffAt: string | null;
   vgmCutoffAt: string | null;
@@ -146,13 +152,15 @@ export default function BookingDetailPage() {
       };
       if (!shipperResponse.ok) throw new Error(shipperPayload.message ?? '常用发货人加载失败。');
       const soPayload = (await soResponse.json()) as SoRecord[] & { message?: string };
-      if (!soResponse.ok) throw new Error(soPayload.message ?? 'SO 记录加载失败。');
+      if (!soResponse.ok) throw new Error(soPayload.message ?? '订舱确认单记录加载失败。');
       setBooking(p);
       setForm(p);
       setDocuments(documentPayload);
       setShippers(shipperPayload);
       setSoRecords(soPayload);
     } catch (e) {
+      setBooking(null);
+      setForm(null);
       setError((e as { message?: string }).message ?? '订舱详情加载失败。');
     } finally {
       setLoading(false);
@@ -438,24 +446,28 @@ export default function BookingDetailPage() {
         }
       />
       <BusinessFlow {...businessFlow} />
-      <BookingProgressStatus booking={booking} />
+      <BookingProgressStatus booking={booking} published={soRecords.length > 0} />
+      <BookingCommission bookingId={id} revision={booking.submittedAt} />
       {editable && !documents.length && !booking.shipments.length ? null : (
         <section className="rounded border border-border bg-surface p-5">
-          <h2 className="font-semibold" id="booking-files">SO、截止时间与运输</h2>
+          <h2 className="font-semibold" id="booking-files">订舱确认单、截止时间与运输</h2>
           <div className="mt-3 space-y-2 text-sm">
             {soRecords.map((record) => (
               <div className="rounded border border-border p-3" key={record.id}>
                 <div className="font-semibold">
-                  SO {record.soNumber} · V{record.version}
+                 订舱确认单{record.soNumber} · V{record.version}
                 </div>
                 <div className="mt-1 text-muted">
                   船名/航次：{record.vessel ?? '—'} / {record.voyage ?? '—'} · 码头：
                   {record.terminal ?? '—'}
                 </div>
                 <div className="text-muted">
-                  截港（CY）：{formatDateTime(record.cyCutoffAt)}<br />
-                  截单（SI）：{formatDateTime(record.siCutoffAt)}<br />
-                  VGM 截止：{formatDateTime(record.vgmCutoffAt)}
+                  船司：{record.carrierCode ?? '待船司确认'}<br />
+                  预计开船：{formatConfirmationTime(record.etd)}<br />
+                  预计到港：{formatConfirmationTime(record.eta)}<br />
+                  集装箱进港截止：{formatConfirmationTime(record.cyCutoffAt)} {cutoffHint(record.cyCutoffAt)}<br />
+                  补料截止：{formatConfirmationTime(record.siCutoffAt)} {cutoffHint(record.siCutoffAt)}<br />
+                  核实总重申报截止：{formatConfirmationTime(record.vgmCutoffAt)} {cutoffHint(record.vgmCutoffAt)}
                 </div>
               </div>
             ))}
@@ -466,7 +478,7 @@ export default function BookingDetailPage() {
                 onClick={() => void downloadDocument(document)}
                 type="button"
               >
-                下载 {document.documentType}：{document.originalFilename}（V{document.version}）
+                下载 {document.documentType === 'SO' ? '订舱确认单' : document.documentType}：{document.originalFilename}（V{document.version}）
               </button>
             ))}
             {booking.shipments.map((shipment) => (
@@ -475,7 +487,7 @@ export default function BookingDetailPage() {
               </Link>
             ))}
             {!soRecords.length && !documents.length ? (
-              <div className="text-muted">暂未收到货代发布的 SO。发布后可在此查看截止时间并下载文件。</div>
+              <div className="text-muted">{booking.status === 'BOOKED' ? '货代已收到订舱确认单，正在核对，发布后可在此查看和下载。' : '正在等待船司确认，货代收到并发布订舱确认单后，可在此查看和下载。'}</div>
             ) : null}
             {!booking.shipments.length ? (
               <div className="text-muted">货代尚未建立运输记录，建立后可从此处查看开船和到港进展。</div>
@@ -860,7 +872,7 @@ export default function BookingDetailPage() {
         <div className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <h2 className="text-sm font-semibold">订舱联系人</h2>
-            <p className="mt-1 text-sm text-muted">用于接收本票订舱进度、SO 等业务通知。</p>
+            <p className="mt-1 text-sm text-muted">用于接收本票订舱进度、订舱确认单等业务通知。</p>
           </div>
           <Field label="联系人" required error={fieldErrors.bookingContactName}>
             <input
@@ -929,7 +941,7 @@ export default function BookingDetailPage() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
           role="dialog"
         >
-          <div className="w-full max-w-lg rounded border border-border bg-surface shadow-xl">
+          <div className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded border border-border bg-surface shadow-xl">
             <div className="border-b border-border px-5 py-4">
               <h2 className="text-base font-semibold" id="submit-booking-title">
                 确认提交订舱
@@ -938,26 +950,9 @@ export default function BookingDetailPage() {
                 提交后将发送给货代操作团队审核，当前草稿将不能继续编辑。
               </p>
             </div>
-            <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2 px-5 py-4 text-sm">
-              <dt className="text-muted">提交给</dt>
-              <dd className="font-semibold text-primary">货代操作团队</dd>
-              <dt className="text-muted">订舱编号</dt>
-              <dd className="font-medium">{booking.bookingNo}</dd>
-              <dt className="text-muted">航线</dt>
-              <dd>
-                {booking.polCode} → {booking.podCode}
-              </dd>
-              <dt className="text-muted">箱量需求</dt>
-              <dd>{formatContainerRequests(form.containerRequests)}</dd>
-              <dt className="text-muted">货物</dt>
-              <dd>
-                {form.cargoItems.length
-                  ? form.cargoItems.map((item) => item.commodity).join('、')
-                  : form.commodity}
-              </dd>
-            </dl>
+            <div className="p-5"><CommissionSummary data={form} /></div>
             <div className="rounded bg-sidebar px-5 py-3 text-sm text-muted">
-              操作团队先审核资料，必要时退回补充；审核通过后向船司或代理订舱，收到 SO 后再通知您。
+              操作团队先审核资料，必要时退回补充；审核通过后向船司或代理订舱，收到订舱确认单后再通知您。
             </div>
             <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
               <button
@@ -983,8 +978,12 @@ export default function BookingDetailPage() {
     </div>
   );
 }
-function BookingProgressStatus({ booking }: { booking: Booking }) {
+function BookingProgressStatus({ booking, published }: { booking: Booking; published: boolean }) {
   const config = bookingProgressStatusConfig(booking.status);
+  if (booking.status === 'BOOKED') {
+    config.description = `${published ? '订舱确认单已发布，可在下方查看截止时间和下载文件。' : '货代已收到订舱确认单，正在核对，发布后可在下方下载。'}${booking.shipments.length ? '已有运输记录，可查看后续进展。' : '正在等待货代建立运输记录。'}`;
+  }
+  if (booking.status === 'REVISION_REQUIRED' && booking.lastStatusRemark) config.description = `请补充：${booking.lastStatusRemark}。修改后重新提交，原委托版本会保留。`;
   const Icon = config.icon;
   return (
     <section className={`rounded border px-4 py-3 ${config.panelClass}`}>
@@ -1045,23 +1044,23 @@ function bookingProgressStatusConfig(status: string) {
     return {
       icon: FileCheck2,
       title: '订舱资料已通过审核',
-      description: '操作团队正在向承运方提交订舱，后续会更新 SO 信息。',
+      description: '操作团队正在向承运方提交订舱，后续会更新订舱确认单信息。',
       panelClass: 'border-primary/20 bg-primary/5',
       iconClass: 'bg-primary/10 text-primary',
     };
   if (status === 'BOOKING_SUBMITTED')
     return {
       icon: FileCheck2,
-      title: '已提交承运方，等待 SO',
-      description: '订舱已由操作团队提交给承运方，SO 放出后会在本页展示。',
+      title: '已提交承运方，等待订舱确认单',
+      description: '订舱已由操作团队提交给承运方，订舱确认单放出后会在本页展示。',
       panelClass: 'border-primary/20 bg-primary/5',
       iconClass: 'bg-primary/10 text-primary',
     };
   if (status === 'BOOKED')
     return {
       icon: CheckCircle2,
-      title: '订舱已完成',
-      description: '已取得舱位确认。SO 发布后可在下方下载；运输记录建立后可直接查看开船和到港进展。',
+      title: '已取得舱位确认',
+      description: '已取得舱位确认。订舱确认单发布后可在下方下载；运输记录建立后可直接查看开船和到港进展。',
       panelClass: 'border-success/20 bg-success/5',
       iconClass: 'bg-success/10 text-success',
     };
@@ -1276,10 +1275,6 @@ function formatSelectedShipper(shipper?: CustomerShipper) {
     .filter(Boolean)
     .join(' / ');
   return contact ? `已带入：${shipper.name}，${contact}` : `已带入：${shipper.name}`;
-}
-
-function formatDateTime(value: string | null) {
-  return value ? new Date(value).toLocaleString('zh-CN') : '—';
 }
 
 function optionalText(value: string | null) {

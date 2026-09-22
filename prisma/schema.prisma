@@ -212,6 +212,7 @@ model Tenant {
   customerShippers       CustomerShipper[]
   bookingReviewActions   BookingReviewAction[]
   bookingSoRecords       BookingSoRecord[]
+  bookingSubmissions     BookingSubmission[]
   auditLogs              AuditLog[]
   businessNumberCounters BusinessNumberCounter[]
   refreshSessions        RefreshSession[]
@@ -759,12 +760,30 @@ model Booking {
   documents         Document[]
   reviewActions     BookingReviewAction[]
   soRecords         BookingSoRecord[]
+  submissions       BookingSubmission[]
+  submissionVersion Int @default(0)
 
   @@unique([tenantId, bookingNo])
   @@index([tenantId, customerCompanyId, status])
   @@index([tenantId, quoteId])
   @@index([tenantId, sourceShipperId])
   @@index([tenantId, createdAt])
+}
+
+model BookingSubmission {
+  id String @id @default(cuid())
+  tenantId String
+  bookingId String
+  version Int
+  submittedById String
+  submittedByName String @db.VarChar(200)
+  submittedAt DateTime @default(now()) @db.Timestamptz(3)
+  schemaVersion Int @default(1)
+  snapshot Json
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, bookingId, version])
 }
 
 model BookingCargoItem {

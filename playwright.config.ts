@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
 
 const apiPort = process.env.E2E_API_PORT ?? '4000';
 const webPort = process.env.E2E_WEB_PORT ?? '3000';
@@ -23,13 +24,16 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: `NODE_ENV=test API_PORT=${apiPort} pnpm --filter @freight/api start`,
+      command: 'node apps/api/dist/main.js',
+      env: { NODE_ENV: 'test', API_PORT: apiPort },
       url: `${apiUrl}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
     {
-      command: `API_INTERNAL_URL=${apiUrl} pnpm --filter @freight/web exec next dev -p ${webPort}`,
+      command: `node node_modules/next/dist/bin/next dev -p ${webPort}`,
+      cwd: path.resolve('apps/web'),
+      env: { API_INTERNAL_URL: apiUrl },
       url: `${webUrl}/login`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

@@ -1,10 +1,10 @@
 import { generateQuotePdf } from './quote-pdf.processor.js';
 import PDFDocument from 'pdfkit';
-import { jest } from '@jest/globals';
+const jestApi = (import.meta as ImportMeta & { jest: typeof jest }).jest;
 
 describe('generateQuotePdf', () => {
   it('embeds a CJK font and Unicode mapping for Chinese quote content', async () => {
-    const text = jest.spyOn(PDFDocument.prototype, 'text');
+    const text = jestApi.spyOn(PDFDocument.prototype, 'text');
     const pdf = await generateQuotePdf({
       quoteNo: 'QT202608000001',
       status: 'SENT',

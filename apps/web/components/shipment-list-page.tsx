@@ -55,7 +55,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
         title={mode === 'portal' ? '我的运输' : '出运记录'}
         description={
           mode === 'admin'
-            ? '维护 SO 后的基础出运信息、船期时间与客户可见进度。'
+            ? '维护订舱确认单后的基础出运信息、船期时间与客户可见进度。'
             : '查看已订舱后的船名航次、预计时间和基础进度。'
         }
       />
@@ -95,7 +95,7 @@ export function ShipmentListPage({ mode }: { mode: 'admin' | 'portal' }) {
               description={
                 status || query
                   ? '请调整状态或关键词后重新查看。'
-                  : '订舱确认并登记 SO 后，操作人员可以创建出运记录，你可以在这里查看运输进度。'
+                  : '订舱确认并登记订舱确认单后，操作人员可以创建出运记录，你可以在这里查看运输进度。'
               }
             />
           </div>

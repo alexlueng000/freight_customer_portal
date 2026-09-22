@@ -1,3 +1,5 @@
+import { lockBooking } from './booking-lock.js';
+import { submissionSelect, submissionSnapshot } from './booking-submission-snapshot.js';
 import {
   BadRequestException,
   ConflictException,
@@ -91,6 +93,7 @@ const bookingSelect = {
   quote: {
     select: {
       quoteNo: true,
+      customerTerms: true,
       polCode: true,
       podCode: true,
       carrierCode: true,
@@ -497,6 +500,7 @@ export class BookingsService {
   async update(id: string, dto: UpdateBookingDto) {
     const context = this.requireCustomer();
     return this.prisma.$transaction(async (tx) => {
+      await lockBooking(tx, context.tenantId, id);
       const booking = await tx.booking.findFirst({
         where: { id, tenantId: context.tenantId, customerCompanyId: context.customerCompanyId },
         include: { containerRequests: true, cargoItems: true },
@@ -664,46 +668,128 @@ export class BookingsService {
 
   async submit(id: string) {
     const context = this.requireCustomer();
+    return this.prisma.$transaction(async (tx) => {
+      await lockBooking(tx, context.tenantId, id);
+      const booking = await tx.booking.findFirst({
+        where: { id, tenantId: context.tenantId, customerCompanyId: context.customerCompanyId },
+        include: { containerRequests: true, cargoItems: true },
+      });
+      if (!booking)
+        throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: '订舱不存在。' });
+      if (!this.stateMachine.canTransition(booking.status, BookingStatus.SUBMITTED))
+        throw new BadRequestException({
+          code: 'ILLEGAL_BOOKING_TRANSITION',
+          message: '当前状态不可提交，请刷新。',
+        });
+      const missing = [
+        'commodity',
+        'packageType',
+        'packages',
+        'grossWeight',
+        'cargoReadyDate',
+        'shipperName',
+        'shipperAddress',
+        'bookingContactName',
+      ].filter((key) => !booking[key as keyof typeof booking]);
+      if (booking.grossWeight && booking.grossWeight.lte(0)) missing.push('grossWeight');
+      if (booking.volumeCbm && booking.volumeCbm.lte(0)) missing.push('volumeCbmPositive');
+      if (booking.isDangerousGoods && !booking.specialInstructions?.trim())
+        missing.push('dangerousGoodsInfo');
+      if (!booking.bookingContactEmail && !booking.bookingContactPhone)
+        missing.push('bookingContactEmailOrPhone');
+      if (booking.containerRequests.length === 0) missing.push('containerRequests');
+      if (
+        booking.cargoItems.length > 0 &&
+        booking.cargoItems.some(
+          (item) => !item.commodity.trim() || !item.estimatedGrossWeight?.gt(0),
+        )
+      )
+        missing.push('cargoItems');
+      if (missing.length)
+        throw new BadRequestException({
+          code: 'BOOKING_INCOMPLETE',
+          message: 'Complete required booking fields before submitting',
+          details: { missing, fieldErrors: this.missingBookingFieldErrors(missing) },
+        });
+
+      const now = new Date();
+      const actor = await tx.user.findFirstOrThrow({
+        where: { id: context.userId, tenantId: context.tenantId },
+        select: { displayName: true },
+      });
+      const version = booking.submissionVersion + 1;
+      const snapshotSource = await tx.booking.findFirstOrThrow({
+        where: { id, tenantId: context.tenantId },
+        select: submissionSelect,
+      });
+      await tx.booking.update({
+        where: { id },
+        data: {
+          status: BookingStatus.SUBMITTED,
+          submittedAt: now,
+          submissionVersion: version,
+          updatedById: context.userId,
+        },
+      });
+      await tx.bookingSubmission.create({
+        data: {
+          tenantId: context.tenantId,
+          bookingId: id,
+          version,
+          submittedById: context.userId,
+          submittedByName: actor.displayName,
+          submittedAt: now,
+          snapshot: submissionSnapshot(snapshotSource),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'Booking',
+          entityId: id,
+          action: 'STATUS_SUBMITTED',
+          beforeData: { status: booking.status },
+          afterData: { status: BookingStatus.SUBMITTED, submissionVersion: version },
+        },
+      });
+      return tx.booking.findUniqueOrThrow({ where: { id }, select: bookingSelect });
+    });
+  }
+
+  async listSubmissions(id: string, internal = false, before?: number) {
+    const context = internal ? this.requireInternal() : this.requireCustomer();
     const booking = await this.prisma.booking.findFirst({
-      where: { id, tenantId: context.tenantId, customerCompanyId: context.customerCompanyId },
-      include: { containerRequests: true, cargoItems: true },
+      where: internal
+        ? { id, ...this.internalWhere(context) }
+        : { id, tenantId: context.tenantId, customerCompanyId: context.customerCompanyId },
+      select: { id: true },
     });
     if (!booking)
-      throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
-    const missing = [
-      'commodity',
-      'packageType',
-      'packages',
-      'grossWeight',
-      'cargoReadyDate',
-      'shipperName',
-      'shipperAddress',
-      'bookingContactName',
-    ].filter((key) => !booking[key as keyof typeof booking]);
-    if (booking.grossWeight && booking.grossWeight.lte(0)) missing.push('grossWeight');
-    if (booking.volumeCbm && booking.volumeCbm.lte(0)) missing.push('volumeCbmPositive');
-    if (booking.isDangerousGoods && !booking.specialInstructions?.trim())
-      missing.push('dangerousGoodsInfo');
-    if (!booking.bookingContactEmail && !booking.bookingContactPhone)
-      missing.push('bookingContactEmailOrPhone');
-    if (booking.containerRequests.length === 0) missing.push('containerRequests');
-    if (
-      booking.cargoItems.length > 0 &&
-      booking.cargoItems.some((item) => !item.commodity.trim() || !item.estimatedGrossWeight?.gt(0))
-    )
-      missing.push('cargoItems');
-    if (missing.length)
-      throw new BadRequestException({
-        code: 'BOOKING_INCOMPLETE',
-        message: 'Complete required booking fields before submitting',
-        details: { missing, fieldErrors: this.missingBookingFieldErrors(missing) },
-      });
-    return this.transition(id, BookingStatus.SUBMITTED, {}, false);
+      throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: '订舱不存在。' });
+    return this.prisma.bookingSubmission.findMany({
+      where: {
+        tenantId: context.tenantId,
+        bookingId: id,
+        ...(before ? { version: { lt: before } } : {}),
+      },
+      select: {
+        id: true,
+        version: true,
+        submittedByName: true,
+        submittedAt: true,
+        schemaVersion: true,
+        snapshot: true,
+      },
+      orderBy: { version: 'desc' },
+      take: 20,
+    });
   }
 
   async createShipment(id: string, dto: CreateShipmentDto) {
     const context = this.requireInternal();
     const result = await this.prisma.$transaction(async (tx) => {
+      await lockBooking(tx, context.tenantId, id);
       const booking = await tx.booking.findFirst({
         where: {
           id,
@@ -726,12 +812,28 @@ export class BookingsService {
           polCode: true,
           podCode: true,
           etd: true,
+          soRecords: {
+            where: {
+              status: {
+                in: [BookingSoRecordStatus.INTERNAL_DRAFT, BookingSoRecordStatus.PUBLISHED],
+              },
+              document: { status: DocumentStatus.ACTIVE },
+            },
+            orderBy: { version: 'desc' },
+            take: 1,
+          },
         },
       });
       if (!booking)
         throw new NotFoundException({
           code: 'BOOKED_BOOKING_WITH_REGISTERED_SO_NOT_FOUND',
           message: 'Booked booking with a registered SO not found',
+        });
+      const confirmation = booking.soRecords[0]!;
+      if (dto.soRecordId && dto.soRecordId !== confirmation.id)
+        throw new ConflictException({
+          code: 'SO_VERSION_CONFLICT',
+          message: '订舱确认单已更新，请刷新后重新核对。',
         });
       const existing = await tx.shipment.findFirst({
         where: { tenantId: context.tenantId, bookingId: id },
@@ -760,13 +862,13 @@ export class BookingsService {
           bookingId: id,
           customerCompanyId: booking.customerCompanyId,
           status: 'PLANNED',
-          carrierCode: booking.carrierCode,
-          vessel: dto.vessel?.trim(),
-          voyage: dto.voyage?.trim(),
+          carrierCode: confirmation.carrierCode,
+          vessel: confirmation.vessel,
+          voyage: confirmation.voyage,
           polCode: booking.polCode,
           podCode: booking.podCode,
-          etd: booking.etd,
-          eta: dto.eta ? new Date(dto.eta) : undefined,
+          etd: confirmation.etd,
+          eta: confirmation.eta,
           createdById: context.userId,
         },
         select: shipmentSelect,
@@ -778,7 +880,13 @@ export class BookingsService {
           entityType: 'Shipment',
           entityId: shipment.id,
           action: 'CREATE_FROM_BOOKING',
-          afterData: { shipmentNo, bookingId: id, status: shipment.status },
+          afterData: {
+            shipmentNo,
+            bookingId: id,
+            status: shipment.status,
+            soRecordId: confirmation.id,
+            soVersion: confirmation.version,
+          },
         },
       });
       const emailJobs =

@@ -128,7 +128,7 @@ export class DashboardService {
           description: '客户已提交，等待资料审核',
         },
         {
-          label: '待登记 SO',
+          label: '待登记订舱确认单',
           value: bookingSubmitted,
           href: '/admin/bookings?status=BOOKING_SUBMITTED',
           tone: 'info',
@@ -836,7 +836,7 @@ function resolveAdminRoleView(roles: RoleCode[]): AdminRoleView {
   return {
     code: 'OPERATION',
     title: 'Operation Dashboard',
-    description: '聚焦订舱审核、SO 登记、Shipment 节点和单证履约。',
+    description: '聚焦订舱审核、订舱确认单登记、Shipment 节点和单证履约。',
     primaryActionLabel: '查看订舱',
     primaryActionHref: '/admin/bookings',
   };
@@ -876,5 +876,5 @@ function todayUtcDate() {
 function adminBookingAction(status: BookingStatus) {
   if (status === BookingStatus.SUBMITTED) return '审核资料';
   if (status === BookingStatus.APPROVED) return '提交订舱';
-  return '登记 SO';
+  return '登记订舱确认单';
 }

@@ -1,3 +1,6 @@
+import { ConflictException } from '@nestjs/common';
+import { lockBooking } from './booking-lock.js';
+import { confirmationFields, type SyncShipmentConfirmationDto } from './dto/sync-shipment-confirmation.dto.js';
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma, RoleCode, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -62,6 +65,116 @@ export class ShipmentsService {
     if (!shipment)
       throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found' });
     return shipment;
+  }
+
+  async confirmationDifference(id: string) {
+    const context = this.requireInternal();
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id, ...this.scope(context) },
+    });
+    if (!shipment)
+      throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: '运输不存在。' });
+    const confirmation = await this.prisma.bookingSoRecord.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        bookingId: shipment.bookingId,
+        status: { in: ['INTERNAL_DRAFT', 'PUBLISHED'] },
+        document: { status: 'ACTIVE' },
+      },
+      orderBy: { version: 'desc' },
+      select: {
+        id: true,
+        soNumber: true,
+        version: true,
+        status: true,
+        carrierCode: true,
+        vessel: true,
+        voyage: true,
+        etd: true,
+        eta: true,
+      },
+    });
+    return {
+      shipment: { id: shipment.id, status: shipment.status, updatedAt: shipment.updatedAt },
+      confirmation,
+      differences: confirmation
+        ? confirmationFields
+            .filter((key) => String(shipment[key]) !== String(confirmation[key]))
+            .map((field) => ({ field, current: shipment[field], proposed: confirmation[field] }))
+        : [],
+    };
+  }
+
+  async syncConfirmation(id: string, dto: SyncShipmentConfirmationDto) {
+    const context = this.requireInternal();
+    return this.prisma.$transaction(async (tx) => {
+      const ref = await tx.shipment.findFirst({
+        where: { id, ...this.scope(context) },
+        select: { bookingId: true },
+      });
+      if (!ref)
+        throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: '运输不存在。' });
+      await lockBooking(tx, context.tenantId, ref.bookingId);
+      await tx.$queryRaw`SELECT "id" FROM "Shipment" WHERE "tenantId" = ${context.tenantId} AND "id" = ${id} FOR UPDATE`;
+      const current = await tx.shipment.findFirstOrThrow({ where: { id, ...this.scope(context) } });
+      if (current.status !== 'PLANNED')
+        throw new BadRequestException({
+          code: 'SHIPMENT_SYNC_NOT_PLANNED',
+          message: '仅未开船运输可核对更新计划信息；实际开船和到港时间保持原记录。',
+        });
+      const confirmation = await tx.bookingSoRecord.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          bookingId: ref.bookingId,
+          status: { in: ['INTERNAL_DRAFT', 'PUBLISHED'] },
+          document: { status: 'ACTIVE' },
+        },
+        orderBy: { version: 'desc' },
+      });
+      if (
+        !confirmation ||
+        confirmation.id !== dto.soRecordId ||
+        current.updatedAt.toISOString() !== new Date(dto.expectedUpdatedAt).toISOString()
+      )
+        throw new ConflictException({
+          code: 'SHIPMENT_CONFIRMATION_CONFLICT',
+          message: '运输或订舱确认单已更新，请刷新后重新核对。',
+        });
+      const data: Prisma.ShipmentUpdateManyMutationInput = {};
+      const beforeData: Record<string, Prisma.InputJsonValue | null> = {};
+      const afterData: Record<string, Prisma.InputJsonValue | null> = {
+        soRecordId: confirmation.id,
+        soVersion: confirmation.version,
+      };
+      for (const field of dto.fields) {
+        const value = confirmation[field];
+        Object.assign(data, { [field]: value });
+        beforeData[field] =
+          current[field] instanceof Date ? current[field].toISOString() : current[field];
+        afterData[field] = value instanceof Date ? value.toISOString() : value;
+      }
+      const changed = await tx.shipment.updateMany({
+        where: { id, tenantId: context.tenantId, status: 'PLANNED', updatedAt: current.updatedAt },
+        data,
+      });
+      if (changed.count !== 1)
+        throw new ConflictException({
+          code: 'SHIPMENT_CONFIRMATION_CONFLICT',
+          message: '运输已变化，请刷新。',
+        });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          entityType: 'Shipment',
+          entityId: id,
+          action: 'SYNC_BOOKING_CONFIRMATION',
+          beforeData,
+          afterData,
+        },
+      });
+      return tx.shipment.findFirstOrThrow({ where: { id, tenantId: context.tenantId }, select });
+    });
   }
 
   async update(id: string, dto: UpdateShipmentDto) {

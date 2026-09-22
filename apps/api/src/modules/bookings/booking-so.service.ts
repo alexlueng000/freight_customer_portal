@@ -1,5 +1,7 @@
+import { lockBooking } from './booking-lock.js';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -93,7 +95,7 @@ export class BookingSoService {
     await this.requireBooking(bookingId, context.tenantId);
     return this.prisma.bookingSoRecord.findMany({
       where: { tenantId: context.tenantId, bookingId },
-      select: customerSoSelect,
+      select: soSelect,
       orderBy: { version: 'desc' },
     });
   }
@@ -122,7 +124,7 @@ export class BookingSoService {
         status: BookingSoRecordStatus.PUBLISHED,
         document: { status: DocumentStatus.ACTIVE, customerVisible: true },
       },
-      select: soSelect,
+      select: customerSoSelect,
       orderBy: { version: 'desc' },
     });
   }
@@ -150,7 +152,7 @@ export class BookingSoService {
     if (!replaced)
       throw new NotFoundException({
         code: 'PUBLISHED_SO_RECORD_NOT_FOUND',
-        message: 'Published SO record to replace was not found',
+        message: '待修订的已发布订舱确认单不存在。',
       });
     return this.uploadDraft(bookingId, dto, file);
   }
@@ -158,6 +160,7 @@ export class BookingSoService {
   async publish(bookingId: string, soId: string) {
     const context = this.requireInternal();
     const result = await this.prisma.$transaction(async (tx) => {
+      await lockBooking(tx, context.tenantId, bookingId);
       const record = await tx.bookingSoRecord.findFirst({
         where: {
           id: soId,
@@ -177,7 +180,7 @@ export class BookingSoService {
       if (!record)
         throw new NotFoundException({
           code: 'PUBLISHABLE_SO_RECORD_NOT_FOUND',
-          message: 'Publishable SO record not found',
+          message: '找不到可发布的订舱确认单。',
         });
       const latest = await tx.bookingSoRecord.aggregate({
         where: { tenantId: context.tenantId, bookingId },
@@ -186,7 +189,7 @@ export class BookingSoService {
       if (record.version !== latest._max.version)
         throw new BadRequestException({
           code: 'SO_PUBLISH_STALE_VERSION',
-          message: 'Only the latest SO draft can be published',
+          message: '只能发布最新版本的订舱确认单，请刷新后核对。',
         });
       const previous = await tx.bookingSoRecord.findMany({
         where: {
@@ -226,7 +229,7 @@ export class BookingSoService {
       if (published.count !== 1)
         throw new BadRequestException({
           code: 'SO_PUBLISH_CONFLICT',
-          message: 'SO record changed; refresh and try again',
+          message: '订舱确认单已更新，请刷新后重试。',
         });
       await tx.document.update({
         where: { id: record.documentId },
@@ -263,8 +266,8 @@ export class BookingSoService {
           customerCompanyId: record.booking.customerCompanyId,
           type: 'SO_PUBLISHED',
           payload: {
-            title: 'SO 已发布',
-            description: `${record.booking.bookingNo} 的 SO ${record.soNumber} 已可以查看和下载。`,
+            title: '订舱确认单已发布',
+            description: `${record.booking.bookingNo} 的订舱确认单 ${record.soNumber} 已可以查看和下载。`,
             bookingId,
             bookingNo: record.booking.bookingNo,
             soRecordId: soId,
@@ -286,6 +289,12 @@ export class BookingSoService {
   ) {
     const context = this.requireInternal();
     this.validateFile(file);
+    const fieldErrors: Record<string, string[]> = {};
+    for (const key of ['receivedAt', 'etd', 'eta', 'cyCutoffAt', 'siCutoffAt', 'vgmCutoffAt'] as const) {
+      const value = dto[key];
+      if (value && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value)))) fieldErrors[key] = ['请输入包含时区的有效日期时间。'];
+    }
+    if (Object.keys(fieldErrors).length) throw this.fieldError('SO_TIME_INVALID', '订舱确认单日期时间无效。', fieldErrors);
     await this.requireBooking(bookingId, context.tenantId, [
       BookingStatus.BOOKING_SUBMITTED,
       BookingStatus.BOOKED,
@@ -299,6 +308,7 @@ export class BookingSoService {
     await this.storage.upload(objectKey, file);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockBooking(tx, context.tenantId, bookingId);
         const document = await tx.document.create({
           data: {
             tenantId: context.tenantId,
@@ -319,6 +329,7 @@ export class BookingSoService {
         });
         if (!booking)
           throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'Booking not found' });
+        if (![BookingStatus.BOOKING_SUBMITTED, BookingStatus.BOOKED].includes(booking.status as 'BOOKING_SUBMITTED' | 'BOOKED')) throw new BadRequestException({ code: 'BOOKING_STATE_CONFLICT', message: '订舱状态已变化，请刷新。' });
         const record = await tx.bookingSoRecord.create({
           data: {
             tenantId: context.tenantId,
@@ -354,7 +365,7 @@ export class BookingSoService {
               status: BookingStatus.BOOKED,
               bookedAt: new Date(),
               updatedById: context.userId,
-              lastStatusRemark: 'SO registered internally',
+              lastStatusRemark: '已收到船司订舱确认。',
             },
           });
           if (booked.count !== 1)
@@ -405,6 +416,9 @@ export class BookingSoService {
       });
     } catch (error) {
       await this.storage.remove(objectKey);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({ code: 'SO_VERSION_CONFLICT', message: '订舱确认单已被其他操作员更新，请刷新后重试。' });
+      }
       throw error;
     }
   }

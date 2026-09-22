@@ -240,7 +240,7 @@ export default function AdminPage() {
                 <div className="p-4">
                   <EmptyState
                     title="当前没有未读通知"
-                    description="SO、出运记录和订舱协同事件会出现在这里。"
+                    description="订舱确认单、出运记录和订舱协同事件会出现在这里。"
                   />
                 </div>
               )}
@@ -255,7 +255,7 @@ export default function AdminPage() {
 const fallbackRoleView: RoleView = {
   code: 'OPERATION',
   title: '操作工作台',
-  description: '聚焦订舱审核、SO 登记、出运记录节点和单证履约。',
+  description: '聚焦订舱审核、订舱确认单登记、出运记录节点和单证履约。',
   primaryActionLabel: '查看订舱',
   primaryActionHref: '/admin/bookings',
 };

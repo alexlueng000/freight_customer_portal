@@ -391,7 +391,7 @@ export default function PortalPage() {
                   <div className="p-5">
                     <EmptyState
                       title="当前没有未读通知"
-                      description="SO 发布、运输更新和订舱补料提醒会显示在这里。"
+                      description="订舱确认单发布、运输更新和订舱补料提醒会显示在这里。"
                     />
                   </div>
                 )}

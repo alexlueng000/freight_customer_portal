@@ -1,3 +1,5 @@
+import { ListBookingSubmissionsDto } from './dto/list-booking-submissions.dto.js';
+import { ApiOperation } from '@nestjs/swagger';
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequirePermissions } from '../auth/permissions.decorator.js';
@@ -15,6 +17,11 @@ export class AdminBookingsController {
   constructor(private readonly bookings: BookingsService) {}
   @Get() @RequirePermissions('booking.read') list(@Query() query: ListBookingsDto) {
     return this.bookings.listInternal(query);
+  }
+  @Get(':id/submissions') @RequirePermissions('booking.read')
+  @ApiOperation({ summary: 'List immutable booking submissions for authorized printing, newest first, 20 per page' })
+  submissions(@Param('id') id: string, @Query() query: ListBookingSubmissionsDto) {
+    return this.bookings.listSubmissions(id, true, query.before);
   }
   @Get(':id') @RequirePermissions('booking.read') get(@Param('id') id: string) {
     return this.bookings.getInternal(id);
@@ -51,6 +58,7 @@ export class AdminBookingsController {
   }
   @Post(':id/shipments')
   @RequirePermissions('shipment.create')
+  @ApiOperation({ summary: 'Create one shipment from the current effective internal booking confirmation; publication is not required' })
   createShipment(@Param('id') id: string, @Body() dto: CreateShipmentDto) {
     return this.bookings.createShipment(id, dto);
   }

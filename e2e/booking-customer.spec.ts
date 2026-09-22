@@ -109,7 +109,7 @@ test.describe('Customer booking experience', () => {
     await expect(page.getByLabel('发货人名称')).toHaveValue(`默认发货人 ${run}`);
     await expect(page.getByRole('textbox', { name: '货物品名 必填' })).toHaveValue('Furniture');
     await expect(page.getByRole('textbox', { name: '预计毛重 KG' })).toHaveValue('18000');
-    await expect(page.getByText('SO、截止时间与运输')).toHaveCount(0);
+    await expect(page.getByText('订舱确认单、截止时间与运输')).toHaveCount(0);
 
     await page.getByRole('button', { name: '提交订舱' }).click();
     await expect(page.getByText('请输入货物品名。')).toHaveCount(0);
@@ -183,22 +183,23 @@ test.describe('Customer booking experience', () => {
     await adminPage.getByLabel('订舱对象').fill('E2E Carrier Agent');
     await adminPage.getByLabel('订舱参考号（选填）').fill(`REF-${run}`);
     await adminPage.getByRole('button', { name: '确认已提交' }).click();
-    await expect(adminPage.getByText('已提交订舱 · 待 SO')).toBeVisible();
+    await expect(adminPage.getByText('已提交订舱 · 待订舱确认单')).toBeVisible();
     await expect(adminPage.getByText(`REF-${run}`, { exact: false })).toBeVisible();
-    await expect(adminPage.getByLabel('SO 文件')).toHaveCount(0);
-    await adminPage.getByRole('button', { name: '登记 SO' }).click();
-    await adminPage.getByLabel('SO 文件').setInputFiles({
+    await expect(adminPage.getByLabel('订舱确认单文件')).toHaveCount(0);
+    await adminPage.getByRole('button', { name: '登记订舱确认单' }).click();
+    await adminPage.getByLabel('订舱确认单文件').setInputFiles({
       name: `SO-${run}.pdf`,
       mimeType: 'application/pdf',
       buffer: Buffer.from('%PDF-1.4\n%%EOF'),
     });
-    await adminPage.getByLabel('SO 号').fill(`SO-${run}`);
+    await adminPage.getByLabel('订舱确认单编号').fill(`SO-${run}`);
     await adminPage.getByLabel('来源名称').fill('E2E Carrier Agent');
-    await adminPage.getByLabel('Vessel').fill('E2E STAR');
-    await adminPage.getByLabel('Voyage').fill(`V${run.slice(-5)}`);
-    await adminPage.getByRole('button', { name: '保存 SO' }).click();
+    await adminPage.getByLabel('船名').fill('E2E STAR');
+    await adminPage.getByLabel('航次').fill(`V${run.slice(-5)}`);
+    await adminPage.getByLabel('实际接收时间').fill('2026-09-22T09:00');
+    await adminPage.getByRole('button', { name: '保存订舱确认单' }).click();
     await expect(adminPage.getByText('已订舱')).toBeVisible();
-    await expect(adminPage.getByText('SO 已登记 · 客户暂不可见')).toBeVisible();
+    await expect(adminPage.getByText('订舱确认单已登记 · 客户暂不可见')).toBeVisible();
     const hiddenSoRecords = await json<unknown[]>(
       await request.get(`${apiBase}/bookings/${booking.id}/so-records`, {
         headers: bearer(customerToken),
@@ -207,7 +208,7 @@ test.describe('Customer booking experience', () => {
     );
     expect(hiddenSoRecords).toHaveLength(0);
     await adminPage.getByRole('button', { name: '发布给客户' }).click();
-    await expect(adminPage.getByRole('dialog', { name: '确认发布 SO' })).toBeVisible();
+    await expect(adminPage.getByRole('dialog', { name: '确认发布订舱确认单' })).toBeVisible();
     await adminPage.getByRole('button', { name: '确认发布' }).click();
     await expect(adminPage.getByText('已订舱')).toBeVisible();
     const publishedSoRecords = await json<Array<{ soNumber: string }>>(

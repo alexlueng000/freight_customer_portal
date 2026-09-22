@@ -1,4 +1,7 @@
 'use client';
+import { confirmationTimeToIso, confirmationTimeInput, formatConfirmationTime, cutoffHint } from '@/lib/booking-confirmation-time';
+import { BookingCommission } from '@/components/booking-commission';
+import { ShipmentConfirmationDifference } from '@/components/shipment-confirmation-difference';
 import { quoteAmounts } from '@/lib/quote-amounts';
 import { AlertTriangle, CheckCircle2, Ship } from 'lucide-react';
 import Link from 'next/link';
@@ -112,7 +115,7 @@ interface SoRecord {
   status: 'INTERNAL_DRAFT' | 'PUBLISHED' | 'SUPERSEDED';
   uploadedBy: { displayName: string } | null;
   publishedBy: { displayName: string } | null;
-  document: { id: string; originalFilename: string; customerVisible: boolean };
+  document: { id: string; originalFilename: string; customerVisible: boolean; status?: string };
 }
 interface ApiErrorPayload {
   code?: string;
@@ -133,7 +136,7 @@ type SoFieldErrors = Partial<
     | 'vessel'
     | 'voyage'
     | 'etd'
-    | 'receivedAt',
+    | 'eta' | 'cyCutoffAt' | 'siCutoffAt' | 'vgmCutoffAt' | 'terminal' | 'receivedAt',
     string
   >
 >;
@@ -173,6 +176,17 @@ export default function AdminBookingDetail() {
   const [soVessel, setSoVessel] = useState('');
   const [soVoyage, setSoVoyage] = useState('');
   const [soEtd, setSoEtd] = useState('');
+  const [replacingSoId, setReplacingSoId] = useState<string | null>(null);
+  const [soDetails, setSoDetails] = useState({
+    eta: '',
+    cyCutoffAt: '',
+    siCutoffAt: '',
+    vgmCutoffAt: '',
+    terminal: '',
+    receivedAt: '',
+    carrierCode: '',
+  });
+  const [soOffset, setSoOffset] = useState('+08:00');
   const [soFieldErrors, setSoFieldErrors] = useState<SoFieldErrors>({});
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,10 +202,11 @@ export default function AdminBookingDetail() {
       };
       if (!bookingResponse.ok) throw new Error(p.message ?? '订舱详情加载失败。');
       const soPayload = (await soResponse.json()) as SoRecord[] & { message?: string };
-      if (!soResponse.ok) throw new Error(soPayload.message ?? 'SO 记录加载失败。');
+      if (!soResponse.ok) throw new Error(soPayload.message ?? '订舱确认单记录加载失败。');
       setB(p);
       setSoRecords(soPayload);
     } catch (e) {
+      setB(null);
       setError((e as { message?: string }).message ?? '订舱详情加载失败。');
     } finally {
       setLoading(false);
@@ -229,9 +244,26 @@ export default function AdminBookingDetail() {
   };
   const uploadSo = async () => {
     const clientErrors: SoFieldErrors = {
-      ...(!soFile ? { file: '请选择 SO 文件。' } : {}),
-      ...(!soNumber.trim() ? { soNumber: '请输入 SO No.' } : {}),
+      ...(!soFile ? { file: '请选择订舱确认单文件。' } : {}),
+      ...(!soNumber.trim() ? { soNumber: '请输入订舱确认单编号' } : {}),
     };
+    if (!soDetails.receivedAt) clientErrors.receivedAt = '请输入实际收到订舱确认单的时间。';
+    for (const key of ['receivedAt', 'eta', 'cyCutoffAt', 'siCutoffAt', 'vgmCutoffAt'] as const) {
+      if (soDetails[key]) {
+        try {
+          confirmationTimeToIso(soDetails[key], soOffset);
+        } catch {
+          clientErrors[key] = '请输入有效日期和时间。';
+        }
+      }
+    }
+    if (soEtd) {
+      try {
+        confirmationTimeToIso(soEtd, soOffset);
+      } catch {
+        clientErrors.etd = '请输入有效日期和时间。';
+      }
+    }
     setSoFieldErrors(clientErrors);
     if (Object.keys(clientErrors).length) return;
     if (!soFile) return;
@@ -244,16 +276,22 @@ export default function AdminBookingDetail() {
       form.append('file', soFile);
       form.append('soNumber', submittedSoNumber);
       form.append('sourceType', soSourceType);
-      form.append('receivedAt', new Date().toISOString());
+      for (const key of ['receivedAt', 'eta', 'cyCutoffAt', 'siCutoffAt', 'vgmCutoffAt'] as const) {
+        if (soDetails[key]) form.append(key, confirmationTimeToIso(soDetails[key], soOffset));
+      }
+      if (soDetails.terminal.trim()) form.append('terminal', soDetails.terminal.trim());
       if (soSourceName.trim()) form.append('sourceName', soSourceName.trim());
-      if (b?.carrierCode) form.append('carrierCode', b.carrierCode);
+      if (soDetails.carrierCode.trim()) form.append('carrierCode', soDetails.carrierCode.trim());
       if (soVessel.trim()) form.append('vessel', soVessel.trim());
       if (soVoyage.trim()) form.append('voyage', soVoyage.trim());
-      if (soEtd) form.append('etd', new Date(`${soEtd}T00:00:00.000Z`).toISOString());
-      const response = await apiFetch(`/api/v1/admin/bookings/${id}/so-records`, {
-        method: 'POST',
-        body: form,
-      });
+      if (soEtd) form.append('etd', confirmationTimeToIso(soEtd, soOffset));
+      const response = await apiFetch(
+        `/api/v1/admin/bookings/${id}/so-records${replacingSoId ? `/${replacingSoId}/replace` : ''}`,
+        {
+          method: 'POST',
+          body: form,
+        },
+      );
       const payload = (await response.json()) as ApiErrorPayload;
       if (!response.ok) {
         setSoFieldErrors(mapSoFieldErrors(payload));
@@ -269,15 +307,15 @@ export default function AdminBookingDetail() {
       await load();
       setOperationNotice({
         tone: 'success',
-        title: 'SO 已登记成功',
-        description: `SO ${submittedSoNumber} 已保存为内部记录，现在可以创建出运记录。客户暂不可见此 SO，发布后才能查看和下载。`,
+        title: '订舱确认单已登记成功',
+        description: `订舱确认单${submittedSoNumber} 已保存为内部记录，现在可以创建出运记录。客户暂不可见此订舱确认单，发布后才能查看和下载。`,
       });
     } catch (caught) {
       const message = (caught as Error).message;
       setError(message);
       setOperationNotice({
         tone: 'danger',
-        title: 'SO 登记失败',
+        title: '订舱确认单登记失败',
         description: message,
       });
     } finally {
@@ -294,21 +332,21 @@ export default function AdminBookingDetail() {
         method: 'POST',
       });
       const payload = (await response.json()) as { message?: string };
-      if (!response.ok) throw new Error(payload.message ?? 'SO 发布失败。');
+      if (!response.ok) throw new Error(payload.message ?? '订舱确认单发布失败。');
       setPublishingSoId(null);
       setDialog(null);
       await load();
       setOperationNotice({
         tone: 'success',
-        title: 'SO 已发布给客户',
-        description: `SO ${soNumberToPublish ?? ''} 已设为客户可见，客户现在可以在订舱详情查看和下载。创建出运记录后，客户出运列表才会显示。`,
+        title: '订舱确认单已发布给客户',
+        description: `订舱确认单${soNumberToPublish ?? ''} 已设为客户可见，客户现在可以在订舱详情查看和下载。创建出运记录后，客户出运列表才会显示。`,
       });
     } catch (caught) {
       const message = (caught as Error).message;
       setError(message);
       setOperationNotice({
         tone: 'danger',
-        title: 'SO 发布失败',
+        title: '订舱确认单发布失败',
         description: message,
       });
     } finally {
@@ -321,11 +359,7 @@ export default function AdminBookingDetail() {
     setError('');
     setOperationNotice(null);
     try {
-      const body = {
-        ...(currentSo.vessel?.trim() ? { vessel: currentSo.vessel.trim() } : {}),
-        ...(currentSo.voyage?.trim() ? { voyage: currentSo.voyage.trim() } : {}),
-        ...(currentSo.eta ? { eta: currentSo.eta } : {}),
-      };
+      const body = { soRecordId: currentSo.id };
       const response = await apiFetch(`/api/v1/admin/bookings/${id}/shipments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -378,10 +412,9 @@ export default function AdminBookingDetail() {
   const quoteItems = b.quote?.items ?? [];
   const quoteContainerSummary = quoteItems.length ? formatQuoteContainers(quoteItems) : '—';
   const latestSubmission = b.reviewActions.find((action) => action.action === 'SUBMIT_TO_CARRIER');
-  const currentSo =
-    soRecords.find((record) => record.status === 'INTERNAL_DRAFT') ??
-    soRecords.find((record) => record.status === 'PUBLISHED') ??
-    soRecords[0];
+  const currentSo = soRecords.find(record =>
+    ['INTERNAL_DRAFT', 'PUBLISHED'].includes(record.status) &&
+    (!record.document.status || record.document.status === 'ACTIVE'));
   const businessFlow = resolveBookingBusinessFlow(b, 'admin');
   const openCarrierDialog = () => {
     setSourceName(latestSubmission?.carrierSourceName ?? b.carrierCode ?? '');
@@ -390,6 +423,8 @@ export default function AdminBookingDetail() {
     setDialog('carrier');
   };
   const openRegisterSoDialog = () => {
+    setReplacingSoId(null);
+    setSoOffset('+08:00');
     const provider = latestSubmission?.carrierSourceName ?? b.carrierCode ?? '';
     setSoNumber('');
     setSoFile(null);
@@ -397,7 +432,8 @@ export default function AdminBookingDetail() {
     setSoSourceType(provider && provider !== b.carrierCode ? 'AGENT' : 'CARRIER');
     setSoVessel('');
     setSoVoyage('');
-    setSoEtd(formatDateInput(b.etd));
+    setSoEtd('');
+    setSoDetails({ eta: '', cyCutoffAt: '', siCutoffAt: '', vgmCutoffAt: '', terminal: '', receivedAt: '', carrierCode: b.carrierCode ?? '' });
     setSoFieldErrors({});
     setDialog('register-so');
   };
@@ -613,10 +649,7 @@ export default function AdminBookingDetail() {
           <Fact label="航线服务" value={b.quote?.sourceRate?.serviceName ?? '—'} />
           <Fact label="预计开船时间" value={formatDate(b.quote?.etd ?? null)} />
           <Fact label="箱型 / 箱量" value={quoteContainerSummary} />
-          <Fact
-            label="金额"
-            value={b.quote ? quoteAmounts(b.quote) : '—'}
-          />
+          <Fact label="金额" value={b.quote ? quoteAmounts(b.quote) : '—'} />
         </dl>
       </section>
       <section className="rounded border border-border bg-surface p-5">
@@ -658,10 +691,10 @@ export default function AdminBookingDetail() {
               <div className="text-muted">{formatDateTime(record.createdAt)}</div>
               <div>
                 <div className="font-semibold">
-                  登记 SO · {record.uploadedBy?.displayName ?? '系统'}
+                  登记订舱确认单· {record.uploadedBy?.displayName ?? '系统'}
                 </div>
                 <div className="mt-1">
-                  SO：{record.soNumber} · 文件：{record.document.originalFilename}
+                  订舱确认单：{record.soNumber} · 文件：{record.document.originalFilename}
                 </div>
                 <div className="mt-1">
                   船司：{record.carrierCode ?? b.carrierCode ?? '—'} · 订舱对象：
@@ -680,9 +713,9 @@ export default function AdminBookingDetail() {
                 <div className="text-muted">{formatDateTime(record.publishedAt)}</div>
                 <div>
                   <div className="font-semibold">
-                    SO 发布给客户 · {record.publishedBy?.displayName ?? '系统'}
+                    订舱确认单发布给客户 · {record.publishedBy?.displayName ?? '系统'}
                   </div>
-                  <div className="mt-1">SO：{record.soNumber} · 客户可见</div>
+                  <div className="mt-1">订舱确认单：{record.soNumber} · 客户可见</div>
                 </div>
               </div>
             ))}
@@ -696,14 +729,14 @@ export default function AdminBookingDetail() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="font-semibold">
-                {b.status === 'BOOKED' ? '订舱结果 / SO' : '订舱执行'}
+                {b.status === 'BOOKED' ? '订舱结果 /订舱确认单' : '订舱执行'}
               </h2>
               <p className="mt-1 text-sm text-muted">
                 {b.status === 'APPROVED'
                   ? '客户资料已通过审核，下一步是向承运船司或订舱对象提交订舱。'
                   : b.status === 'BOOKING_SUBMITTED'
-                    ? '订舱已提交，当前等待船司或代理回复 SO。'
-                    : 'SO 已登记在内部系统，客户可见性由发布动作单独控制。'}
+                    ? '订舱已提交，当前等待船司或代理回复订舱确认单。'
+                    : '订舱确认单已登记在内部系统，客户可见性由发布动作单独控制。'}
               </p>
             </div>
             {canUploadDocuments && b.status === 'BOOKING_SUBMITTED' ? (
@@ -713,7 +746,7 @@ export default function AdminBookingDetail() {
                 onClick={openRegisterSoDialog}
                 type="button"
               >
-                登记 SO
+                登记订舱确认单
               </button>
             ) : null}
           </div>
@@ -726,7 +759,7 @@ export default function AdminBookingDetail() {
           ) : null}
           {b.status === 'BOOKING_SUBMITTED' ? (
             <dl className="mt-4 grid gap-4 rounded border border-border bg-sidebar p-4 text-sm sm:grid-cols-3">
-              <Fact label="当前状态" value="已提交订舱 · 待 SO" />
+              <Fact label="当前状态" value="已提交订舱 · 待订舱确认单" />
               <Fact label="承运船司" value={b.carrierCode ?? '—'} />
               <Fact
                 label="订舱对象"
@@ -743,19 +776,47 @@ export default function AdminBookingDetail() {
                 <div>
                   <StatusBadge tone={currentSo.status === 'PUBLISHED' ? 'success' : 'warning'}>
                     {currentSo.status === 'PUBLISHED'
-                      ? 'SO 已发布 · 客户可见'
-                      : 'SO 已登记 · 客户暂不可见'}
+                      ? '订舱确认单已发布 · 客户可见'
+                      : '订舱确认单已登记 · 客户暂不可见'}
                   </StatusBadge>
                   <div className="mt-3 text-lg font-semibold">{currentSo.soNumber}</div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {canUploadDocuments && currentSo.status === 'PUBLISHED' ? (
+                    <button
+                      className={secondary}
+                      disabled={busy}
+                      onClick={() => {
+                        openRegisterSoDialog();
+                        setReplacingSoId(currentSo.id);
+                        setSoNumber(currentSo.soNumber);
+                        setSoSourceName(currentSo.sourceName ?? String());
+                        setSoSourceType(currentSo.sourceType);
+                        setSoVessel(currentSo.vessel ?? String());
+                        setSoVoyage(currentSo.voyage ?? String());
+                        setSoEtd(confirmationTimeInput(currentSo.etd));
+                        setSoDetails({
+                          carrierCode: currentSo.carrierCode ?? String(),
+                          terminal: currentSo.terminal ?? String(),
+                          eta: confirmationTimeInput(currentSo.eta),
+                          cyCutoffAt: confirmationTimeInput(currentSo.cyCutoffAt),
+                          siCutoffAt: confirmationTimeInput(currentSo.siCutoffAt),
+                          vgmCutoffAt: confirmationTimeInput(currentSo.vgmCutoffAt),
+                          receivedAt: String(),
+                        });
+                      }}
+                      type="button"
+                    >
+                      修订订舱确认单
+                    </button>
+                  ) : null}
                   <button
                     className={secondary}
                     disabled={busy}
                     onClick={() => void downloadDocument(currentSo.document)}
                     type="button"
                   >
-                    查看 SO
+                    查看订舱确认单
                   </button>
                   {canManageDocuments && currentSo.status === 'INTERNAL_DRAFT' ? (
                     <button
@@ -786,15 +847,42 @@ export default function AdminBookingDetail() {
                 </div>
               </div>
               <dl className="mt-4 grid gap-4 sm:grid-cols-3">
-                <Fact label="船司" value={currentSo.carrierCode ?? b.carrierCode ?? '—'} />
+                <Fact label="船司" value={currentSo.carrierCode ?? '待船司确认'} />
                 <Fact label="订舱对象" value={currentSo.sourceName ?? '—'} />
-                <Fact label="SO 来源" value={soSourceTypeLabel(currentSo.sourceType)} />
+                <Fact label="订舱确认单来源" value={soSourceTypeLabel(currentSo.sourceType)} />
                 <Fact
                   label="船名 / 航次"
                   value={`${currentSo.vessel ?? '—'} / ${currentSo.voyage ?? '—'}`}
                 />
-                <Fact label="确认预计开船时间" value={formatDate(currentSo.etd)} />
-                <Fact label="SO 文件" value={currentSo.document.originalFilename} />
+                <Fact label="确认预计开船时间" value={formatConfirmationTime(currentSo.etd)} />
+                <Fact label="预计到港时间" value={formatConfirmationTime(currentSo.eta)} />
+                <Fact label="集装箱进港截止" value={formatConfirmationTime(currentSo.cyCutoffAt)}>
+                  <span>
+                    {formatConfirmationTime(currentSo.cyCutoffAt)}
+                    <br />
+                    {cutoffHint(currentSo.cyCutoffAt)}
+                  </span>
+                </Fact>
+                <Fact label="补料截止" value={formatConfirmationTime(currentSo.siCutoffAt)}>
+                  <span>
+                    {formatConfirmationTime(currentSo.siCutoffAt)}
+                    <br />
+                    {cutoffHint(currentSo.siCutoffAt)}
+                  </span>
+                </Fact>
+                <Fact
+                  label="核实总重申报截止"
+                  value={formatConfirmationTime(currentSo.vgmCutoffAt)}
+                >
+                  <span>
+                    {formatConfirmationTime(currentSo.vgmCutoffAt)}
+                    <br />
+                    {cutoffHint(currentSo.vgmCutoffAt)}
+                  </span>
+                </Fact>
+                <Fact label="码头" value={currentSo.terminal ?? '未提供'} />
+                <Fact label="实际接收时间" value={formatConfirmationTime(currentSo.receivedAt)} />
+                <Fact label="订舱确认单文件" value={currentSo.document.originalFilename} />
                 <Fact label="登记时间" value={formatDateTime(currentSo.createdAt)} />
                 <Fact label="登记人" value={currentSo.uploadedBy?.displayName ?? '—'} />
                 <Fact
@@ -810,11 +898,12 @@ export default function AdminBookingDetail() {
           ) : null}
           {b.status === 'BOOKED' && !currentSo ? (
             <div className="mt-4 rounded border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
-              当前状态为「已订舱」，但尚未加载到 SO 记录。请刷新后核对历史数据。
+              当前状态为「已订舱」，但尚未加载到订舱确认单记录。请刷新后核对历史数据。
             </div>
           ) : null}
         </section>
       ) : null}
+      <BookingCommission bookingId={id} internal revision={b.status} />
       {b.shipments.length ? (
         <section className="rounded border border-border bg-surface p-5">
           <h2 className="font-semibold">关联出运记录</h2>
@@ -829,6 +918,15 @@ export default function AdminBookingDetail() {
               </Link>
             ))}
           </div>
+          {hasPermission(user, 'shipment.manage')
+            ? b.shipments.map((shipment) => (
+                <ShipmentConfirmationDifference
+                  key={shipment.id}
+                  shipmentId={shipment.id}
+                  confirmationId={currentSo?.id}
+                />
+              ))
+            : null}
         </section>
       ) : null}
       {dialog && dialog !== 'register-so' ? (
@@ -862,14 +960,15 @@ export default function AdminBookingDetail() {
             if (dialog === 'publish-so' && publishingSoId) void publishSo(publishingSoId);
             if (dialog === 'create-shipment') void createShipment();
           }}
+          confirmationPreview={dialog === 'publish-so' ? currentSo : undefined}
           shipmentPreview={
             currentSo
               ? {
                   bookingNo: b.bookingNo,
                   route: `${b.polCode} → ${b.podCode}`,
-                  carrier: currentSo.carrierCode ?? b.carrierCode ?? '—',
+                  carrier: currentSo.carrierCode ?? '待船司确认',
                   vesselVoyage: `${currentSo.vessel ?? '—'} / ${currentSo.voyage ?? '—'}`,
-                  etd: currentSo.etd ?? b.etd,
+                  etd: currentSo.etd,
                   eta: currentSo.eta,
                 }
               : undefined
@@ -887,6 +986,13 @@ export default function AdminBookingDetail() {
           vessel={soVessel}
           voyage={soVoyage}
           etd={soEtd}
+          details={soDetails}
+          offset={soOffset}
+          onOffset={setSoOffset}
+          onDetail={(key, value) => {
+            setSoDetails((current) => ({ ...current, [key]: value }));
+            setSoFieldErrors((current) => ({ ...current, [key]: undefined }));
+          }}
           errors={soFieldErrors}
           onClose={() => {
             setSoFieldErrors({});
@@ -1063,6 +1169,7 @@ function ActionDialog(props: {
   reasonCode: string;
   reference: string;
   remark: string;
+  confirmationPreview?: SoRecord;
   shipmentPreview?: {
     bookingNo: string;
     route: string;
@@ -1090,7 +1197,7 @@ function ActionDialog(props: {
           : props.mode === 'carrier'
             ? '提交订舱'
             : props.mode === 'publish-so'
-              ? '确认发布 SO'
+              ? '确认发布订舱确认单'
               : '确认创建出运记录';
   const submitLabel =
     props.mode === 'approve'
@@ -1117,8 +1224,7 @@ function ActionDialog(props: {
         </h2>
         {props.mode === 'approve' ? (
           <div className="rounded border border-success/20 bg-success/10 px-3 py-2 text-sm text-foreground">
-            该订舱
-            将进入待订舱阶段。请确认客户提交的货物、发货人和联系人资料已经满足实际订舱要求。
+            该订舱 将进入待订舱阶段。请确认客户提交的货物、发货人和联系人资料已经满足实际订舱要求。
           </div>
         ) : null}
         {props.mode === 'revision' ? (
@@ -1147,15 +1253,55 @@ function ActionDialog(props: {
         ) : null}
         {props.mode === 'publish-so' ? (
           <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-            发布后客户将立即可以查看并下载此 SO。请确认 SO 号、附件和客户可见内容已经核对无误。
+            发布后客户将立即可以查看并下载此订舱确认单。请确认订舱确认单号、附件和客户可见内容已经核对无误。
           </div>
+        ) : null}
+        {props.mode === 'publish-so' && props.confirmationPreview ? (
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+            <Fact
+              label="订舱确认单编号 / 版本"
+              value={
+                props.confirmationPreview.soNumber + ' / V' + props.confirmationPreview.version
+              }
+            />
+            <Fact label="附件" value={props.confirmationPreview.document.originalFilename} />
+            <Fact
+              label="船司 / 船名 / 航次"
+              value={[
+                props.confirmationPreview.carrierCode,
+                props.confirmationPreview.vessel,
+                props.confirmationPreview.voyage,
+              ]
+                .map((v) => v || '未提供')
+                .join(' / ')}
+            />
+            <Fact label="码头" value={props.confirmationPreview.terminal ?? '未提供'} />
+            {(['etd', 'eta', 'cyCutoffAt', 'siCutoffAt', 'vgmCutoffAt', 'receivedAt'] as const).map(
+              (key, index) => (
+                <Fact
+                  key={key}
+                  label={
+                    [
+                      '预计开船',
+                      '预计到港',
+                      '集装箱进港截止',
+                      '补料截止',
+                      '核实总重申报截止',
+                      '实际接收',
+                    ][index]!
+                  }
+                  value={formatConfirmationTime(props.confirmationPreview![key])}
+                />
+              ),
+            )}
+          </dl>
         ) : null}
         {props.mode === 'create-shipment' ? (
           <div className="space-y-3">
             <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-              创建后客户将在出运列表看到该出运记录。请确认内部登记的 SO
-              已核对，船期信息可作为当前出运基础信息。SO 是否发布只影响客户查看和下载
-              SO，不影响出运建档。
+              创建后客户将在出运列表看到该出运记录。请确认内部登记的订舱确认单
+              已核对，船期信息可作为当前出运基础信息。订舱确认单是否发布只影响客户查看和下载
+              订舱确认单，不影响出运建档。
             </div>
             {props.shipmentPreview ? (
               <dl className="grid gap-3 rounded border border-border bg-sidebar p-3 text-sm sm:grid-cols-2">
@@ -1163,8 +1309,14 @@ function ActionDialog(props: {
                 <Fact label="航线" value={props.shipmentPreview.route} />
                 <Fact label="船司" value={props.shipmentPreview.carrier} />
                 <Fact label="船名 / 航次" value={props.shipmentPreview.vesselVoyage} />
-                <Fact label="预计开船时间" value={formatDate(props.shipmentPreview.etd)} />
-                <Fact label="预计到港时间" value={formatDate(props.shipmentPreview.eta)} />
+                <Fact
+                  label="预计开船时间"
+                  value={formatConfirmationTime(props.shipmentPreview.etd)}
+                />
+                <Fact
+                  label="预计到港时间"
+                  value={formatConfirmationTime(props.shipmentPreview.eta)}
+                />
               </dl>
             ) : null}
           </div>
@@ -1255,6 +1407,10 @@ function RegisterSoDialog(props: {
   vessel: string;
   voyage: string;
   etd: string;
+  details: Record<'eta' | 'cyCutoffAt' | 'siCutoffAt' | 'vgmCutoffAt' | 'terminal' | 'receivedAt' | 'carrierCode', string>;
+  offset: string;
+  onOffset(value: string): void;
+  onDetail(key: keyof typeof props.details, value: string): void;
   errors: SoFieldErrors;
   onClose(): void;
   onFile(value: File | null): void;
@@ -1273,10 +1429,10 @@ function RegisterSoDialog(props: {
       className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
       role="dialog"
     >
-      <div className="w-full max-w-2xl rounded border border-border bg-surface shadow-xl">
+      <div className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded border border-border bg-surface shadow-xl">
         <div className="border-b border-border px-5 py-4">
           <h2 className="font-semibold" id="register-so-dialog-title">
-            登记 SO
+            登记订舱确认单
           </h2>
           <p className="mt-1 text-sm text-muted">
             保存后仅内部可见，客户需要等到单独发布后才能在 Portal 查看。
@@ -1285,11 +1441,17 @@ function RegisterSoDialog(props: {
         <div className="grid gap-4 px-5 py-4 sm:grid-cols-2">
           <div className="rounded border border-border bg-sidebar px-3 py-2 text-sm">
             <div className="text-xs text-muted">承运船司</div>
-            <div className="mt-1 font-semibold">{props.carrierCode ?? '—'}</div>
+            <input
+              aria-label="确认承运船司"
+              className={input}
+              maxLength={20}
+              value={props.details.carrierCode}
+              onChange={(e) => props.onDetail('carrierCode', e.target.value)}
+            />
           </div>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">
-              <FieldLabel label="SO 编号" required />
+              <FieldLabel label="订舱确认单编号" required />
             </span>
             <input
               className={inputClass(props.errors.soNumber)}
@@ -1302,7 +1464,7 @@ function RegisterSoDialog(props: {
             ) : null}
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block font-medium">SO 来源</span>
+            <span className="mb-1 block font-medium">订舱确认单来源</span>
             <select
               className={inputClass(props.errors.sourceType)}
               value={props.sourceType}
@@ -1356,7 +1518,7 @@ function RegisterSoDialog(props: {
             <span className="mb-1 block font-medium">确认 / 更新预计开船时间</span>
             <input
               className={inputClass(props.errors.etd)}
-              type="date"
+              type="datetime-local"
               value={props.etd}
               onChange={(event) => props.onEtd(event.target.value)}
             />
@@ -1364,9 +1526,83 @@ function RegisterSoDialog(props: {
               <span className="mt-1 block text-xs text-danger">{props.errors.etd}</span>
             ) : null}
           </label>
+          <label className="block text-sm sm:col-span-2">
+            输入时间使用的时区
+            <select
+              className={input}
+              value={props.offset}
+              onChange={(e) => props.onOffset(e.target.value)}
+            >
+              {[
+                '+08:00',
+                '+00:00',
+                '+01:00',
+                '+02:00',
+                '+03:00',
+                '+04:00',
+                '+05:30',
+                '+07:00',
+                '+09:00',
+                '+10:00',
+                '+11:00',
+                '+12:00',
+                '-04:00',
+                '-05:00',
+                '-06:00',
+                '-07:00',
+                '-08:00',
+              ].map((offset) => (
+                <option key={offset} value={offset}>
+                  {offset === '+08:00' ? '北京时间 ' : ''}UTC{offset}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-muted">
+              按原单日期核对时差（含夏令时）；保存后统一按北京时间显示。未知的可选时间留空。
+            </span>
+          </label>
+          {(
+            ['eta', 'cyCutoffAt', 'siCutoffAt', 'vgmCutoffAt', 'receivedAt', 'terminal'] as const
+          ).map((key, index) => (
+            <label className="block text-sm" key={key}>
+              <span className="mb-1 block">
+                <FieldLabel
+                  label={
+                    [
+                      '预计到港时间',
+                      '集装箱进港截止',
+                      '补料截止',
+                      '核实总重申报截止',
+                      '实际接收时间',
+                      '码头',
+                    ][index]!
+                  }
+                  required={key === 'receivedAt'}
+                />
+              </span>
+              <input
+                className={inputClass(props.errors[key])}
+                type={key === 'terminal' ? 'text' : 'datetime-local'}
+                maxLength={key === 'terminal' ? 300 : undefined}
+                value={props.details[key]}
+                onChange={(e) => props.onDetail(key, e.target.value)}
+              />
+              {props.errors[key] ? (
+                <span className="text-xs text-danger">{props.errors[key]}</span>
+              ) : null}
+            </label>
+          ))}
+          {props.etd &&
+          [props.details.cyCutoffAt, props.details.siCutoffAt, props.details.vgmCutoffAt].some(
+            (value) => value && value > props.etd,
+          ) ? (
+            <p role="status" className="text-sm text-warning sm:col-span-2">
+              部分截止时间晚于预计开船时间，请核对原单；确认无误后仍可保存。
+            </p>
+          ) : null}
           <label className="block sm:col-span-2">
             <span className="mb-1 block text-sm font-medium">
-              <FieldLabel label="SO 文件" required />
+              <FieldLabel label="订舱确认单文件" required />
             </span>
             <span
               className={`flex min-h-20 cursor-pointer flex-col items-center justify-center rounded border border-dashed bg-sidebar px-4 py-4 text-sm hover:border-primary ${
@@ -1401,7 +1637,7 @@ function RegisterSoDialog(props: {
             disabled={props.busy || !props.soFile || !props.soNumber.trim()}
             onClick={() => props.onSubmit()}
           >
-            {props.busy ? '保存中…' : '保存 SO'}
+            {props.busy ? '保存中…' : '保存订舱确认单'}
           </button>
         </div>
       </div>
@@ -1428,9 +1664,6 @@ function formatDate(value: string | null) {
   return value ? value.slice(0, 10) : '—';
 }
 
-function formatDateInput(value: string | null) {
-  return value ? value.slice(0, 10) : '';
-}
 
 function formatDateTime(value: string | null) {
   return value ? new Date(value).toLocaleString('zh-CN') : '—';
@@ -1518,15 +1751,20 @@ function mapSoFieldErrors(payload: ApiErrorPayload): SoFieldErrors {
   const fieldErrors = payload.details?.fieldErrors;
   if (!fieldErrors) return {};
   const labels: Record<string, [keyof SoFieldErrors, string]> = {
-    file: ['file', '请选择 PDF、PNG 或 JPG 格式的 SO 文件。'],
-    soNumber: ['soNumber', '请输入 SO No.'],
-    sourceType: ['sourceType', '请选择有效 SO 来源。'],
+    file: ['file', '请选择 PDF、PNG 或 JPG 格式的订舱确认单文件。'],
+    soNumber: ['soNumber', '请输入订舱确认单编号'],
+    sourceType: ['sourceType', '请选择有效订舱确认单来源。'],
     sourceName: ['sourceName', '来源名称不能超过 200 个字符。'],
     carrierCode: ['carrierCode', '船司代码不能超过 20 个字符。'],
     vessel: ['vessel', '船名不能超过 100 个字符。'],
     voyage: ['voyage', '航次不能超过 50 个字符。'],
     etd: ['etd', '请输入有效预计开船时间。'],
-    receivedAt: ['receivedAt', 'SO 接收时间无效，请重新提交。'],
+    eta: ['eta', '预计到港时间无效。'],
+    cyCutoffAt: ['cyCutoffAt', '集装箱进港截止时间无效。'],
+    siCutoffAt: ['siCutoffAt', '补料截止时间无效。'],
+    vgmCutoffAt: ['vgmCutoffAt', '核实总重申报截止时间无效。'],
+    terminal: ['terminal', '码头最多 300 个字符。'],
+    receivedAt: ['receivedAt', '订舱确认单接收时间无效，请重新提交。'],
   };
   return Object.keys(fieldErrors).reduce<SoFieldErrors>((result, field) => {
     const mapped = labels[field];
@@ -1537,10 +1775,10 @@ function mapSoFieldErrors(payload: ApiErrorPayload): SoFieldErrors {
 
 function formatSoError(payload: ApiErrorPayload) {
   const messages: Record<string, string> = {
-    SO_FILE_REQUIRED: '请选择 SO 文件后再保存。',
-    SO_FILE_TYPE_INVALID: 'SO 文件仅支持 PDF、PNG 或 JPG。',
+    SO_FILE_REQUIRED: '请选择订舱确认单文件后再保存。',
+    SO_FILE_TYPE_INVALID: '订舱确认单文件仅支持 PDF、PNG 或 JPG。',
     VALIDATION_ERROR: '请检查弹窗中的字段后重新保存。',
-    BOOKING_NOT_FOUND: '当前订舱状态不允许登记 SO，请刷新后重试。',
+    BOOKING_NOT_FOUND: '当前订舱状态不允许登记订舱确认单，请刷新后重试。',
   };
-  return (payload.code && messages[payload.code]) || payload.message || 'SO 内部保存失败。';
+  return (payload.code && messages[payload.code]) || payload.message || '订舱确认单内部保存失败。';
 }

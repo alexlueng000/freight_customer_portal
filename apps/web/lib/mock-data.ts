@@ -115,9 +115,9 @@ export const adminStats: StatItem[] = [
     tone: 'warning',
   },
   {
-    label: '待放 SO',
+    label: '待放订舱确认单',
     value: '9',
-    detail: '3 单已提交船司但待登记 SO',
+    detail: '3 单已提交船司但待登记订舱确认单',
     href: '/admin/bookings?status=BOOKING_SUBMITTED',
     tone: 'danger',
   },
@@ -139,7 +139,7 @@ export const adminStats: StatItem[] = [
 
 export const adminTasks: ActionRow[] = [
   { item: '审核 BKG202608000088', owner: '操作', due: '今天', status: '待审核', tone: 'warning', href: '/admin/bookings?status=SUBMITTED', actionLabel: '进入审核队列' },
-  { item: '登记 BKG202608000083 的 SO', owner: '操作', due: '今天', status: '待 SO', tone: 'danger', href: '/admin/bookings?status=BOOKING_SUBMITTED', actionLabel: '登记 SO' },
+  { item: '登记 BKG202608000083 的订舱确认单', owner: '操作', due: '今天', status: '待订舱确认单', tone: 'danger', href: '/admin/bookings?status=BOOKING_SUBMITTED', actionLabel: '登记订舱确认单' },
   { item: '确认并发送 QT202608000155', owner: '销售', due: '明天', status: '待销售确认', tone: 'neutral', href: '/admin/quotes?status=DRAFT', actionLabel: '查看审核' },
   { item: '跟进逾期账单 INV202608000050', owner: '财务', due: '已逾期', status: '已开票', tone: 'danger', href: '/admin/invoices?status=ISSUED', actionLabel: '查看账单' },
 ];
