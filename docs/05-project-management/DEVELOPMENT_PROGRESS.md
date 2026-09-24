@@ -29,8 +29,8 @@
 本地开发入口：
 
 - Web：`http://localhost:3000`
-- 客户门户：`http://localhost:3000/portal`
-- 运营后台：`http://localhost:3000/admin`
+- Demo 客户登录：[客户门户登录](http://localhost:3000/t/demo?login=1)
+- Demo 内部员工登录：[运营后台登录](http://localhost:3000/admin/login?tenantCode=DEMO)
 - API：`http://localhost:4000/api/v1`
 - API 文档：`http://localhost:4000/api/docs`
 - PostgreSQL：`localhost:5433`

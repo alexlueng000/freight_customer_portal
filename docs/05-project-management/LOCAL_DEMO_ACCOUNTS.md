@@ -4,24 +4,26 @@
 
 ## 登录信息
 
-- 登录地址：<http://localhost:3000/login>
+- 客户登录：<http://localhost:3000/t/demo?login=1>
+- 内部员工登录：<http://localhost:3000/admin/login?tenantCode=DEMO>
+- Demo 门户首页：<http://localhost:3000/t/demo>
 - 租户代码：`DEMO`
 
 ## 货代内部角色
 
 | 角色 | 邮箱 | 密码 | 登录入口 |
 | --- | --- | --- | --- |
-| 租户管理员 `TENANT_ADMIN` | `admin@demo.freight.local` | `DemoAdmin!2026` | `/admin` |
-| 销售 `SALES` | `sales@demo.freight.local` | `DemoAdmin!2026` | `/admin` |
-| 操作 `OPERATION` | `operation@demo.freight.local` | `DemoAdmin!2026` | `/admin` |
-| 财务 `FINANCE` | `finance@demo.freight.local` | `DemoAdmin!2026` | `/admin` |
+| 租户管理员 `TENANT_ADMIN` | `admin@demo.freight.local` | `DemoAdmin!2026` | [员工登录](http://localhost:3000/admin/login?tenantCode=DEMO) |
+| 销售 `SALES` | `sales@demo.freight.local` | `DemoAdmin!2026` | [员工登录](http://localhost:3000/admin/login?tenantCode=DEMO) |
+| 操作 `OPERATION` | `operation@demo.freight.local` | `DemoAdmin!2026` | [员工登录](http://localhost:3000/admin/login?tenantCode=DEMO) |
+| 财务 `FINANCE` | `finance@demo.freight.local` | `DemoAdmin!2026` | [员工登录](http://localhost:3000/admin/login?tenantCode=DEMO) |
 
 ## 客户角色
 
 | 角色 | 邮箱 | 密码 | 登录入口 |
 | --- | --- | --- | --- |
-| 客户管理员 `CUSTOMER_ADMIN` | `customer@demo.freight.local` | `DemoCustomer!2026` | `/portal` |
-| 客户普通用户 `CUSTOMER_USER` | `customer-user@demo.freight.local` | `DemoCustomer!2026` | `/portal` |
+| 客户管理员 `CUSTOMER_ADMIN` | `customer@demo.freight.local` | `DemoCustomer!2026` | [客户登录](http://localhost:3000/t/demo?login=1) |
+| 客户普通用户 `CUSTOMER_USER` | `customer-user@demo.freight.local` | `DemoCustomer!2026` | [客户登录](http://localhost:3000/t/demo?login=1) |
 
 ## 使用说明
 
